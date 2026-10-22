@@ -224,21 +224,43 @@ func formatSessionAge(saved time.Time) string {
 }
 
 // formatSessionAgeAt is formatSessionAge measured from now (an as_of anchor).
+//
+// Under a day the label is elapsed time; from the next calendar date on it
+// counts calendar days, which is how people count them ("saved on the 15th,
+// today the 18th" is 3 days ago even when only 55 hours have passed).
+// Flooring elapsed hours instead reads one day short whenever the save time
+// of day is later than the current one, and a model asked "how many days
+// ago" quotes the label it was given.
 func formatSessionAgeAt(saved, now time.Time) string {
 	if saved.IsZero() {
 		return "age unknown"
 	}
 	age := max(now.Sub(saved), 0)
-	switch {
-	case age < time.Hour:
+	if age < time.Hour {
 		return fmt.Sprintf("%dm ago", int(age.Minutes()))
-	case age < 24*time.Hour:
+	}
+	days := calendarDaysBetween(saved, now)
+	switch {
+	case days <= 0:
 		return fmt.Sprintf("%dh ago", int(age.Hours()))
-	case age < 48*time.Hour:
+	case days == 1:
 		return "yesterday"
 	default:
-		return fmt.Sprintf("%dd ago", int(age.Hours()/24))
+		return fmt.Sprintf("%dd ago", days)
 	}
+}
+
+// calendarDaysBetween counts the calendar dates from `from` to `to`, both read
+// in to's location, so a save late one evening and a question early the next
+// morning are one day apart. Never negative.
+func calendarDaysBetween(from, to time.Time) int {
+	loc := to.Location()
+	f := from.In(loc)
+	fy, fm, fd := f.Date()
+	ty, tm, td := to.Date()
+	a := time.Date(fy, fm, fd, 12, 0, 0, 0, time.UTC)
+	b := time.Date(ty, tm, td, 12, 0, 0, 0, time.UTC)
+	return max(int(b.Sub(a).Hours()/24+0.5), 0)
 }
 
 // lastUserMessage returns the newest user-role message content in history,

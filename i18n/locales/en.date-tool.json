@@ -1,0 +1,9 @@
+{
+  "plugins.date.description": "Calendar arithmetic that never guesses: days, weeks and months between two dates, a date plus an offset, the weekday of a date, and relative expressions (last Saturday, 3 weeks ago) as concrete dates.",
+  "plugins.date.describe.default": "Calculating a date",
+  "plugins.date.describe.now": "Reading the current date",
+  "plugins.date.describe.diff": "Days between %s and %s",
+  "plugins.date.describe.add": "Shifting a date: %s",
+  "plugins.date.describe.weekday": "Weekday of %s",
+  "plugins.date.describe.resolve": "Resolving: %s"
+}
