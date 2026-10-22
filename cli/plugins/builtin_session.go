@@ -156,7 +156,7 @@ that matter. To keep working under a name: save (new) or attach (existing).`
 }
 
 // Version is semver.
-func (*BuiltinSessionPlugin) Version() string { return "1.4.0" }
+func (*BuiltinSessionPlugin) Version() string { return "1.5.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSessionPlugin) Path() string { return "" }
@@ -168,7 +168,7 @@ func (*BuiltinSessionPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "search",
-				"description": "Search saved conversations for a query; returns matching sessions with snippets, each with its save date and its age relative to the current date. Narrow by date with from/to, and pass as_of to count relative expressions (\"2 weeks ago\", \"last month\") from a date other than today — for this call only; nothing else changes. A time expression inside query sets the window when from/to are absent.",
+				"description": "Search saved conversations for a query; returns matching sessions with snippets, each with its save date (with weekday) and its age in calendar days relative to the current date. When a query has several terms, sessions holding only some of them follow the full matches, labeled partial: a later update or a second item is often worded differently. Narrow by date with from/to, and pass as_of to count relative expressions (\"2 weeks ago\", \"last month\") from a date other than today — for this call only; nothing else changes. A time expression inside query sets the window when from/to are absent.",
 				"flags": []map[string]interface{}{
 					{"name": "query", "type": "string", "required": false, "description": "Free-text search across saved sessions. Required unless from or to is given (then the window's sessions are listed newest first)."},
 					{"name": "limit", "type": "number", "required": false, "description": "Max snippets per session (default 3)."},
@@ -292,12 +292,19 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 		}
 		var in struct {
 			Name    string          `json:"name"`
+			ID      string          `json:"id"`
+			Session string          `json:"session"`
 			Offset  json.RawMessage `json:"offset"`
 			Limit   json.RawMessage `json:"limit"`
 			Query   string          `json:"query"`
 			Message json.RawMessage `json:"message"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
+		// The names a search result prints are what models pass back, and
+		// they call them "id" or "session" about as often as "name".
+		if strings.TrimSpace(in.Name) == "" {
+			in.Name = firstNonBlank(in.ID, in.Session)
+		}
 		if strings.TrimSpace(in.Name) == "" {
 			return "", errors.New(`@session get: "name" is required (use search or list first)`)
 		}
@@ -417,6 +424,16 @@ func canonicalSessionCmd(s string) string {
 		return "attach"
 	case "detach", "unbind":
 		return "detach"
+	}
+	return ""
+}
+
+// firstNonBlank returns the first argument that is not blank, or "".
+func firstNonBlank(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
 	}
 	return ""
 }

@@ -2287,6 +2287,9 @@ func registerCoreBuiltins(pluginMgr *plugins.Manager) {
 	// @json / @diff — structured-data reader and unified diffs. Pure Go,
 	// workspace-bounded through the engine path guard; no adapter wiring.
 	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinJSONPlugin())
+	// @date — calendar arithmetic (diff, add, weekday, relative
+	// expressions). Pure, offline, counts from CHATCLI_NOW.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDatePlugin())
 	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinDiffPlugin())
 	// @session — search past saved conversations. Wired below to the
 	// SessionManager.

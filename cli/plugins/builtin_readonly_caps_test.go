@@ -68,6 +68,13 @@ func TestReadOnlyCaps_PureReadsSkipTheGate(t *testing.T) {
 		{[]string{"apply", "--file", "x", "--patch", "@@", "--dry_run", "false"}, false, false},
 		{[]string{`{not json`}, false, false},
 	})
+	checkCaps(t, "@date", NewBuiltinDatePlugin(), []capsCase{
+		{[]string{`{"cmd":"diff","args":{"from":"2023-03-14","to":"2023-04-17"}}`}, true, true},
+		{[]string{"now"}, true, true},
+		{[]string{`{"expr":"last saturday"}`}, true, true},
+		{[]string{`{"cmd":"explode"}`}, false, false},
+		{[]string{`{not json`}, false, false},
+	})
 	checkCaps(t, "@commands", NewBuiltinCommandsPlugin(), []capsCase{
 		{[]string{`{"cmd":"list"}`}, true, true},
 		{[]string{"get", "review-pr", "12"}, true, true},
