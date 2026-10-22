@@ -182,3 +182,42 @@ var errTest = errFixed("boom")
 type errFixed string
 
 func (e errFixed) Error() string { return string(e) }
+
+// Blocked and cancelled tasks have no ACP status: blocked stays pending
+// (still needs attention) and cancelled becomes completed (nothing left to
+// do), both annotated with the state and reason so the client shows why.
+func TestPlanToEvent_BlockedAndCancelled(t *testing.T) {
+	plan := &agent.TaskPlan{Tasks: []*agent.Task{
+		{ID: 1, Description: "Deploy", Status: agent.TaskBlocked, Error: "waiting for approval"},
+		{ID: 2, Description: "Old step", Status: agent.TaskCancelled},
+		{ID: 3, Description: "Verify", Status: agent.TaskPending},
+	}}
+	ev := planToEvent(plan)
+	if len(ev.Entries) != 3 {
+		t.Fatalf("entries: %d", len(ev.Entries))
+	}
+	if ev.Entries[0].Status != "pending" || ev.Entries[0].Content != "Deploy (blocked: waiting for approval)" {
+		t.Fatalf("blocked entry: %+v", ev.Entries[0])
+	}
+	if ev.Entries[1].Status != "completed" || ev.Entries[1].Content != "Old step (cancelled)" {
+		t.Fatalf("cancelled entry: %+v", ev.Entries[1])
+	}
+	if ev.Entries[2].Status != "pending" || ev.Entries[2].Content != "Verify" {
+		t.Fatalf("pending entry: %+v", ev.Entries[2])
+	}
+}
+
+func TestIsCancelledPlanEntry(t *testing.T) {
+	for in, want := range map[string]bool{
+		"Old step (cancelled)":                true,
+		"Old step (cancelled: superseded)":    true,
+		"Deploy (blocked: waiting)":           false,
+		"Verify":                              false,
+		"Keep (cancelled) the flag (failed)":  false,
+		"Rename x (cancelled: see (a) above)": false,
+	} {
+		if got := isCancelledPlanEntry(in); got != want {
+			t.Errorf("isCancelledPlanEntry(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

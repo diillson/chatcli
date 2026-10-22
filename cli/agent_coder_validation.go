@@ -233,9 +233,10 @@ func buildCoderToolCallFixPrompt(missingFlag string) string {
 			"Resend a SINGLE <tool_call> with valid args. Use JSON format (recommended):\n\n"+
 			`<tool_call name="@coder" args='{"cmd":"read","args":{"file":"main.go"}}' />`+"\n"+
 			`<tool_call name="@coder" args='{"cmd":"search","args":{"term":"LoginService","dir":"."}}' />`+"\n"+
-			`<tool_call name="@coder" args='{"cmd":"write","args":{"file":"out.go","content":"BASE64","encoding":"base64"}}' />`+"\n"+
+			`<tool_call name="@coder" args='{"cmd":"write","args":{"file":"out.go","content":"package main\n\nfunc main() {}\n"}}' />`+"\n"+
 			`<tool_call name="@coder" args='{"cmd":"exec","args":{"cmd":"go test ./..."}}' />`+"\n"+
-			`<tool_call name="@coder" args='{"cmd":"patch","args":{"file":"f.go","search":"old","replace":"new"}}' />`,
+			`<tool_call name="@coder" args='{"cmd":"patch","args":{"file":"f.go","search":"old","replace":"new"}}' />`+"\n\n"+
+			"content/search/replace are JSON strings (newlines as \\n, quotes as \\\"); \"encoding\":\"base64\" is optional, for binary or escape-heavy content.",
 		missingFlag,
 	)
 }
@@ -257,7 +258,7 @@ func buildCoderSingleLineArgsEnforcementPrompt(originalArgs string) string {
 			"Rules:\n"+
 			"1. NEVER use backslash (\\) for line continuation\n"+
 			"2. NEVER put real newlines inside args\n"+
-			"3. For multiline file content, use base64 encoding\n"+
+			"3. Multiline file content goes in the JSON string as \\n escapes (base64 optional, for binary or escape-heavy content)\n"+
 			"4. Use single quotes around JSON args to avoid escaping issues\n\n"+
 			"Your args (truncated):\n---\n%s\n---",
 		preview,

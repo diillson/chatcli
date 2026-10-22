@@ -267,7 +267,7 @@ func buildCustomSystemPrompt(
 
 	cmdDescriptions := map[string]string{
 		"read":                     "Read file contents. Args: {\"file\":\"path/to/file\"}",
-		"write":                    "Create/overwrite file. Args: {\"file\":\"path\",\"content\":\"BASE64\",\"encoding\":\"base64\"}",
+		"write":                    "Create/overwrite file. Args: {\"file\":\"path\",\"content\":\"...\"} (JSON text with \\n escapes; \"encoding\":\"base64\" optional)",
 		"patch":                    "Search/replace edit. Args: {\"file\":\"path\",\"search\":\"old\",\"replace\":\"new\"}",
 		"multipatch":               "Transactional multi-file edit (all-or-nothing). Args: {\"edits\":\"[{\\\"file\\\":\\\"path\\\",\\\"search\\\":\\\"old\\\",\\\"replace\\\":\\\"new\\\"}]\"}",
 		"tree":                     "Directory listing. Args: {\"dir\":\".\",\"max-depth\":3}",

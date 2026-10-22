@@ -93,8 +93,10 @@ func classifyToolCall(toolName string, argv []string) (agentevents.ToolKind, []a
 }
 
 // planToEvent converts the tracker's plan snapshot into the ACP plan shape.
-// ACP plans have no "failed" status, so failures surface as pending entries
-// annotated with the error.
+// ACP plans know only pending, in_progress and completed: a failed or
+// blocked task surfaces as pending annotated with its reason (it still
+// needs attention), a cancelled one as completed annotated "(cancelled)"
+// (nothing is left to do for it).
 func planToEvent(p *agent.TaskPlan) agentevents.Plan {
 	if p == nil {
 		return agentevents.Plan{}
@@ -105,17 +107,30 @@ func planToEvent(p *agent.TaskPlan) agentevents.Plan {
 			continue
 		}
 		e := agentevents.PlanEntry{Content: t.Description, Priority: "medium", Status: string(t.Status)}
-		if t.Status == agent.TaskFailed {
+		switch t.Status {
+		case agent.TaskFailed:
 			e.Status = string(agent.TaskPending)
-			if t.Error != "" {
-				e.Content = fmt.Sprintf("%s (failed: %s)", t.Description, t.Error)
-			} else {
-				e.Content = t.Description + " (failed)"
-			}
+			e.Content = annotatePlanEntry(t.Description, "failed", t.Error)
+		case agent.TaskBlocked:
+			e.Status = string(agent.TaskPending)
+			e.Content = annotatePlanEntry(t.Description, "blocked", t.Error)
+		case agent.TaskCancelled:
+			e.Status = string(agent.TaskCompleted)
+			e.Content = annotatePlanEntry(t.Description, "cancelled", t.Error)
 		}
 		entries = append(entries, e)
 	}
 	return agentevents.Plan{Entries: entries}
+}
+
+// annotatePlanEntry appends the out-of-vocabulary state (and its reason,
+// when given) to a plan entry's text, e.g. "Deploy (blocked: waiting for
+// approval)".
+func annotatePlanEntry(description, state, reason string) string {
+	if reason != "" {
+		return fmt.Sprintf("%s (%s: %s)", description, state, reason)
+	}
+	return fmt.Sprintf("%s (%s)", description, state)
 }
 
 // nextEventCallID mints a run-unique tool-call id for the events channel.

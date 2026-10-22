@@ -50,6 +50,7 @@ func (a *liveTodoAdapter) Write(items []plugins.TodoItem) (string, error) {
 		specs = append(specs, agent.TaskSpec{
 			Description: it.Description,
 			Status:      agent.TaskStatus(it.Status),
+			Reason:      it.Error,
 		})
 	}
 	tracker.SetTasks(specs)
@@ -66,7 +67,7 @@ func (a *liveTodoAdapter) Add(items []plugins.TodoItem) (string, error) {
 	}
 	specs := make([]agent.TaskSpec, 0, len(items))
 	for _, it := range items {
-		specs = append(specs, agent.TaskSpec{Description: it.Description, Status: agent.TaskStatus(it.Status)})
+		specs = append(specs, agent.TaskSpec{Description: it.Description, Status: agent.TaskStatus(it.Status), Reason: it.Error})
 	}
 	ids := tracker.AppendTasks(specs)
 	return fmt.Sprintf(todoMsgAddedFmt, len(ids), ids, tracker.FormatProgress()), nil
@@ -120,11 +121,8 @@ func (a *liveTodoAdapter) Mark(id int, status string, errorMsg string) (string, 
 	}
 
 	ts := agent.TaskStatus(status)
-	switch ts {
-	case agent.TaskPending, agent.TaskInProgress, agent.TaskCompleted, agent.TaskFailed:
-		// ok
-	default:
-		return "", fmt.Errorf("@todo mark: invalid status %q (expected pending|in_progress|completed|failed)", status)
+	if !ts.Valid() {
+		return "", fmt.Errorf("@todo mark: invalid status %q (expected %s)", status, agent.TaskStatusList)
 	}
 
 	if !tracker.MarkByID(id, ts, errorMsg) {

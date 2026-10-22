@@ -59,7 +59,7 @@ Your expertise: safe code transformations that preserve behavior while improving
 Use <tool_call name="@coder" args='{"cmd":"COMMAND","args":{...}}' /> syntax.
 
 - read: Read file contents. Args: {"file":"path/to/file"}
-- write: Create files. Args: {"file":"path","content":"...","encoding":"base64"}
+- write: Create files. Args: {"file":"path","content":"..."} (JSON text with \n escapes; "encoding":"base64" optional)
 - patch: Apply search/replace. Args: {"file":"path","search":"old","replace":"new"}
 - search: Find symbol usages. Args: {"term":"symbolName","dir":".","glob":"*.go"}
 - tree: List directory structure. Args: {"dir":"."}

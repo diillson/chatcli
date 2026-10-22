@@ -17,7 +17,44 @@ const (
 	TaskInProgress TaskStatus = "in_progress"
 	TaskCompleted  TaskStatus = "completed"
 	TaskFailed     TaskStatus = "failed"
+	// TaskBlocked is a task that cannot proceed until something outside
+	// the agent's control happens (a user answer, an external system).
+	// Task.Error carries the reason. It is not a failure: it never counts
+	// toward replanning, and the plan's focus moves to the next workable
+	// task.
+	TaskBlocked TaskStatus = "blocked"
+	// TaskCancelled is a task dropped on purpose (no longer needed, out of
+	// scope). Task.Error carries the reason. Terminal: it leaves the
+	// progress denominator, so a plan whose remaining tasks are cancelled
+	// reads as done.
+	TaskCancelled TaskStatus = "cancelled"
 )
+
+// Valid reports whether s is one of the tracker's statuses (the empty
+// status is not valid; callers default it to pending themselves).
+func (s TaskStatus) Valid() bool {
+	switch s {
+	case TaskPending, TaskInProgress, TaskCompleted, TaskFailed, TaskBlocked, TaskCancelled:
+		return true
+	}
+	return false
+}
+
+// Workable reports whether a task in status s still needs the agent's
+// attention: pending, in progress or failed (a failed task is retried or
+// replanned). Completed, cancelled and blocked tasks are skipped when the
+// plan's focus advances.
+func (s TaskStatus) Workable() bool {
+	switch s {
+	case TaskPending, TaskInProgress, TaskFailed, "":
+		return true
+	}
+	return false
+}
+
+// TaskStatusList is the model-facing enumeration of statuses, in the order
+// a plan usually moves through them.
+const TaskStatusList = "pending|in_progress|completed|failed|blocked|cancelled"
 
 type Task struct {
 	ID          int
@@ -129,7 +166,16 @@ func (t *TaskTracker) MarkCurrentAs(status TaskStatus, errorMsg string) {
 		return
 	}
 
-	task := t.plan.Tasks[t.plan.CurrentTask]
+	t.applyStatusLocked(t.plan.CurrentTask, status, errorMsg)
+}
+
+// applyStatusLocked sets the status of the task at idx and keeps the plan's
+// bookkeeping consistent (caller holds t.mu, idx is in range): timestamps,
+// the failure counter that triggers replanning, the reason kept for
+// failed/blocked/cancelled tasks, and the focus cursor — which moves past a
+// task that is no longer workable and back onto a task that resumes.
+func (t *TaskTracker) applyStatusLocked(idx int, status TaskStatus, reason string) {
+	task := t.plan.Tasks[idx]
 	task.Status = status
 	task.Attempts++
 
@@ -138,18 +184,43 @@ func (t *TaskTracker) MarkCurrentAs(status TaskStatus, errorMsg string) {
 		if task.StartedAt.IsZero() {
 			task.StartedAt = time.Now()
 		}
+		task.Error = ""
+		t.plan.CurrentTask = idx
+	case TaskPending:
+		task.Error = ""
+		if idx < t.plan.CurrentTask {
+			t.plan.CurrentTask = idx
+		}
 	case TaskCompleted:
 		task.CompletedAt = time.Now()
-		t.plan.CurrentTask++
+		task.Error = ""
+		t.advanceCursorLocked(idx)
 	case TaskFailed:
-		task.Error = errorMsg
+		task.Error = reason
 		t.plan.FailureCount++
 		if t.plan.FailureCount >= 3 {
 			t.plan.NeedsReplan = true
 		}
+	case TaskBlocked, TaskCancelled:
+		task.Error = reason
+		t.advanceCursorLocked(idx)
 	}
 
 	t.plan.UpdatedAt = time.Now()
+}
+
+// advanceCursorLocked moves the focus past idx when idx was the current
+// task, landing on the next workable task (or past the end when none is
+// left). Caller holds t.mu.
+func (t *TaskTracker) advanceCursorLocked(idx int) {
+	if idx != t.plan.CurrentTask {
+		return
+	}
+	next := idx + 1
+	for next < len(t.plan.Tasks) && !t.plan.Tasks[next].Status.Workable() {
+		next++
+	}
+	t.plan.CurrentTask = next
 }
 
 func (t *TaskTracker) GetCurrentTask() *Task {
@@ -260,6 +331,8 @@ func (t *TaskTracker) ResetPlanFromReasoning(reasoningText string, preserveCompl
 type TaskSpec struct {
 	Description string
 	Status      TaskStatus
+	// Reason is kept as Task.Error for a failed, blocked or cancelled task.
+	Reason string
 }
 
 // SetTasks replaces the entire plan with the supplied list. Used by
@@ -292,6 +365,8 @@ func (t *TaskTracker) SetTasks(specs []TaskSpec) {
 			currentTask = i
 		case TaskCompleted:
 			tk.CompletedAt = time.Now()
+		case TaskFailed, TaskBlocked, TaskCancelled:
+			tk.Error = strings.TrimSpace(s.Reason)
 		}
 		tasks = append(tasks, tk)
 	}
@@ -307,9 +382,9 @@ func (t *TaskTracker) SetTasks(specs []TaskSpec) {
 		}
 	}
 	if !allInProgress {
-		currentTask = 0
+		currentTask = len(tasks)
 		for i, tk := range tasks {
-			if tk.Status != TaskCompleted {
+			if tk.Status.Workable() {
 				currentTask = i
 				break
 			}
@@ -353,8 +428,11 @@ func (t *TaskTracker) AppendTasks(specs []TaskSpec) []int {
 			status = TaskPending
 		}
 		tk := &Task{ID: len(t.plan.Tasks) + 1, Description: desc, Status: status}
-		if status == TaskInProgress {
+		switch status {
+		case TaskInProgress:
 			tk.StartedAt = time.Now()
+		case TaskFailed, TaskBlocked, TaskCancelled:
+			tk.Error = strings.TrimSpace(s.Reason)
 		}
 		t.plan.Tasks = append(t.plan.Tasks, tk)
 		ids = append(ids, tk.ID)
@@ -394,27 +472,7 @@ func (t *TaskTracker) MarkByID(id int, status TaskStatus, errorMsg string) bool 
 	if idx < 0 || idx >= len(t.plan.Tasks) {
 		return false
 	}
-	tk := t.plan.Tasks[idx]
-	tk.Status = status
-	tk.Attempts++
-	switch status {
-	case TaskInProgress:
-		if tk.StartedAt.IsZero() {
-			tk.StartedAt = time.Now()
-		}
-	case TaskCompleted:
-		tk.CompletedAt = time.Now()
-		if idx == t.plan.CurrentTask {
-			t.plan.CurrentTask++
-		}
-	case TaskFailed:
-		tk.Error = errorMsg
-		t.plan.FailureCount++
-		if t.plan.FailureCount >= 3 {
-			t.plan.NeedsReplan = true
-		}
-	}
-	t.plan.UpdatedAt = time.Now()
+	t.applyStatusLocked(idx, status, errorMsg)
 	return true
 }
 
@@ -438,6 +496,10 @@ func (t *TaskTracker) FormatProgress() string {
 			icon = "[>]"
 		case TaskFailed:
 			icon = "[!]"
+		case TaskBlocked:
+			icon = "[~]"
+		case TaskCancelled:
+			icon = "[-]"
 		default:
 			icon = "[ ]"
 		}
@@ -449,25 +511,42 @@ func (t *TaskTracker) FormatProgress() string {
 
 		fmt.Fprintf(&b, "%s%s %d. %s\n", currentMarker, icon, i+1, task.Description)
 
-		if task.Status == TaskFailed && task.Error != "" {
-			fmt.Fprintf(&b, "    Error: %s\n", task.Error)
+		if task.Error != "" {
+			switch task.Status {
+			case TaskFailed:
+				fmt.Fprintf(&b, "    Error: %s\n", task.Error)
+			case TaskBlocked:
+				fmt.Fprintf(&b, "    Blocked: %s\n", task.Error)
+			case TaskCancelled:
+				fmt.Fprintf(&b, "    Cancelled: %s\n", task.Error)
+			}
 		}
 	}
 
-	completed := 0
-	failed := 0
+	var completed, failed, blocked, cancelled int
 	for _, task := range t.plan.Tasks {
 		switch task.Status {
 		case TaskCompleted:
 			completed++
 		case TaskFailed:
 			failed++
+		case TaskBlocked:
+			blocked++
+		case TaskCancelled:
+			cancelled++
 		}
 	}
 
-	fmt.Fprintf(&b, "\nProgress: %d/%d done", completed, len(t.plan.Tasks))
+	// Cancelled tasks leave the denominator: they are not work left to do.
+	fmt.Fprintf(&b, "\nProgress: %d/%d done", completed, len(t.plan.Tasks)-cancelled)
 	if failed > 0 {
 		fmt.Fprintf(&b, ", %d failed", failed)
+	}
+	if blocked > 0 {
+		fmt.Fprintf(&b, ", %d blocked", blocked)
+	}
+	if cancelled > 0 {
+		fmt.Fprintf(&b, ", %d cancelled", cancelled)
 	}
 	b.WriteString("\n")
 

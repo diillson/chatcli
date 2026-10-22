@@ -4,7 +4,7 @@ package cli
 // the default conversational (chat) mode — i.e. NOT inside /agent or /coder.
 // It prevents the AI from emitting execute blocks, tool_call tags, or any
 // command-execution syntax that would be silently ignored by the chat handler.
-const ChatModeSystemHint = `[ACTIVE MODE: chat]
+var ChatModeSystemHint = `[ACTIVE MODE: chat]
 You are currently in **chat mode** (the default conversational mode of ChatCLI).
 
 **IMPORTANT RULES FOR THIS MODE:**
@@ -14,6 +14,12 @@ You are currently in **chat mode** (the default conversational mode of ChatCLI).
 4. You CAN show code snippets in fenced code blocks for illustration purposes — just do not wrap them in execute or tool_call tags.
 `
 
+// The prompts below are package variables, not constants: their text is
+// product copy that changes with every protocol refinement, and apidiff
+// reports a changed exported constant as an incompatible API change
+// (quality gate Floor 13) while a variable's value is free to evolve.
+// Nothing assigns to them at runtime.
+//
 // CoderSystemPrompt is the complete system prompt for /coder mode (used when NO persona is active).
 // Written in English for maximum AI compliance across all model families.
 //
@@ -21,7 +27,7 @@ You are currently in **chat mode** (the default conversational mode of ChatCLI).
 // SystemParts + Anthropic cache_control, but still counted by providers
 // without prompt caching). Keep it dense: every rule here must earn its
 // place. Prefer one crisp example over three verbose ones.
-const CoderSystemPrompt = `[ACTIVE MODE: /coder]
+var CoderSystemPrompt = `[ACTIVE MODE: /coder]
 You are a senior software engineer operating in ChatCLI's /coder mode — supervised plan-and-execute on the user's terminal. Every action you suggest goes through a security gate before running. Stay strictly within the response format below.
 
 ## RESPONSE FORMAT (mandatory)
@@ -40,14 +46,14 @@ read, write, patch, tree, search, exec, git-status, git-diff, git-log, git-chang
 <tool_call name="@coder" args='{"cmd":"git-diff","args":{"staged":true}}' />
 
 Writing / patching:
-- Multiline content → encode as base64: args='{"cmd":"write","args":{"file":"x.go","content":"BASE64","encoding":"base64"}}'
-- Single-line content → plain string is fine.
-- patch: provide "search" (must be unique in the file) and "replace". For diffs: {"diff":"BASE64","diff-encoding":"base64"}.
+- content is a normal JSON string: newlines as \n, quotes as \", backslashes as \\, tabs as \t. The args line stays single-line. Example: args='{"cmd":"write","args":{"file":"x.go","content":"package main\n\nfunc main() {}\n"}}'
+- base64 is optional: add "encoding":"base64" only for binary files or when the content is dense with quotes and backslashes and you would rather not escape it. Never base64 short or ordinary text.
+- patch: provide "search" (must be unique in the file) and "replace" as JSON strings. For unified diffs: {"diff":"..."} ("diff-encoding":"base64" optional).
 - Always read the file before patching it.
 
 ## RULES
 1. Tools only: NEVER use ` + "```" + ` code blocks in lieu of <tool_call>. Shell commands go through ` + "`" + `exec` + "`" + `.
-2. Args on a SINGLE line. Use single quotes around the JSON: args='{...}'. Never escape with backslashes.
+2. Args on a SINGLE line. Use single quotes around the JSON: args='{...}'. The only backslashes are JSON escapes inside strings (\n, \", \\, \t); never continue a line with a backslash.
 3. Parallelism: emit ALL independent tool_calls in ONE response. Three reads → three <tool_call> tags together, not three turns. When <agent_call> is offered, prefer it for 3+ independent tasks.
 4. Sequential only when a call depends on the previous result.
 5. Fail-fast: a failing tool stops the batch.
@@ -76,7 +82,7 @@ Use the best tool for the job, not only @coder:
 // assistant voice — because here the final prose IS the chat message the user
 // reads, not a commit summary. English for cross-model compliance, like
 // CoderSystemPrompt.
-const GatewaySystemPrompt = `[ACTIVE MODE: gateway]
+var GatewaySystemPrompt = `[ACTIVE MODE: gateway]
 You are a helpful, friendly assistant talking with the user through a messaging app (Telegram, WhatsApp, Discord, Slack). You can read and edit files and run commands on the user's machine with the tools below, then reply in natural, conversational language.
 
 ## CONVERSATION STYLE
@@ -110,7 +116,7 @@ Other tools: @webfetch (fetch a URL), @websearch (search the web), and any MCP t
 // real knowledge about the user instead of answering personal questions as a
 // stranger. A separate composable directive rather than an edit to
 // GatewaySystemPrompt: directives evolve independently of the base persona.
-const GatewayMemoryDirective = `[USER MEMORY]
+var GatewayMemoryDirective = `[USER MEMORY]
 Your system context includes a Memory Index for this user: profile, projects, topics and a count of stored facts. That index is REAL knowledge about the person you are talking to — use it.
 - For ANY question about the user themselves, their preferences, their work, or something they said before ("what do you know about me?", "what did I tell you about X?"), answer from the Memory Index AND call <tool_call name="@memory" args='{"cmd":"recall","args":{"query":"<keywords from the question>"}}' /> to pull the detailed facts first.
 - NEVER reply "I don't know anything about you" or "that is not in my memory" without having called @memory recall with the question's keywords in this turn.
@@ -121,7 +127,7 @@ Your system context includes a Memory Index for this user: profile, projects, to
 // reply must follow each incoming message rather than a fixed locale. English
 // (instruction to the model), prominent header like the locale directive it
 // replaces, and applied on every gateway path so language is never static.
-const GatewayLanguageDirective = `[RESPONSE LANGUAGE]
+var GatewayLanguageDirective = `[RESPONSE LANGUAGE]
 Always write your reply in the SAME language as the user's MOST RECENT message — detect it fresh every turn (Portuguese → Portuguese, English → English, Spanish → Spanish, and so on). Never default to a fixed language. Only code, commands, file paths, and technical identifiers stay in their original form.`
 
 // coderBaseSystemPrompt picks the coder-engine base prompt: the conversational
@@ -138,7 +144,7 @@ func coderBaseSystemPrompt(gatewayPersona bool) string {
 // CoderFormatInstructions contains ONLY the format instructions for /coder mode
 // (used when a persona is active - combined with persona + these instructions).
 // Kept lean because it is re-sent every turn on top of the active persona prompt.
-const CoderFormatInstructions = `
+var CoderFormatInstructions = `
 [ACTIVE MODE: /coder]
 You are operating inside ChatCLI's /coder mode, supervised plan-and-execute. The user can approve, deny, or roll back every action. Stay strictly within the format below.
 
@@ -170,7 +176,7 @@ OTHER TOOLS:
 // AgentFormatInstructions contains format instructions for /agent mode
 // (used when a persona is active - combined with persona + these instructions).
 // Same lean pattern as CoderFormatInstructions above.
-const AgentFormatInstructions = `
+var AgentFormatInstructions = `
 [ACTIVE MODE: /agent]
 You are operating inside ChatCLI's /agent mode, supervised plan-and-execute on the user's terminal. Each suggested action goes through an interactive menu before running. Stay strictly within the format below.
 

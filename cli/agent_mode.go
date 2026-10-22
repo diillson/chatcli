@@ -2214,7 +2214,7 @@ func (a *AgentMode) getToolContextString() string {
 		coderCheatSheet = "Cheat sheet (@coder):\n" +
 			"- read: {\"cmd\":\"read\",\"args\":{\"file\":\"main.go\"}}\n" +
 			"- search: {\"cmd\":\"search\",\"args\":{\"term\":\"Login\",\"dir\":\".\"}}\n" +
-			"- write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"encoding\":\"base64\",\"content\":\"...\"}}\n" +
+			"- write: {\"cmd\":\"write\",\"args\":{\"file\":\"x.go\",\"content\":\"package main\\n...\"}} (JSON text; encoding base64 optional)\n" +
 			"- exec: {\"cmd\":\"exec\",\"args\":{\"cmd\":\"mkdir -p testeapi\"}}\n\n"
 	}
 
@@ -2325,7 +2325,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			anchor = "REMINDER (/CODER MODE): You MUST respond with a short <plan> (the actions you will take, 2-6 lines) then emit one or more <tool_call name=\"@coder\" args=\"...\" />. " +
 				"CRITICAL: Emit ALL independent tool_calls in a SINGLE response. Do NOT split independent reads/searches/writes into separate turns. " +
 				"If you need to read 3 files, emit 3 tool_calls NOW, not one per turn. Use <agent_call> for 3+ independent tasks when available. " +
-				"Do NOT use code blocks (```). For write/patch: base64 encoding and single-line args are MANDATORY."
+				"Do NOT use code blocks (```). For write/patch: single-line args are MANDATORY; content is a JSON string (\\n for newlines), base64 only for binary or escape-heavy content."
 		} else {
 			anchor = "REMINDER (/AGENT MODE): You can use tools via <tool_call name=\"@tool\" args=\"...\" /> when appropriate. " +
 				"CRITICAL: Emit ALL independent operations in a SINGLE response. Do NOT waste turns on things that could run in parallel. " +

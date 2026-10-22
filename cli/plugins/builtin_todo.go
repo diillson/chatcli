@@ -57,7 +57,9 @@ type TodoEditor interface {
 
 type TodoItem struct {
 	Description string `json:"description"`
-	Status      string `json:"status,omitempty"` // pending | in_progress | completed | failed
+	Status      string `json:"status,omitempty"` // pending | in_progress | completed | failed | blocked | cancelled
+	// Error is the reason kept with a failed, blocked or cancelled task.
+	Error string `json:"error,omitempty"`
 }
 
 // todoAdapterMu guards the package-level todoAdapter pointer. A
@@ -110,7 +112,7 @@ func (p *BuiltinTodoPlugin) Description() string {
 func (p *BuiltinTodoPlugin) Usage() string { return "@todo write|list|mark" }
 
 // Version follows semver tied to the tracker contract.
-func (p *BuiltinTodoPlugin) Version() string { return "1.1.0" }
+func (p *BuiltinTodoPlugin) Version() string { return "1.2.0" }
 
 // Path is the builtin sentinel.
 func (p *BuiltinTodoPlugin) Path() string { return "[builtin]" }
@@ -128,7 +130,7 @@ func (p *BuiltinTodoPlugin) Schema() string {
 				"name":        "write",
 				"description": "Replace the agent's task plan with the supplied list. Each call should send the FULL updated plan, not a delta. This is the canonical TodoWrite path.",
 				"flags": []map[string]interface{}{
-					{"name": "todos", "type": "array", "required": true, "description": "Array of {description,status?} objects (status: pending|in_progress|completed|failed)"},
+					{"name": "todos", "type": "array", "required": true, "description": "Array of {description,status?,error?} objects (status: " + todoStatusList + "; error = reason for failed/blocked/cancelled)"},
 				},
 				"examples": []string{
 					`{"cmd":"write","args":{"todos":[{"description":"Investigate issue","status":"completed"},{"description":"Apply fix","status":"in_progress"},{"description":"Add tests","status":"pending"}]}}`,
@@ -162,10 +164,14 @@ func (p *BuiltinTodoPlugin) Schema() string {
 				"description": "Update the status of one task by its 1-indexed ID. Use this for single-item updates when the rest of the plan is unchanged.",
 				"flags": []map[string]interface{}{
 					{"name": "id", "type": "integer", "required": true, "description": "1-indexed task id"},
-					{"name": "status", "type": "string", "required": true, "description": "pending|in_progress|completed|failed"},
-					{"name": "error", "type": "string", "description": "Optional error message when status=failed"},
+					{"name": "status", "type": "string", "required": true, "description": todoStatusList + ". blocked = cannot proceed until the user or an external system acts (the plan's focus moves on; mark it pending/in_progress to resume). cancelled = dropped on purpose (leaves the progress count)."},
+					{"name": "error", "type": "string", "description": "Reason, kept with the task, for status=failed, blocked or cancelled"},
 				},
-				"examples": []string{`{"cmd":"mark","args":{"id":2,"status":"completed"}}`},
+				"examples": []string{
+					`{"cmd":"mark","args":{"id":2,"status":"completed"}}`,
+					`{"cmd":"mark","args":{"id":3,"status":"blocked","error":"needs the staging credentials from the user"}}`,
+					`{"cmd":"mark","args":{"id":4,"status":"cancelled","error":"superseded by task 2"}}`,
+				},
 			},
 		},
 	}
@@ -230,11 +236,11 @@ func (p *BuiltinTodoPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		if id <= 0 {
 			return "", errors.New("@todo mark: id is required (1-indexed)")
 		}
-		status := strings.TrimSpace(jsonString(payload, "status"))
+		status := canonicalTodoStatus(jsonString(payload, "status"))
 		if status == "" {
-			return "", errors.New("@todo mark: status is required (pending|in_progress|completed|failed)")
+			return "", errors.New("@todo mark: status is required (" + todoStatusList + ")")
 		}
-		errMsg := jsonString(payload, "error", "errorMsg", "errMsg")
+		errMsg := jsonString(payload, "error", "reason", "errorMsg", "errMsg")
 		return adapter.Mark(id, status, errMsg)
 	default:
 		return "", fmt.Errorf("@todo: unknown subcommand %q (expected write|add|update|list|mark)", sub)
@@ -320,13 +326,40 @@ func todoItemsFromPayload(payload map[string]json.RawMessage) ([]TodoItem, error
 		if items[i].Description == "" {
 			return nil, fmt.Errorf("@todo write: todo #%d has empty description", i+1)
 		}
-		switch items[i].Status {
-		case "", "pending", "in_progress", "completed", "failed":
-			// ok
-		default:
-			return nil, fmt.Errorf("@todo write: todo #%d has invalid status %q (expected pending|in_progress|completed|failed)",
-				i+1, items[i].Status)
+		status := canonicalTodoStatus(items[i].Status)
+		if status == "" && strings.TrimSpace(items[i].Status) != "" {
+			return nil, fmt.Errorf("@todo write: todo #%d has invalid status %q (expected %s)",
+				i+1, items[i].Status, todoStatusList)
 		}
+		items[i].Status = status
 	}
 	return items, nil
+}
+
+// todoStatusList is the model-facing enumeration of task statuses; the
+// tracker (cli/agent) owns the same set.
+const todoStatusList = "pending|in_progress|completed|failed|blocked|cancelled"
+
+// canonicalTodoStatus maps a status as the model wrote it onto the
+// tracker's vocabulary — case-insensitive, hyphen/space tolerant, with the
+// synonyms models reach for (done, todo, waiting, skipped…). Returns ""
+// for an unknown status (callers decide whether empty means "default").
+func canonicalTodoStatus(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	s = strings.NewReplacer("-", "_", " ", "_").Replace(s)
+	switch s {
+	case "pending", "todo", "open", "not_started":
+		return "pending"
+	case "in_progress", "inprogress", "doing", "active", "started", "wip":
+		return "in_progress"
+	case "completed", "complete", "done", "finished":
+		return "completed"
+	case "failed", "failure", "error":
+		return "failed"
+	case "blocked", "waiting", "on_hold", "paused":
+		return "blocked"
+	case "cancelled", "canceled", "skipped", "dropped", "wontfix", "wont_do":
+		return "cancelled"
+	}
+	return ""
 }
