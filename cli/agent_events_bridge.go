@@ -259,7 +259,7 @@ func (a *AgentMode) executeCommandBlocksUnattended(ctx context.Context, blocks [
 		}
 		if blocked != "" {
 			msg := i18n.T("agent.oneshot.auto_exec_aborted", blocked)
-			fb.WriteString("ERRO: " + msg + "\n\n")
+			fb.WriteString(agent.ActionErrorLabel + msg + "\n\n")
 			a.emitBlockedTool("execute:"+block.Language, blocked, msg)
 			continue
 		}
@@ -276,7 +276,7 @@ func (a *AgentMode) executeCommandBlocksUnattended(ctx context.Context, blocks [
 		a.emitToolEnd(tcEv, out, execErr, "", time.Since(start))
 
 		if errorMsg != "" {
-			fmt.Fprintf(&fb, "ERRO: %s\nSaída parcial: %s\n\n", errorMsg, out)
+			fb.WriteString(agent.ActionFailure(errorMsg, out))
 		} else {
 			fb.WriteString(out + "\n\n")
 		}

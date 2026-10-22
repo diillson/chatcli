@@ -108,7 +108,7 @@ func TestSkipAfterFailureAndReadOnlyLookup(t *testing.T) {
 	if !res.IsError || res.ErrorCode != toolResultErrorCodeNotExecuted || !strings.Contains(res.Output, "Action 3 (@coder) not executed") {
 		t.Fatalf("skip result: %+v", res)
 	}
-	if !strings.Contains(out.String(), "--- Resultado da Ação 3 (@coder) ---") || !strings.Contains(rendered, "not executed") {
+	if !strings.Contains(out.String(), "--- Action Result 3 (@coder) ---") || !strings.Contains(rendered, "not executed") {
 		t.Fatalf("skip note: %q / %q", out.String(), rendered)
 	}
 	// A nil renderer is fine (one-shot surfaces).

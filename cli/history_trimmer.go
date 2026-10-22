@@ -55,7 +55,7 @@ var (
 	explanationBlockRe = regexp.MustCompile(`(?s)<explanation>.*?</explanation>`)
 	toolOutputBlockRe  = regexp.MustCompile(`(?s)<tool_output>\n?(.*?)\n?</tool_output>`)
 	// Pattern to detect tool feedback messages (from agent_mode.go format)
-	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Resultado da Ação)`)
+	toolFeedbackPrefixRe = regexp.MustCompile(`^(?:The tool '|A ferramenta '|--- Action Result|--- Resultado da Ação)`)
 	formatErrorPrefixRe  = regexp.MustCompile(`^FORMAT ERROR:`)
 	// Patterns to detect injected context/memory messages
 	memoryContextMarkerRe   = regexp.MustCompile(`^\[MEMORY CONTEXT — loaded from \d{4}-\d{2}-\d{2}\]`)
@@ -225,7 +225,7 @@ func (t *MessageTrimmer) trimToolFeedback(content string) string {
 		if c := t.compressOrEmpty(content); c != "" {
 			return c
 		}
-		// Looks for "--- Resultado da Ação" pattern (batch output)
+		// Looks for the action-result header pattern (batch output)
 		// Keep header + first portion + tail
 		content = truncatePreservingStructure(content, 8000)
 	}
@@ -307,7 +307,8 @@ func isToolFeedbackMessage(content string) bool {
 	return toolFeedbackPrefixRe.MatchString(content) ||
 		formatErrorPrefixRe.MatchString(content) ||
 		strings.Contains(content, "<tool_output>") ||
-		strings.HasPrefix(content, "--- Resultado da Ação")
+		strings.HasPrefix(content, agent.ActionResultPrefix) ||
+		strings.HasPrefix(content, agent.LegacyActionResultPrefix)
 }
 
 // truncatePreservingStructure truncates long text keeping beginning and end,

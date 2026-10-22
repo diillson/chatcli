@@ -88,8 +88,13 @@ func TestIsToolFeedbackMessage(t *testing.T) {
 			want:    true,
 		},
 		{
-			name:    "result prefix Portuguese",
+			name:    "result prefix (legacy Portuguese sessions)",
 			content: "--- Resultado da Ação ---\nOutput here",
+			want:    true,
+		},
+		{
+			name:    "result prefix",
+			content: "--- Action Result 1 (@read) ---\nOutput here",
 			want:    true,
 		},
 		{
@@ -185,7 +190,7 @@ func TestTrimMessagePreservesVerbatimFlagged(t *testing.T) {
 	// another recall.
 	original := strings.Repeat("important recalled line that must survive compaction\n", 200)
 	feedback := "The tool 'batch_execution' was executed and returned the following:\n\n" +
-		"<tool_output>\n--- Resultado da Ação 1 (@recall) ---\n" + original + "\n</tool_output>\n\n" +
+		"<tool_output>\n--- Action Result 1 (@recall) ---\n" + original + "\n</tool_output>\n\n" +
 		"(If the task is done, reply only with a final summary.)"
 
 	flagged := models.Message{Role: "user", Content: feedback, Meta: &models.MessageMeta{PreserveVerbatim: true}}
