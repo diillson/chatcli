@@ -145,19 +145,19 @@ func (s *Session) doPress(ctx context.Context, chord string) error {
 // center, for real mouse events.
 func (s *Session) elementCenter(ctx context.Context, target string) (x, y float64, err error) {
 	selJSON, _ := json.Marshal(resolveSelector(target))
-	js := fmt.Sprintf(`(() => {
-  const el = document.querySelector(%s);
+	js := domScript(fmt.Sprintf(`(() => {
+  const el = __cc.one(%s);
   if (!el) return 'NOTFOUND';
   el.scrollIntoView({block: 'center'});
-  const r = el.getBoundingClientRect();
-  return JSON.stringify({x: r.left + r.width / 2, y: r.top + r.height / 2});
-})()`, selJSON)
+  const r = __cc.rect(el);
+  return JSON.stringify({x: r.x + r.w / 2, y: r.y + r.h / 2});
+})()`, selJSON))
 	out, err := s.evalRaw(ctx, js)
 	if err != nil {
 		return 0, 0, err
 	}
 	if strings.Contains(out, "NOTFOUND") {
-		return 0, 0, fmt.Errorf("no element matches %q — run snapshot first and use one of its [n] refs", target)
+		return 0, 0, fmt.Errorf(errNoElementFmt, target)
 	}
 	var pt struct{ X, Y float64 }
 	if err := json.Unmarshal([]byte(out), &pt); err != nil {
@@ -199,8 +199,8 @@ func (s *Session) Select(ctx context.Context, target, option string) error {
 func (s *Session) doSelect(ctx context.Context, target, option string) error {
 	selJSON, _ := json.Marshal(resolveSelector(target))
 	optJSON, _ := json.Marshal(option)
-	js := fmt.Sprintf(`(() => {
-  const el = document.querySelector(%s);
+	js := domScript(fmt.Sprintf(`(() => {
+  const el = __cc.one(%s);
   if (!el) return 'NOTFOUND';
   if (el.tagName.toLowerCase() !== 'select') return 'NOTSELECT';
   const want = %s.trim().toLowerCase();
@@ -214,14 +214,14 @@ func (s *Session) doSelect(ctx context.Context, target, option string) error {
   el.dispatchEvent(new Event('input', {bubbles: true}));
   el.dispatchEvent(new Event('change', {bubbles: true}));
   return 'OK:' + opts[idx].value;
-})()`, selJSON, optJSON)
+})()`, selJSON, optJSON))
 	out, err := s.evalRaw(ctx, js)
 	if err != nil {
 		return err
 	}
 	switch {
 	case strings.HasPrefix(out, "NOTFOUND"):
-		return fmt.Errorf("no element matches %q — run snapshot first and use one of its [n] refs", target)
+		return fmt.Errorf(errNoElementFmt, target)
 	case strings.HasPrefix(out, "NOTSELECT"):
 		return fmt.Errorf("%q is not a <select>; use type for inputs or click for custom dropdowns", target)
 	case strings.HasPrefix(out, "NOOPTION:"):
@@ -252,46 +252,39 @@ func (s *Session) doUpload(ctx context.Context, target string, paths []string) e
 		}
 		abs = append(abs, a)
 	}
-	nodeID, err := s.nodeIDFor(ctx, target)
+	objectID, err := s.objectIDFor(ctx, target)
 	if err != nil {
 		return err
 	}
 	_, err = s.call(ctx, "DOM.setFileInputFiles", map[string]interface{}{
-		"files": abs, "nodeId": nodeID,
+		"files": abs, "objectId": objectID,
 	})
 	return err
 }
 
-// nodeIDFor resolves a ref/selector to a DOM node id.
-func (s *Session) nodeIDFor(ctx context.Context, target string) (int, error) {
-	res, err := s.call(ctx, "DOM.getDocument", map[string]interface{}{"depth": 0})
-	if err != nil {
-		return 0, err
-	}
-	var doc struct {
-		Root struct {
-			NodeID int `json:"nodeId"`
-		} `json:"root"`
-	}
-	if err := json.Unmarshal(res, &doc); err != nil {
-		return 0, err
-	}
-	res, err = s.call(ctx, "DOM.querySelector", map[string]interface{}{
-		"nodeId": doc.Root.NodeID, "selector": resolveSelector(target),
+// objectIDFor resolves a ref/selector to a remote object id, through the
+// same shadow-root and iframe aware lookup every other action uses.
+func (s *Session) objectIDFor(ctx context.Context, target string) (string, error) {
+	selJSON, _ := json.Marshal(resolveSelector(target))
+	res, err := s.call(ctx, "Runtime.evaluate", map[string]interface{}{
+		"expression": domScript(fmt.Sprintf(`__cc.one(%s)`, selJSON)),
 	})
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	var q struct {
-		NodeID int `json:"nodeId"`
+	var out struct {
+		Result struct {
+			ObjectID string `json:"objectId"`
+			Subtype  string `json:"subtype"`
+		} `json:"result"`
 	}
-	if err := json.Unmarshal(res, &q); err != nil {
-		return 0, err
+	if err := json.Unmarshal(res, &out); err != nil {
+		return "", err
 	}
-	if q.NodeID == 0 {
-		return 0, fmt.Errorf("no element matches %q — run snapshot first and use one of its [n] refs", target)
+	if out.Result.ObjectID == "" || out.Result.Subtype == "null" {
+		return "", fmt.Errorf(errNoElementFmt, target)
 	}
-	return q.NodeID, nil
+	return out.Result.ObjectID, nil
 }
 
 // HTML returns the outerHTML of the element (or the whole document when
@@ -313,14 +306,14 @@ func (s *Session) doHTML(ctx context.Context, target string, maxBytes int) (stri
 		js = `document.documentElement.outerHTML`
 	} else {
 		selJSON, _ := json.Marshal(resolveSelector(target))
-		js = fmt.Sprintf(`(() => { const el = document.querySelector(%s); return el ? el.outerHTML : 'NOTFOUND'; })()`, selJSON)
+		js = domScript(fmt.Sprintf(`(() => { const el = __cc.one(%s); return el ? el.outerHTML : 'NOTFOUND'; })()`, selJSON))
 	}
 	out, err := s.evalRaw(ctx, js)
 	if err != nil {
 		return "", err
 	}
 	if out == "NOTFOUND" {
-		return "", fmt.Errorf("no element matches %q — run snapshot first and use one of its [n] refs", target)
+		return "", fmt.Errorf(errNoElementFmt, target)
 	}
 	if len(out) > maxBytes {
 		out = textfold.Cut(out, maxBytes) + "\n… (html truncated)"

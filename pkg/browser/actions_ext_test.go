@@ -36,7 +36,11 @@ func extFakeSession(t *testing.T) (*Session, func() []cdpMessage, func(cdpMessag
 			}
 			_ = json.Unmarshal(msg.Params, &p)
 			switch {
-			case strings.Contains(p.Expression, "getBoundingClientRect"):
+			case strings.HasSuffix(strings.TrimSpace(p.Expression), `__cc.one("#missing"));`+"\n})()"):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"object","subtype":"null"}}`)}
+			case strings.Contains(p.Expression, "return (__cc.one("):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"object","objectId":"obj7"}}`)}
+			case strings.Contains(p.Expression, "r.w / 2"):
 				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"x\":10,\"y\":20}"}}`)}
 			case strings.Contains(p.Expression, "NOOPTION"):
 				if strings.Contains(p.Expression, `"missing"`) {
@@ -173,7 +177,7 @@ func TestHoverSelectUploadHTML(t *testing.T) {
 		t.Fatal(err)
 	}
 	up := methodParams(t, seen(), "DOM.setFileInputFiles")
-	if len(up) != 1 || up[0]["nodeId"].(float64) != 7 {
+	if len(up) != 1 || up[0]["objectId"] != "obj7" {
 		t.Fatalf("upload: %v", up)
 	}
 	if err := s.Upload(ctx, "#file", []string{filepath.Join(t.TempDir(), "nope")}); err == nil {

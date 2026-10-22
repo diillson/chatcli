@@ -32,8 +32,15 @@ func TestPageActionsAreNodesUnderTheBrowser(t *testing.T) {
 				Expression string `json:"expression"`
 			}
 			_ = json.Unmarshal(msg.Params, &p)
-			if strings.Contains(p.Expression, "location.href") {
+			switch {
+			case strings.Contains(p.Expression, "markers"):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"title\":\"SECRET-TITLE\",\"url\":\"https://docs.example.com/SECRET-PATH\",\"interactive\":[],\"text\":\"\",\"markers\":{}}"}}`)}
+			case strings.Contains(p.Expression, "location.href"):
 				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"t\":\"SECRET-TITLE\",\"u\":\"https://docs.example.com/SECRET-PATH?token=SECRET\"}"}}`)}
+			case strings.Contains(p.Expression, "mode: 'mouse'"):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"mode\":\"mouse\",\"x\":5,\"y\":6}"}}`)}
+			case strings.Contains(p.Expression, "kind: 'value'"):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"kind\":\"value\",\"password\":false}"}}`)}
 			}
 			return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"OK"}}`)}
 		case "Page.captureScreenshot":

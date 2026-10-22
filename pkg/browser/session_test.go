@@ -217,3 +217,154 @@ func TestRelaunchKeepsProfileAndPage(t *testing.T) {
 		t.Fatalf("throwaway profile must be removed on final close, stat err=%v", err)
 	}
 }
+
+// e2ePageV2 exercises what the DOM scan must see through: an open shadow
+// root, a same-origin iframe, a labeled password field, an editable
+// region and a cross-origin-looking frame the scan cannot read.
+const e2ePageV2 = `<html><head><title>ChatCLI DOM v2</title></head><body>
+<label for="pw">Secret phrase</label><input id="pw" type="password">
+<input id="name" type="text" placeholder="Your name">
+<div id="editor" contenteditable="true">draft</div>
+<div id="host"></div>
+<iframe id="inner" srcdoc="<button id='deep' onclick='parent.document.title=&quot;FrameClicked&quot;'>Deep button</button><p>inside frame text</p>"></iframe>
+<p>Alpha paragraph with the word needle in it.</p><p>Beta paragraph, another needle here.</p>
+<script>
+  const root = document.getElementById('host').attachShadow({mode: 'open'});
+  root.innerHTML = '<button id="shadowbtn" onclick="document.title=\'ShadowClicked\'">Shadow button</button>';
+  document.getElementById('pw').value = 'hun' + 'ter2';
+  let counter = 0;
+  document.getElementById('editor').addEventListener('input', () => { counter++; document.title = 'Edited' + counter; });
+</script>
+</body></html>`
+
+func TestSessionEndToEnd_DOMv2(t *testing.T) {
+	s := newE2ESession(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if _, _, err := s.Navigate(ctx, "data:text/html,"+url.PathEscape(e2ePageV2)); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond) // srcdoc frame and shadow script settle
+
+	snap, err := s.Snapshot(ctx, 0)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if strings.Contains(snap, "hunter2") {
+		t.Fatalf("password value leaked into the snapshot:\n%s", snap)
+	}
+	for _, want := range []string{"<input> Secret phrase type=password value=<hidden>", "<input> Your name type=text", "<div> draft editable", "<button> Shadow button", "<button> Deep button", "in iframe", "inside frame text"} {
+		if !strings.Contains(snap, want) {
+			t.Fatalf("snapshot missing %q:\n%s", want, snap)
+		}
+	}
+
+	// A button inside an open shadow root is clickable by its ref, with a
+	// real mouse click.
+	note, err := s.ClickWith(ctx, refOf(t, snap, "Shadow button"), ClickOptions{})
+	if err != nil || note != "" {
+		t.Fatalf("shadow click: %q %v", note, err)
+	}
+	if title, _, _ := s.Identity(ctx); title != "ShadowClicked" {
+		t.Fatalf("shadow click had no effect: title=%q", title)
+	}
+	// So is one inside a same-origin iframe.
+	if _, err := s.ClickWith(ctx, refOf(t, snap, "Deep button"), ClickOptions{}); err != nil {
+		t.Fatalf("iframe click: %v", err)
+	}
+	if title, _, _ := s.Identity(ctx); title != "FrameClicked" {
+		t.Fatalf("iframe click had no effect: title=%q", title)
+	}
+
+	// Typing into an editable region goes through the input pipeline, so
+	// the page's input listener fires; the previous text is replaced.
+	if _, err := s.TypeWith(ctx, "#editor", "final text", false, false); err != nil {
+		t.Fatalf("type editable: %v", err)
+	}
+	got, _ := s.Eval(ctx, `document.getElementById('editor').innerText`)
+	if strings.TrimSpace(got) != "final text" {
+		t.Fatalf("editable content = %q", got)
+	}
+	if title, _, _ := s.Identity(ctx); !strings.HasPrefix(title, "Edited") {
+		t.Fatalf("input event did not reach the page: title=%q", title)
+	}
+	if _, err := s.TypeWith(ctx, "#editor", " +more", true, false); err != nil {
+		t.Fatalf("append editable: %v", err)
+	}
+	got, _ = s.Eval(ctx, `document.getElementById('editor').innerText`)
+	if strings.TrimSpace(got) != "final text +more" {
+		t.Fatalf("appended content = %q", got)
+	}
+	if err := s.Clear(ctx, "#editor"); err != nil {
+		t.Fatalf("clear editable: %v", err)
+	}
+	if got, _ = s.Eval(ctx, `document.getElementById('editor').innerText`); strings.TrimSpace(got) != "" {
+		t.Fatalf("editable not cleared: %q", got)
+	}
+
+	// A password field is reported so the caller never echoes the text.
+	pw, err := s.TypeWith(ctx, "#pw", "s3cret", false, false)
+	if err != nil || !pw {
+		t.Fatalf("password report: %v %v", pw, err)
+	}
+	if _, err := s.TypeWith(ctx, "#name", "Ada", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TypeWith(ctx, "#name", " Lovelace", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.Eval(ctx, `document.getElementById('name').value`); got != "Ada Lovelace" {
+		t.Fatalf("append on input = %q", got)
+	}
+	if err := s.Clear(ctx, "#name"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.Eval(ctx, `document.getElementById('name').value`); got != "" {
+		t.Fatalf("input not cleared: %q", got)
+	}
+
+	// Eval tolerates a redeclaration across calls (REPL mode) and awaits.
+	if _, err := s.Eval(ctx, `const answer = 40; answer`); err != nil {
+		t.Fatalf("first const: %v", err)
+	}
+	if got, err := s.Eval(ctx, `const answer = 42; answer`); err != nil || got != "42" {
+		t.Fatalf("second const must not fail with 'already declared': %q %v", got, err)
+	}
+	if got, err := s.Eval(ctx, `await new Promise(r => setTimeout(() => r('later'), 10))`); err != nil || got != "later" {
+		t.Fatalf("top-level await: %q %v", got, err)
+	}
+
+	// find lists matching elements and text occurrences; text pages.
+	out, err := s.Find(ctx, "needle", 10)
+	if err != nil || !strings.Contains(out, "Text matches for \"needle\" (2 shown of 2)") {
+		t.Fatalf("find: %q %v", out, err)
+	}
+	out, err = s.Find(ctx, "deep button", 10)
+	if err != nil || !strings.Contains(out, "<button> Deep button") {
+		t.Fatalf("find element: %q %v", out, err)
+	}
+	full, err := s.Text(ctx, "", 0, 0)
+	if err != nil || !strings.Contains(full, "Alpha paragraph") || !strings.Contains(full, "end of page") {
+		t.Fatalf("text: %q %v", full, err)
+	}
+	part, err := s.Text(ctx, "", 0, 20)
+	if err != nil || !strings.Contains(part, "`--offset 20` continues") {
+		t.Fatalf("text paging: %q %v", part, err)
+	}
+	if ch, err := s.Challenge(ctx); err != nil || ch != "" {
+		t.Fatalf("plain page reported as challenge %q (%v)", ch, err)
+	}
+
+	// An interstitial is recognized and the snapshot says so.
+	block := `<html><head><title>Just a moment...</title></head><body><div id="challenge-running">Checking your browser before accessing example.com.</div></body></html>`
+	if _, _, err := s.Navigate(ctx, "data:text/html,"+url.PathEscape(block)); err != nil {
+		t.Fatalf("navigate block: %v", err)
+	}
+	if ch, err := s.Challenge(ctx); err != nil || ch != "Cloudflare" {
+		t.Fatalf("challenge = %q (%v)", ch, err)
+	}
+	snap, _ = s.Snapshot(ctx, 0)
+	if !strings.Contains(snap, "Bot challenge detected (Cloudflare)") {
+		t.Fatalf("snapshot must warn:\n%s", snap)
+	}
+}
