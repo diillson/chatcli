@@ -152,6 +152,28 @@ func (*BuiltinJSONPlugin) DescribeCall(args []string) string {
 	return i18n.T("plugins.json.describe.pretty", target)
 }
 
+// --- @diff ---
+
+func (*BuiltinDiffPlugin) DescribeCall(args []string) string {
+	cmd, raw, err := parseDiffToolInvocation(args)
+	if err != nil {
+		return i18n.T("plugins.diff.describe.default")
+	}
+	a := diffToolArgsFrom(raw)
+	switch cmd {
+	case "text":
+		return i18n.T("plugins.diff.describe.text")
+	case "apply":
+		if a.dryRun {
+			return i18n.T("plugins.diff.describe.apply_dry", describeTrunc(a.file, 50))
+		}
+		return i18n.T("plugins.diff.describe.apply", describeTrunc(a.file, 50))
+	case "dirs":
+		return i18n.T("plugins.diff.describe.dirs", describeTrunc(a.a, 35), describeTrunc(a.b, 35))
+	}
+	return i18n.T("plugins.diff.describe.files", describeTrunc(a.a, 35), describeTrunc(a.b, 35))
+}
+
 // --- @skill ---
 
 func (*BuiltinSkillPlugin) DescribeCall(args []string) string {
