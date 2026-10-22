@@ -1,0 +1,11 @@
+{
+  "plugins.json.description": "Lê arquivos JSON/YAML ou texto inline sem carregar tudo: valor num caminho, chaves, consulta filtrada, schema inferido, validação com linha/coluna, formatação.",
+  "plugins.json.describe.default": "Lendo dados estruturados",
+  "plugins.json.describe.inline": "texto inline",
+  "plugins.json.describe.get": "Lendo valor: %s",
+  "plugins.json.describe.keys": "Listando chaves: %s",
+  "plugins.json.describe.query": "Consultando: %s",
+  "plugins.json.describe.schema": "Inferindo formato: %s",
+  "plugins.json.describe.validate": "Validando: %s",
+  "plugins.json.describe.pretty": "Formatando: %s"
+}

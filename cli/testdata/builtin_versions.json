@@ -71,6 +71,10 @@
     "version": "1.1.0",
     "surface": "3248811e7506d197"
   },
+  "@json": {
+    "version": "1.0.0",
+    "surface": "326fc7ebb159a346"
+  },
   "@knowledge": {
     "version": "1.0.0",
     "surface": "a23ec7f45998f3e0"

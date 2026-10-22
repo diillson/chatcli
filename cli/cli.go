@@ -2275,6 +2275,9 @@ func registerCoreBuiltins(pluginMgr *plugins.Manager) {
 	// @osv — keyless dependency vulnerability scanning via OSV.dev.
 	// Self-contained (HTTP + filesystem), no adapter wiring needed.
 	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
+	// @json — structured-data reader (JSON/YAML). Pure Go,
+	// workspace-bounded through the engine path guard; no adapter wiring.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinJSONPlugin())
 	// @session — search past saved conversations. Wired below to the
 	// SessionManager.
 	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSessionPlugin())

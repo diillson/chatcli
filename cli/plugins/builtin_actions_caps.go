@@ -121,6 +121,37 @@ func (*BuiltinOsvPlugin) DescribeCall(args []string) string {
 	return i18n.T("plugins.osv.describe.scan", path)
 }
 
+// --- @json ---
+
+func (*BuiltinJSONPlugin) DescribeCall(args []string) string {
+	cmd, raw, err := parseJSONToolInvocation(args)
+	if err != nil {
+		return i18n.T("plugins.json.describe.default")
+	}
+	a := jsonToolArgsFrom(raw)
+	target := a.file
+	if target == "" {
+		target = i18n.T("plugins.json.describe.inline")
+	}
+	if a.path != "" {
+		target += " › " + describeTrunc(a.path, 40)
+	}
+	target = describeTrunc(target, 70)
+	switch cmd {
+	case "get":
+		return i18n.T("plugins.json.describe.get", target)
+	case "keys":
+		return i18n.T("plugins.json.describe.keys", target)
+	case "query":
+		return i18n.T("plugins.json.describe.query", target)
+	case "schema":
+		return i18n.T("plugins.json.describe.schema", target)
+	case "validate":
+		return i18n.T("plugins.json.describe.validate", target)
+	}
+	return i18n.T("plugins.json.describe.pretty", target)
+}
+
 // --- @skill ---
 
 func (*BuiltinSkillPlugin) DescribeCall(args []string) string {

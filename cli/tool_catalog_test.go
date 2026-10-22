@@ -20,6 +20,7 @@ func catalogPlugins() []plugins.Plugin {
 		plugins.NewBuiltinGraphViewPlugin(), plugins.NewBuiltinImagePlugin(), plugins.NewBuiltinKnowledgePlugin(),
 		plugins.NewBuiltinLSPPlugin(), plugins.NewBuiltinMemoryPlugin(), plugins.NewBuiltinMoaPlugin(),
 		plugins.NewBuiltinOsvPlugin(), plugins.NewBuiltinParkPlugin(), plugins.NewBuiltinReadPlugin(),
+		plugins.NewBuiltinJSONPlugin(),
 		plugins.NewBuiltinRecallPlugin(), plugins.NewBuiltinRegistryTagsPlugin(), plugins.NewBuiltinSchedulerPlugin(),
 		plugins.NewBuiltinSearchPlugin(), plugins.NewBuiltinSendPlugin(), plugins.NewBuiltinSessionPlugin(),
 		plugins.NewBuiltinSkillPlugin(), plugins.NewBuiltinSpeakPlugin(), plugins.NewBuiltinTodoPlugin(),
