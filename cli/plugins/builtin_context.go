@@ -369,22 +369,28 @@ func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []strin
 		out, serr := adapter.Status()
 		return wrapContextErr("status", out, serr)
 	case "delete":
-		name := strings.TrimSpace(jsonString(raw, "name"))
-		if name == "" {
-			return "", fmt.Errorf("@context delete: \"name\" is required")
-		}
-		if jsonBool(raw, "dry_run", "dryRun", "preview") {
-			out, serr := adapter.Show(name)
-			if serr != nil {
-				return "", fmt.Errorf("@context delete (dry run): %w", serr)
-			}
-			return contextDeleteDryRunPrefix + out, nil
-		}
-		out, derr := adapter.Delete(name)
-		return wrapContextErr("delete", out, derr)
+		return contextDelete(adapter, raw)
 	default:
 		return "", fmt.Errorf("@context: unknown cmd %q (valid: create|update|attach|detach|list|show|inspect|merge|status|export|import|delete|metrics)", cmd)
 	}
+}
+
+// contextDelete removes a context, or with dry_run only shows the one
+// that would be removed.
+func contextDelete(adapter ContextAdapter, raw map[string]json.RawMessage) (string, error) {
+	name := strings.TrimSpace(jsonString(raw, "name"))
+	if name == "" {
+		return "", fmt.Errorf("@context delete: \"name\" is required")
+	}
+	if jsonBool(raw, "dry_run", "dryRun", "preview") {
+		out, serr := adapter.Show(name)
+		if serr != nil {
+			return "", fmt.Errorf("@context delete (dry run): %w", serr)
+		}
+		return contextDeleteDryRunPrefix + out, nil
+	}
+	out, derr := adapter.Delete(name)
+	return wrapContextErr("delete", out, derr)
 }
 
 // wrapContextErr namespaces an adapter error under the subcommand.
