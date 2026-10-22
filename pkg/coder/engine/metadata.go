@@ -38,13 +38,19 @@ type PluginSchema struct {
 	Subcommands []SubcommandDefinition `json:"subcommands"`
 }
 
+// PluginVersion is the version of the @coder tool surface the model sees:
+// bumped whenever a subcommand, flag or its documented behavior changes
+// (the builtin versions test enforces it). Version above is the engine's
+// original contract constant and stays as it is for API compatibility.
+const PluginVersion = "2.1.0"
+
 // GetMetadata returns the @coder plugin metadata.
 func GetMetadata() Metadata {
 	return Metadata{
 		Name:        "@coder",
 		Description: "Suite de engenharia completa (IO, Search, Exec, Git, Test, Backup, Rollback, Patch).",
-		Usage:       `@coder <read|write|patch|tree|search|outline|map|exec|git-status|git-diff|git-log|git-changed|git-branch|test|rollback|clean> [flags]`,
-		Version:     Version,
+		Usage:       `@coder <read|write|patch|multipatch|tree|search|outline|map|checkpoint|exec|git-status|git-diff|git-log|git-changed|git-branch|test|rollback|clean> [flags]`,
+		Version:     PluginVersion,
 	}
 }
 
@@ -127,11 +133,12 @@ func GetSchema() string {
 			},
 			{
 				Name:        "patch",
-				Description: "Aplica patch por search/replace ou unified diff.",
+				Description: "Aplica patch por search/replace ou unified diff. O trecho buscado deve ocorrer UMA vez (ambíguo = erro com as linhas; ausente = erro com a linha mais parecida); diferença só de indentação é aceita e a substituição é reindentada.",
 				Flags: []FlagDefinition{
 					{Name: "--file", Type: "string", Description: "Caminho do arquivo (opcional se diff tiver arquivos)."},
-					{Name: "--search", Type: "string", Description: "Trecho a substituir (text/base64)."},
+					{Name: "--search", Type: "string", Description: "Trecho a substituir (text/base64). Inclua linhas de contexto até ser único no arquivo."},
 					{Name: "--replace", Type: "string", Description: "Substituição (text/base64)."},
+					{Name: "--all", Type: "bool", Default: "false", Description: "Substitui TODAS as ocorrências do trecho (sem isso, um trecho repetido é recusado)."},
 					{Name: "--encoding", Type: "string", Default: "text", Description: "text|base64 (para search/replace)"},
 					{Name: "--diff", Type: "string", Description: "Unified diff (text/base64)."},
 					{Name: "--diff-encoding", Type: "string", Default: "text", Description: "text|base64"},

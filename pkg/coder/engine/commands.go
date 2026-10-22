@@ -148,6 +148,7 @@ func (e *Engine) handlePatch(args []string) error {
 	encoding := fs.String("encoding", "text", "")
 	diff := fs.String("diff", "", "")
 	diffEncoding := fs.String("diff-encoding", "text", "")
+	all := fs.Bool("all", false, "")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -157,7 +158,7 @@ func (e *Engine) handlePatch(args []string) error {
 	}
 
 	if *file == "" || *search == "" {
-		return fmt.Errorf("--file e --search requeridos")
+		return fmt.Errorf("patch needs --file and --search (plus --replace; or --diff for a unified diff)")
 	}
 	if err := e.validateWritePath(*file); err != nil {
 		return err
@@ -183,19 +184,32 @@ func (e *Engine) handlePatch(args []string) error {
 	searchStr := strings.ReplaceAll(string(sBytes), "\r\n", "\n")
 	replaceStr := strings.ReplaceAll(string(rBytes), "\r\n", "\n")
 
-	if strings.Count(content, searchStr) == 0 {
-		e.errorf("DEBUG: Trecho não encontrado.\nBuscado (len=%d):\n%q\n", len(searchStr), searchStr)
-		return fmt.Errorf("❌ Texto não encontrado")
+	matches, err := locatePatch(content, searchStr, *file, *all)
+	if err != nil {
+		return fmt.Errorf("❌ %w", err)
 	}
 	if err := createBackup(*file); err != nil {
-		e.errorf("WARN: backup falhou para %s: %v\n", *file, err)
+		e.errorf("WARN: backup failed for %s: %v\n", *file, err)
 	}
-	newContent := strings.Replace(content, searchStr, replaceStr, 1)
+	newContent := applyPatches(content, searchStr, replaceStr, matches)
 	if err := os.WriteFile(*file, []byte(newContent), 0600); err != nil { //#nosec G703 -- path validated by engine.validatePath / SensitiveReadPaths.IsReadAllowed
 		return fmt.Errorf("erro escrita: %w", err)
 	}
-	e.printf("✅ Patch applied to '%s'.\n", *file)
+	e.printf("✅ Patch applied to '%s' (%s).\n", *file, describePatch(matches))
 	return nil
+}
+
+// describePatch says where a patch landed: the line of a single match,
+// the count and lines of several, and whether whitespace was tolerated.
+func describePatch(matches []patchMatch) string {
+	if len(matches) == 1 {
+		s := fmt.Sprintf("line %d", matches[0].line)
+		if matches[0].tolerant {
+			s += ", matched ignoring indentation and re-indented to the file"
+		}
+		return s
+	}
+	return fmt.Sprintf("%d occurrences at lines %s", len(matches), matchLines(matches))
 }
 
 func (e *Engine) handleRollback(args []string) error {

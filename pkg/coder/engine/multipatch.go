@@ -195,14 +195,15 @@ func (e *Engine) handleMultipatch(args []string) error {
 		originals[abs] = content
 
 		for _, ed := range groups[abs] {
-			if !strings.Contains(content, ed.search) {
-				return fmt.Errorf("edit #%d (%s): search text not found in current content",
-					ed.decl, abs)
+			// One edit lands in one place: an ambiguous search is refused
+			// with the lines it matched, a missing one gets the closest
+			// line, and an indentation-only difference is tolerated when
+			// unique — the same contract as patch.
+			matches, err := locatePatch(content, ed.search, abs, false)
+			if err != nil {
+				return fmt.Errorf("edit #%d: %w", ed.decl, err)
 			}
-			// Apply once. Multipatch is a deliberate primitive: if the
-			// LLM wants multi-occurrence replacement, it can issue
-			// multiple edits with the same file.
-			content = strings.Replace(content, ed.search, ed.replace, 1)
+			content = applyPatches(content, ed.search, ed.replace, matches)
 		}
 		finals[abs] = content
 	}

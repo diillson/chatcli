@@ -119,6 +119,8 @@ func (e *Engine) runRipgrep(ctx context.Context, rgPath, term, dir string, useRe
 		args = append(args, "-C", strconv.Itoa(contextLines))
 	}
 	if maxResults > 0 {
+		// Per file, so a single busy file cannot eat the whole budget; the
+		// total is capped on the output below.
 		args = append(args, "--max-count", strconv.Itoa(maxResults))
 	}
 	for _, g := range splitCSV(glob) {
@@ -129,8 +131,43 @@ func (e *Engine) runRipgrep(ctx context.Context, rgPath, term, dir string, useRe
 	args = append(args, "--", term, dir)
 
 	out, err := runCommandCtx(ctx, "", rgPath, args...)
+	if err == nil && maxResults > 0 {
+		out = capSearchOutput(out, maxResults)
+	}
 	return e.printCommandOutput(out, err)
 }
+
+// capSearchOutput keeps the first max matches of ripgrep output (a match
+// line is path:line:col:text; context lines use "-" separators and stay
+// with their match) and says how many were left out, so --max-results
+// means the same total whichever backend ran the search.
+func capSearchOutput(out string, maxMatches int) string {
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	matches := 0
+	cut := len(lines)
+	for i, l := range lines {
+		if matchLineRe.MatchString(l) {
+			matches++
+			if matches > maxMatches {
+				cut = i
+				break
+			}
+		}
+	}
+	if cut == len(lines) {
+		return out
+	}
+	rest := 0
+	for _, l := range lines[cut:] {
+		if matchLineRe.MatchString(l) {
+			rest++
+		}
+	}
+	return strings.Join(lines[:cut], "\n") + fmt.Sprintf("\n… %d more match(es) not shown (--max-results %d): narrow the term, dir or glob\n", rest, maxMatches)
+}
+
+// matchLineRe recognizes a ripgrep match line (path:line:col:…).
+var matchLineRe = regexp.MustCompile(`^.+?:\d+:\d+:`)
 
 func (e *Engine) fallbackSearch(term, dir string, useRegex, caseSensitive bool, contextLines, maxResults int, glob string, maxBytes int) error {
 	var re *regexp.Regexp

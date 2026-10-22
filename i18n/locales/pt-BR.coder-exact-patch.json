@@ -1,0 +1,7 @@
+{
+  "plugins.coder.describe.multipatch": "Aplicando patch em vários arquivos",
+  "plugins.coder.describe.outline": "Esboçando: %s",
+  "plugins.coder.describe.test": "Rodando testes",
+  "plugins.coder.describe.checkpoint": "Checkpoint",
+  "plugins.coder.describe.git": "git %s"
+}
