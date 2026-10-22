@@ -44,6 +44,14 @@ func TestReadOnlyCaps_PureReadsSkipTheGate(t *testing.T) {
 		{[]string{`{"cmd":"rules"}`}, true, true},
 		{[]string{`{not json`}, false, false},
 	})
+	checkCaps(t, "@archive", NewBuiltinArchivePlugin(), []capsCase{
+		{[]string{`{"cmd":"list","args":{"file":"a.zip"}}`}, true, true},
+		{[]string{"read", "a.zip", "--entry", "x"}, true, true},
+		{[]string{`{"cmd":"extract","args":{"file":"a.zip","to":"out"}}`}, false, false},
+		{[]string{"create", "a.zip", "--paths", "src"}, false, false},
+		{[]string{`{"to":"out","file":"a.zip"}`}, false, false},
+		{nil, false, false},
+	})
 	checkCaps(t, "@commands", NewBuiltinCommandsPlugin(), []capsCase{
 		{[]string{`{"cmd":"list"}`}, true, true},
 		{[]string{"get", "review-pr", "12"}, true, true},

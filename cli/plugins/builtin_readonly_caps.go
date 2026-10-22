@@ -53,6 +53,18 @@ func (*BuiltinSecretsPlugin) IsReadOnly(args []string) bool {
 // IsConcurrencySafe mirrors IsReadOnly: scans are independent reads.
 func (p *BuiltinSecretsPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
 
+// --- @archive -----------------------------------------------------------
+
+// IsReadOnly reports true for list and read; extract and create write to
+// the workspace, and an envelope that does not parse fails closed.
+func (*BuiltinArchivePlugin) IsReadOnly(args []string) bool {
+	cmd, _, err := parseArchiveInvocation(args)
+	return err == nil && (cmd == "list" || cmd == "read")
+}
+
+// IsConcurrencySafe mirrors IsReadOnly: listing and reading never collide.
+func (p *BuiltinArchivePlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
+
 // --- @commands ----------------------------------------------------------
 
 // IsReadOnly reports true: list and get only read the command catalog.

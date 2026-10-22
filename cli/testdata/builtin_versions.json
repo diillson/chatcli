@@ -7,6 +7,10 @@
     "version": "2.1.0",
     "surface": "b8ed4dce49efe2d3"
   },
+  "@archive": {
+    "version": "1.0.0",
+    "surface": "def51449945de52c"
+  },
   "@ask": {
     "version": "1.0.0",
     "surface": "df0cfaa13004c3c9"
