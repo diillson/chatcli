@@ -55,15 +55,19 @@ func (*BuiltinOsvPlugin) Usage() string {
 	return `<tool_call name="@osv" args='{"cmd":"scan","args":{"path":"go.mod"}}' />
 
 Subcommands (cmd + args):
-  scan {path}                  scan a manifest file (go.mod, requirements.txt,
-                               package-lock.json, Cargo.lock) or a directory
-                               containing one. Defaults to the current directory.
+  scan {path, recursive?}      scan a manifest file (go.mod, requirements.txt,
+                               package-lock.json, yarn.lock, pnpm-lock.yaml,
+                               poetry.lock, Pipfile.lock, Gemfile.lock,
+                               composer.lock, pom.xml, Cargo.lock) or a directory
+                               containing one; recursive:true scans every
+                               manifest below the directory (a monorepo in one
+                               call). Defaults to the current directory.
   check {ecosystem, package, version}
                                check one dependency. ecosystem: Go|PyPI|npm|crates.io`
 }
 
 // Version is semver.
-func (*BuiltinOsvPlugin) Version() string { return "1.0.0" }
+func (*BuiltinOsvPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinOsvPlugin) Path() string { return "" }
@@ -75,11 +79,12 @@ func (*BuiltinOsvPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "scan",
-				"description": "Scan a dependency manifest (or a directory containing one) against OSV.dev.",
+				"description": "Scan a dependency manifest (or a directory containing one) against OSV.dev. Manifests: go.mod, requirements.txt, package-lock.json, yarn.lock, pnpm-lock.yaml, poetry.lock, Pipfile.lock, Gemfile.lock, composer.lock, pom.xml, Cargo.lock.",
 				"flags": []map[string]interface{}{
 					{"name": "path", "type": "string", "required": false, "description": "Manifest file or directory. Default: current directory."},
+					{"name": "recursive", "type": "boolean", "required": false, "description": "Scan every manifest found below the directory (monorepos), up to 25."},
 				},
-				"examples": []string{`{"cmd":"scan","args":{"path":"go.mod"}}`, `{"cmd":"scan"}`},
+				"examples": []string{`{"cmd":"scan","args":{"path":"go.mod"}}`, `{"cmd":"scan"}`, `{"cmd":"scan","args":{"path":".","recursive":true}}`},
 			},
 			{
 				"name":        "check",
@@ -114,14 +119,18 @@ func (p *BuiltinOsvPlugin) ExecuteWithStream(ctx context.Context, args []string,
 	}
 	switch cmd {
 	case "scan":
-		var in struct {
-			Path string `json:"path"`
-		}
+		// A raw map: the flattened argv form carries recursive as the string
+		// "true", which a typed bool field would reject along with the path.
+		var in map[string]json.RawMessage
 		_ = json.Unmarshal([]byte(inner), &in)
-		if strings.TrimSpace(in.Path) == "" {
-			in.Path = "."
+		path := strings.TrimSpace(jsonString(in, "path", "dir", "file"))
+		if path == "" {
+			path = "."
 		}
-		return p.scan(ctx, in.Path)
+		if jsonBool(in, "recursive", "all", "tree") {
+			return p.scanTree(ctx, path)
+		}
+		return p.scan(ctx, path)
 	case "check":
 		var in struct {
 			Ecosystem string `json:"ecosystem"`
@@ -211,6 +220,32 @@ func (p *BuiltinOsvPlugin) scan(ctx context.Context, path string) (string, error
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
+// scanTree scans every manifest below dir and joins the reports.
+func (p *BuiltinOsvPlugin) scanTree(ctx context.Context, dir string) (string, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("@osv: %w", err)
+	}
+	if !info.IsDir() {
+		return p.scan(ctx, dir)
+	}
+	manifests := findManifests(dir)
+	if len(manifests) == 0 {
+		return fmt.Sprintf("@osv: no supported manifest below %s (looked for %s)", dir, strings.Join(osvManifestNames, ", ")), nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "@osv recursive scan of %s — %d manifest(s)\n", dir, len(manifests))
+	for _, m := range manifests {
+		out, err := p.scan(ctx, m)
+		if err != nil {
+			fmt.Fprintf(&b, "\n%s: %v\n", m, err)
+			continue
+		}
+		b.WriteString("\n" + out + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
 func formatOsvOne(ecosystem, pkg, version string, vulns []osvVuln) string {
 	if len(vulns) == 0 {
 		return fmt.Sprintf("✅ %s@%s (%s): no known vulnerabilities.", pkg, version, ecosystem)
@@ -282,13 +317,13 @@ func resolveManifest(path string) (string, error) {
 	if !info.IsDir() {
 		return path, nil
 	}
-	for _, name := range []string{"go.mod", "requirements.txt", "package-lock.json", "Cargo.lock"} {
+	for _, name := range osvManifestNames {
 		candidate := filepath.Join(path, name)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("no supported manifest in %s (looked for go.mod, requirements.txt, package-lock.json, Cargo.lock)", path)
+	return "", fmt.Errorf("no supported manifest in %s (looked for %s); pass recursive:true to search below it", path, strings.Join(osvManifestNames, ", "))
 }
 
 // parseManifest dispatches on filename.
@@ -306,8 +341,22 @@ func parseManifest(path string) ([]osvDep, error) {
 		return parsePackageLock(data)
 	case "cargo.lock":
 		return parseCargoLock(data), nil
+	case "yarn.lock":
+		return parseYarnLock(data), nil
+	case "pnpm-lock.yaml":
+		return parsePnpmLock(data), nil
+	case "poetry.lock":
+		return parsePoetryLock(data), nil
+	case "pipfile.lock":
+		return parsePipfileLock(data)
+	case "gemfile.lock":
+		return parseGemfileLock(data), nil
+	case "composer.lock":
+		return parseComposerLock(data)
+	case "pom.xml":
+		return parsePomXML(data)
 	default:
-		return nil, fmt.Errorf("unsupported manifest %q", filepath.Base(path))
+		return nil, fmt.Errorf("unsupported manifest %q (supported: %s)", filepath.Base(path), strings.Join(osvManifestNames, ", "))
 	}
 }
 

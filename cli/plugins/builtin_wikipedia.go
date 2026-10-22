@@ -33,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,10 +64,20 @@ const wikipediaSearchLimit = 5
 
 // wikipediaArgs is the typed view of @wikipedia's JSON input.
 type wikipediaArgs struct {
-	Query string // search term
-	Read  string // exact title to read (mutually informs the mode)
-	Lang  string // wiki language edition (en, pt, es, …)
+	Query    string // search term
+	Read     string // exact title to read (mutually informs the mode)
+	Lang     string // wiki language edition (en, pt, es, …)
+	Section  string // heading (or 1-based index) of the section to read
+	Full     bool   // whole article instead of the intro
+	Sections bool   // list the article's sections instead of reading
+	MaxChars int    // cap on returned text (default wikipediaDefaultMaxChars)
 }
+
+// wikipediaDefaultMaxChars caps a full-article or section read.
+const wikipediaDefaultMaxChars = 12000
+
+// wikipediaMaxChars is the hard ceiling a call may ask for.
+const wikipediaMaxChars = 60000
 
 // BuiltinWikipediaPlugin is the @wikipedia tool.
 type BuiltinWikipediaPlugin struct{}
@@ -105,16 +116,21 @@ func (*BuiltinWikipediaPlugin) Usage() string {
 	return `<tool_call name="@wikipedia" args='{"query":"Alan Turing"}' />
 
 Flags (flat JSON or {"cmd":"...","args":{...}} envelope):
-  query   search term — returns up to 5 matching article titles
-  read    exact article title — returns its plain-text intro/summary
-  lang    Wikipedia language edition (default: en; e.g. pt, es, fr, de)
+  query      search term — returns up to 5 matching article titles
+  read       exact article title (alias: title) — returns its plain-text intro
+  sections   true — list the article's section headings (with index and size)
+  section    heading or 1-based index — return just that section's text
+  full       true — the whole article text, capped by max_chars
+  max_chars  cap for section/full reads (default 12000, max 60000)
+  lang       Wikipedia language edition (default: en; e.g. pt, es, fr, de)
 
 Provide either query (to search) or read (to fetch a known article). Typical
-flow: search for the term, then read the exact title from the results.`
+flow: search for the term, read the intro, list sections, then read the one
+section that matters instead of the whole article.`
 }
 
 // Version is semver. 2.x marks the builtin port of the 1.x external example.
-func (*BuiltinWikipediaPlugin) Version() string { return "2.0.0" }
+func (*BuiltinWikipediaPlugin) Version() string { return "2.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinWikipediaPlugin) Path() string { return "" }
@@ -135,12 +151,25 @@ func (*BuiltinWikipediaPlugin) Schema() string {
 			},
 			{
 				"name":        "read",
-				"description": "Read the plain-text intro/summary of a specific Wikipedia article by its exact title.",
+				"description": "Read a Wikipedia article by its exact title: the plain-text intro by default, one section with section, or the whole text with full:true (capped by max_chars).",
 				"flags": []map[string]interface{}{
-					{"name": "read", "type": "string", "required": true, "description": "Exact article title, e.g. 'Alan Turing'."},
+					{"name": "read", "type": "string", "required": true, "description": "Exact article title, e.g. 'Alan Turing' (alias: title)."},
+					{"name": "section", "type": "string", "description": "Section heading (case-insensitive) or 1-based index from sections, to read just that part."},
+					{"name": "full", "type": "boolean", "description": "Return the whole article text instead of the intro (default false)."},
+					{"name": "max_chars", "type": "integer", "description": "Cap for section/full reads (default 12000, max 60000)."},
 					{"name": "lang", "type": "string", "description": "Wikipedia language edition (default: en; e.g. pt, es)."},
 				},
-				"examples": []string{`{"read":"Alan Turing"}`, `{"read":"Computação quântica","lang":"pt"}`},
+				"examples": []string{`{"read":"Alan Turing"}`, `{"read":"Alan Turing","section":"Early life"}`, `{"read":"Computação quântica","lang":"pt","full":true,"max_chars":20000}`},
+			},
+			{
+				"name":        "sections",
+				"description": "List an article's section headings with their index and size, to pick one to read instead of the whole page.",
+				"flags": []map[string]interface{}{
+					{"name": "read", "type": "string", "required": true, "description": "Exact article title (alias: title)."},
+					{"name": "sections", "type": "boolean", "required": true, "description": "Must be true."},
+					{"name": "lang", "type": "string", "description": "Wikipedia language edition (default: en)."},
+				},
+				"examples": []string{`{"read":"Alan Turing","sections":true}`},
 			},
 		},
 	}
@@ -162,7 +191,16 @@ func (p *BuiltinWikipediaPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return "", fmt.Errorf("@wikipedia: %w", err)
 	}
 	if cfg.Read != "" {
-		out, rerr := wikipediaRead(ctx, cfg.Lang, cfg.Read)
+		var out string
+		var rerr error
+		switch {
+		case cfg.Sections:
+			out, rerr = wikipediaSections(ctx, cfg.Lang, cfg.Read)
+		case cfg.Section != "" || cfg.Full:
+			out, rerr = wikipediaReadBody(ctx, cfg.Lang, cfg.Read, cfg.Section, cfg.MaxChars)
+		default:
+			out, rerr = wikipediaRead(ctx, cfg.Lang, cfg.Read)
+		}
 		if rerr != nil {
 			return "", fmt.Errorf("@wikipedia: %w", rerr)
 		}
@@ -201,6 +239,13 @@ func parseWikipediaArgs(args []string) (wikipediaArgs, error) {
 		if l := stringFromFlagArgs(args, []string{"lang", "language"}); l != "" {
 			out.Lang = l
 		}
+		out.Section = stringFromFlagArgs(args, []string{"section"})
+		flags, bools, _ := splitFlatArgs(args)
+		out.Full = bools["full"] || strings.EqualFold(flags["full"], "true")
+		out.Sections = bools["sections"] || strings.EqualFold(flags["sections"], "true")
+		if v := flags["max_chars"]; v != "" {
+			out.MaxChars, _ = strconv.Atoi(v)
+		}
 		if out.Read == "" {
 			var terms []string
 			for _, a := range args {
@@ -214,8 +259,12 @@ func parseWikipediaArgs(args []string) (wikipediaArgs, error) {
 		return finalizeWikipediaArgs(out)
 	}
 
-	out.Read = strings.TrimSpace(jsonString(raw, "read", "title", "article"))
+	out.Read = strings.TrimSpace(jsonString(raw, "read", "title", "article", "page"))
 	out.Query = strings.TrimSpace(jsonString(raw, "query", "q", "search", "term"))
+	out.Section = strings.TrimSpace(jsonString(raw, "section", "heading"))
+	out.Full = jsonBool(raw, "full", "whole")
+	out.Sections = jsonBool(raw, "sections", "toc", "outline")
+	out.MaxChars = jsonInt(raw, "max_chars", "maxChars", "limit")
 	if l := strings.TrimSpace(jsonString(raw, "lang", "language")); l != "" {
 		out.Lang = l
 	}
@@ -227,6 +276,12 @@ func finalizeWikipediaArgs(out wikipediaArgs) (wikipediaArgs, error) {
 	out.Lang = normalizeWikipediaLang(out.Lang)
 	if out.Read == "" && out.Query == "" {
 		return out, fmt.Errorf(`provide "query" (to search) or "read" (to fetch an article)`)
+	}
+	if out.MaxChars <= 0 {
+		out.MaxChars = wikipediaDefaultMaxChars
+	}
+	if out.MaxChars > wikipediaMaxChars {
+		out.MaxChars = wikipediaMaxChars
 	}
 	return out, nil
 }
