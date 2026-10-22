@@ -41,7 +41,7 @@ func (a *CoderAgent) SystemPrompt() string {
 
 ## RULES
 1. ALWAYS read a file before modifying it — never edit blind.
-2. Use base64 encoding for multiline content in write/patch args.
+2. write/patch content is a JSON string (newlines as \n, quotes as \"); "encoding":"base64" is optional, for binary or escape-heavy content.
 3. Keep changes minimal and focused on the requested task.
 4. Preserve existing code style and conventions.
 5. Do NOT narrate your actions. No "Let me...", "I will...", "Now I'll...".

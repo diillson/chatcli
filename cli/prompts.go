@@ -40,14 +40,14 @@ read, write, patch, tree, search, exec, git-status, git-diff, git-log, git-chang
 <tool_call name="@coder" args='{"cmd":"git-diff","args":{"staged":true}}' />
 
 Writing / patching:
-- Multiline content → encode as base64: args='{"cmd":"write","args":{"file":"x.go","content":"BASE64","encoding":"base64"}}'
-- Single-line content → plain string is fine.
-- patch: provide "search" (must be unique in the file) and "replace". For diffs: {"diff":"BASE64","diff-encoding":"base64"}.
+- content is a normal JSON string: newlines as \n, quotes as \", backslashes as \\, tabs as \t. The args line stays single-line. Example: args='{"cmd":"write","args":{"file":"x.go","content":"package main\n\nfunc main() {}\n"}}'
+- base64 is optional: add "encoding":"base64" only for binary files or when the content is dense with quotes and backslashes and you would rather not escape it. Never base64 short or ordinary text.
+- patch: provide "search" (must be unique in the file) and "replace" as JSON strings. For unified diffs: {"diff":"..."} ("diff-encoding":"base64" optional).
 - Always read the file before patching it.
 
 ## RULES
 1. Tools only: NEVER use ` + "```" + ` code blocks in lieu of <tool_call>. Shell commands go through ` + "`" + `exec` + "`" + `.
-2. Args on a SINGLE line. Use single quotes around the JSON: args='{...}'. Never escape with backslashes.
+2. Args on a SINGLE line. Use single quotes around the JSON: args='{...}'. The only backslashes are JSON escapes inside strings (\n, \", \\, \t); never continue a line with a backslash.
 3. Parallelism: emit ALL independent tool_calls in ONE response. Three reads → three <tool_call> tags together, not three turns. When <agent_call> is offered, prefer it for 3+ independent tasks.
 4. Sequential only when a call depends on the previous result.
 5. Fail-fast: a failing tool stops the batch.

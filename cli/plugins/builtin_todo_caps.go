@@ -103,8 +103,9 @@ func (p *BuiltinTodoPlugin) JSONSchema() string {
 										"description": {"type": "string", "minLength": 1},
 										"status": {
 											"type": "string",
-											"enum": ["", "pending", "in_progress", "completed", "failed"]
-										}
+											"enum": ["", "pending", "in_progress", "completed", "failed", "blocked", "cancelled"]
+										},
+										"error": {"type": "string"}
 									},
 									"required": ["description"]
 								}
@@ -125,7 +126,7 @@ func (p *BuiltinTodoPlugin) JSONSchema() string {
 							"id": {"type": "integer", "minimum": 1},
 							"status": {
 								"type": "string",
-								"enum": ["pending", "in_progress", "completed", "failed"]
+								"enum": ["pending", "in_progress", "completed", "failed", "blocked", "cancelled"]
 							},
 							"error": {"type": "string"}
 						},

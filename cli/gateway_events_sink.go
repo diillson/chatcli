@@ -115,11 +115,18 @@ func (s *gatewayEventsSink) PlanUpdate(p agentevents.Plan) {
 	if len(p.Entries) == 0 {
 		return
 	}
-	done := 0
+	done, total := 0, len(p.Entries)
 	current := ""
 	for _, e := range p.Entries {
 		switch e.Status {
 		case "completed":
+			// A cancelled task arrives as completed "(cancelled…)" (the ACP
+			// vocabulary has no cancelled); it is not progress, so it leaves
+			// both sides of the counter.
+			if isCancelledPlanEntry(e.Content) {
+				total--
+				continue
+			}
 			done++
 		case "in_progress":
 			if current == "" {
@@ -127,9 +134,16 @@ func (s *gatewayEventsSink) PlanUpdate(p agentevents.Plan) {
 			}
 		}
 	}
-	line := fmt.Sprintf("📋 %d/%d", done, len(p.Entries))
+	line := fmt.Sprintf("📋 %d/%d", done, total)
 	if current != "" {
 		line += " · " + oneLine(current, 100)
 	}
 	s.send(line)
+}
+
+// isCancelledPlanEntry recognizes the annotation planToEvent gives a
+// cancelled task: the text ends with "(cancelled)" or "(cancelled: reason)".
+func isCancelledPlanEntry(content string) bool {
+	i := strings.LastIndex(content, " (cancelled")
+	return i >= 0 && strings.HasSuffix(content, ")") && !strings.Contains(content[i+1:len(content)-1], ")")
 }

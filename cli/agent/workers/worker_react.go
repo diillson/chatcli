@@ -1288,6 +1288,7 @@ func normalizeArgAliases(cmd string, args map[string]interface{}) map[string]int
 		{from: "maxdepth", to: "max-depth", cmds: []string{"tree"}},
 	}
 
+	fromB64 := false
 	for _, a := range aliases {
 		val, exists := args[a.from]
 		if !exists {
@@ -1295,6 +1296,9 @@ func normalizeArgAliases(cmd string, args map[string]interface{}) map[string]int
 		}
 		if _, hasDest := args[a.to]; hasDest {
 			continue // don't overwrite if correct key already present
+		}
+		if a.from == "content_b64" && (cmd == "write" || cmd == "patch") {
+			fromB64 = true
 		}
 		match := a.cmds == nil
 		if !match {
@@ -1311,16 +1315,13 @@ func normalizeArgAliases(cmd string, args map[string]interface{}) map[string]int
 		}
 	}
 
-	// Se content_b64 foi mapeado para content, garantir encoding=base64
-	if _, ok := args["content"]; ok {
+	// content_b64 names its encoding: when that alias carried the content,
+	// set encoding=base64 unless the model said otherwise. Plain "content"
+	// is text by default — guessing base64 from its shape (long, no spaces)
+	// mis-decoded single-line text such as a token line or a minified asset.
+	if fromB64 {
 		if enc, hasEnc := args["encoding"]; !hasEnc || enc == "" {
-			// Se veio de content_b64, é base64
-			if cmd == "write" || cmd == "patch" {
-				// Detectar se o valor parece base64 (sem espaços/newlines e longo)
-				if s, ok := args["content"].(string); ok && len(s) > 50 && !strings.ContainsAny(s, " \n\t{}<>") {
-					args["encoding"] = "base64"
-				}
-			}
+			args["encoding"] = "base64"
 		}
 	}
 

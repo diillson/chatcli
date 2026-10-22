@@ -46,9 +46,14 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 	fences, scannable := maskQuotedSegments(text)
 
 	// Try XML-style parsing first (primary format)
-	xmlCalls, xmlErr := parseXMLToolCalls(scannable)
+	xmlCalls, xmlErr := parseXMLToolCalls(scannable, text)
 	if xmlErr == nil && len(xmlCalls) > 0 {
 		calls = append(calls, xmlCalls...)
+		// The tags are consumed: blank them on the scannable copy so the
+		// JSON and bracket scanners below never re-read the JSON inside an
+		// args attribute as a second call (the duplicate check compares
+		// text, which the masking of a backtick span inside args defeats).
+		scannable = blankParsedTags(scannable, text, xmlCalls)
 	}
 
 	// Also try JSON-style tool calls (for models that output JSON).
@@ -97,6 +102,31 @@ func ParseToolCalls(text string) ([]ToolCall, error) {
 	}
 
 	return calls, nil
+}
+
+// blankParsedTags returns scan with the byte range of every call's Raw tag
+// (located in text, which is byte-aligned with scan) replaced by spaces,
+// newlines kept. Calls whose Raw cannot be located are left alone.
+func blankParsedTags(scan, text string, calls []ToolCall) string {
+	if len(scan) != len(text) {
+		return scan
+	}
+	b := []byte(scan)
+	cursor := 0
+	for _, c := range calls {
+		if c.Raw == "" {
+			continue
+		}
+		at := strings.Index(text[cursor:], c.Raw)
+		if at < 0 {
+			continue
+		}
+		start := cursor + at
+		end := start + len(c.Raw)
+		copy(b[start:end], blankPreservingNewlines(text[start:end]))
+		cursor = end
+	}
+	return string(b)
 }
 
 // recoverToolCallArgs applies JSON recovery to tool call args.
@@ -168,15 +198,27 @@ func isDuplicateToolCall(existing []ToolCall, candidate ToolCall) bool {
 // containing special characters like '>' that would break regex-based parsing.
 // It recognizes the canonical <tool_call ...> tag and the shorter <tool ...>
 // alias in a single left-to-right pass, so mixed batches keep document order.
-func parseXMLToolCalls(text string) ([]ToolCall, error) {
+// parseXMLToolCalls finds <tool_call> / <tool> tags in scan and reads each
+// tag's attributes from text at the same offsets. scan is the masked copy
+// maskQuotedSegments produces (byte-aligned with text): locating tags on it
+// keeps a tag the model merely quotes in `inline code` from executing,
+// while reading the attributes from the original keeps a backtick span
+// INSIDE args (a Go raw string, a Markdown snippet in a file being written)
+// intact — read from the masked copy it came back as blanks. When the two
+// differ in length (callers passing unmasked text twice, or a fence body)
+// everything is read from scan.
+func parseXMLToolCalls(scan, text string) ([]ToolCall, error) {
 	var calls []ToolCall
 	searchFrom := 0
+	if len(text) != len(scan) {
+		text = scan
+	}
 
-	for searchFrom < len(text) {
+	for searchFrom < len(scan) {
 		// Find the start of a <tool tag (case-insensitive). "<tool" is a
 		// prefix of "<tool_call", so one scan finds both spellings; the tag
 		// name is disambiguated right after.
-		idx := indexCaseInsensitive(text[searchFrom:], "<tool")
+		idx := indexCaseInsensitive(scan[searchFrom:], "<tool")
 		if idx < 0 {
 			break
 		}
@@ -405,6 +447,22 @@ func extractQuotedValue(text string, pos int) (string, error) {
 
 		if ch == '\\' && i+1 < len(text) {
 			next := text[i+1]
+			// A single-quoted JSON value keeps every JSON escape verbatim: the
+			// JSON decoder owns them, and collapsing "\\\\" here turned the
+			// content `"\\d+"` into `"\d+"` on disk. The attribute-level
+			// escape of the delimiting quote (\') is the one sequence that is
+			// not JSON, so it is the one still unescaped.
+			if jsonValue {
+				if next == '\'' {
+					buf.WriteByte(next)
+					i += 2
+					continue
+				}
+				buf.WriteByte(ch)
+				buf.WriteByte(next)
+				i += 2
+				continue
+			}
 			// Only treat as escape if it's escaping the quote char or another backslash
 			if next == quote || next == '\\' {
 				buf.WriteByte(next)
@@ -867,7 +925,7 @@ func parseFencedToolCalls(fences []fencedBlock) []ToolCall {
 		if !executableFenceInfo(f.info) {
 			continue
 		}
-		xmlCalls, _ := parseXMLToolCalls(f.content)
+		xmlCalls, _ := parseXMLToolCalls(f.content, f.content)
 		calls = append(calls, xmlCalls...)
 		// Same dedup rule as the top-level flow: the JSON scanner re-finds
 		// the object embedded in an XML args attribute.
