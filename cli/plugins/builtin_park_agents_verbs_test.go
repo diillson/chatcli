@@ -7,6 +7,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -247,4 +248,17 @@ func TestBuiltinAgents_WatcherUnsupportedAndCaps(t *testing.T) {
 		assert.Contains(t, p.JSONSchema(), verb)
 	}
 	assert.True(t, strings.Contains(p.Usage(), "wait") && strings.Contains(p.Usage(), "transcript"))
+}
+
+// A token prefix is hex, so it is sometimes all digits or reads as an
+// exponent. Through the argv form it must stay the text the user typed.
+func TestParkFlagsToJSON_TokenPrefixStaysText(t *testing.T) {
+	for _, prefix := range []string{"27182501", "00123456", "1e456789", "12345678"} {
+		out, err := parkFlagsToJSON([]string{"--token", prefix, "--reason", "007"})
+		require.NoError(t, err)
+		var got map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &got))
+		assert.Equal(t, prefix, got["token"], "token %s", prefix)
+		assert.Equal(t, "007", got["reason"])
+	}
 }
