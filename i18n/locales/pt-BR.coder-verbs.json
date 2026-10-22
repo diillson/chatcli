@@ -1,0 +1,5 @@
+{
+  "plugins.coder.describe.find": "Procurando arquivos: %s",
+  "plugins.coder.describe.move": "Movendo: %s",
+  "plugins.coder.describe.delete": "Removendo: %s"
+}

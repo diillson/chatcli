@@ -1,0 +1,5 @@
+{
+  "plugins.coder.describe.find": "Finding files: %s",
+  "plugins.coder.describe.move": "Moving: %s",
+  "plugins.coder.describe.delete": "Deleting: %s"
+}

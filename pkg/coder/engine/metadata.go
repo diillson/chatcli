@@ -42,14 +42,14 @@ type PluginSchema struct {
 // bumped whenever a subcommand, flag or its documented behavior changes
 // (the builtin versions test enforces it). Version above is the engine's
 // original contract constant and stays as it is for API compatibility.
-const PluginVersion = "2.1.0"
+const PluginVersion = "2.2.0"
 
 // GetMetadata returns the @coder plugin metadata.
 func GetMetadata() Metadata {
 	return Metadata{
 		Name:        "@coder",
 		Description: "Suite de engenharia completa (IO, Search, Exec, Git, Test, Backup, Rollback, Patch).",
-		Usage:       `@coder <read|write|patch|multipatch|tree|search|outline|map|checkpoint|exec|git-status|git-diff|git-log|git-changed|git-branch|test|rollback|clean> [flags]`,
+		Usage:       `@coder <read|write|patch|multipatch|find|move|delete|tree|search|outline|map|checkpoint|exec|git-status|git-diff|git-log|git-changed|git-branch|git-show|git-blame|test|rollback|clean> [flags]`,
 		Version:     PluginVersion,
 	}
 }
@@ -225,6 +225,53 @@ func GetSchema() string {
 				Description: "Branch atual.",
 				Flags: []FlagDefinition{
 					{Name: "--dir", Type: "string", Default: ".", Description: "Diretório do repo."},
+				},
+			},
+			{
+				Name:        "git-show",
+				Description: "Mostra um commit (mensagem e patch, ou --stat) ou um arquivo como estava em um ref (--path).",
+				Flags: []FlagDefinition{
+					{Name: "--dir", Type: "string", Default: ".", Description: "Diretório do repo."},
+					{Name: "--ref", Type: "string", Default: "HEAD", Description: "Commit, tag ou branch."},
+					{Name: "--path", Type: "string", Description: "Arquivo a mostrar como estava no ref (sem o patch)."},
+					{Name: "--stat", Type: "bool", Description: "Só o resumo de arquivos tocados."},
+				},
+			},
+			{
+				Name:        "git-blame",
+				Description: "Autor, commit e data de cada linha de um arquivo (ou de um intervalo --start/--end).",
+				Flags: []FlagDefinition{
+					{Name: "--dir", Type: "string", Default: ".", Description: "Diretório do repo."},
+					{Name: "--file", Type: "string", Description: "Arquivo.", Required: true},
+					{Name: "--start", Type: "int", Description: "Primeira linha (1-based)."},
+					{Name: "--end", Type: "int", Description: "Última linha (1-based)."},
+				},
+			},
+			{
+				Name:        "find",
+				Description: "Lista arquivos pelo NOME (glob) ou por trecho do caminho — o que search não faz; ignora .git, node_modules, vendor e ocultos.",
+				Flags: []FlagDefinition{
+					{Name: "--dir", Type: "string", Default: ".", Description: "Diretório base."},
+					{Name: "--pattern", Type: "string", Description: "Glob do nome do arquivo, ex.: *_test.go, Dockerfile*."},
+					{Name: "--contains", Type: "string", Description: "Trecho (sem distinção de caixa) do caminho relativo."},
+					{Name: "--limit", Type: "int", Default: "200", Description: "Máximo de resultados."},
+					{Name: "--dirs", Type: "bool", Description: "Inclui diretórios no resultado."},
+				},
+			},
+			{
+				Name:        "move",
+				Description: "Move ou renomeia um arquivo dentro do workspace (backup .bak da origem; recusa destino existente sem --force).",
+				Flags: []FlagDefinition{
+					{Name: "--from", Type: "string", Description: "Caminho atual.", Required: true},
+					{Name: "--to", Type: "string", Description: "Caminho novo (diretórios criados).", Required: true},
+					{Name: "--force", Type: "bool", Description: "Substitui o destino se existir."},
+				},
+			},
+			{
+				Name:        "delete",
+				Description: "Remove um arquivo (nunca diretório) deixando um .bak ao lado; rollback restaura.",
+				Flags: []FlagDefinition{
+					{Name: "--file", Type: "string", Description: "Arquivo a remover.", Required: true},
 				},
 			},
 			{
