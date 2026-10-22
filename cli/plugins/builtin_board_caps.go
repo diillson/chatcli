@@ -62,6 +62,12 @@ func (p *BuiltinBoardPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.board.describe.move")
 	case "assign":
 		return i18n.T("plugins.board.describe.assign")
+	case "edit", "update", "rename":
+		return i18n.T("plugins.board.describe.edit")
+	case "unassign", "unclaim", "release":
+		return i18n.T("plugins.board.describe.unassign")
+	case "delete", "remove", "rm":
+		return i18n.T("plugins.board.describe.delete")
 	case "note", "comment":
 		return i18n.T("plugins.board.describe.note")
 	case "link":
@@ -114,17 +120,19 @@ func (p *BuiltinBoardPlugin) JSONSchema() string {
 			},
 			{
 				"properties": map[string]interface{}{
-					"cmd": map[string]interface{}{"enum": []string{"show", "move", "assign", "note", "link"}},
+					"cmd": map[string]interface{}{"enum": []string{"show", "edit", "move", "assign", "unassign", "note", "link", "delete"}},
 					"args": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
-							"id":       req(),
-							"to":       str(),
-							"assignee": str(),
-							"text":     str(),
-							"author":   str(),
-							"run_id":   str(),
-							"job_id":   str(),
+							"id":          req(),
+							"title":       str(),
+							"description": str(),
+							"to":          str(),
+							"assignee":    str(),
+							"text":        str(),
+							"author":      str(),
+							"run_id":      str(),
+							"job_id":      str(),
 						},
 						"required": []string{"id"},
 					},

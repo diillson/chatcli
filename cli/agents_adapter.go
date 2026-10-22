@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -125,6 +126,97 @@ func (a *liveAgentsAdapter) Cancel(id string) (string, error) {
 		return "", fmt.Errorf("@agents cancel: run %q already finished", id)
 	}
 	return "", fmt.Errorf("@agents cancel: no run with id %q (use list to see IDs)", id)
+}
+
+// agentsWaitPoll is how often Wait re-reads the registry. Observers would
+// be cheaper per tick, but polling also covers runs mirrored from other
+// processes (the hub has no event stream) and keeps the wait trivially
+// cancellable.
+const agentsWaitPoll = 250 * time.Millisecond
+
+// Model-facing wait outcomes (English on purpose: tool output for the LLM).
+const (
+	agentsMsgWaitTimedOut = "WAIT TIMED OUT after %s: %s is still %s. Current state:\n%sWait again or cancel it."
+	agentsMsgRunFinished  = "RUN %s FINISHED status=%s after %s%s\n%s"
+)
+
+// Wait implements plugins.AgentsWatcher: blocks until the run is terminal,
+// ctx ends or timeout elapses. A finished run returns its Show detail; a
+// wait that runs out returns the current state with a hint, not an error.
+func (a *liveAgentsAdapter) Wait(ctx context.Context, id string, timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+	lookup := func() (runs.Info, bool, bool) {
+		if info, ok := a.reg.Get(id); ok {
+			return info, false, true
+		}
+		if r, found := findRemoteAgentRun(id); found {
+			return r.Info, true, true
+		}
+		return runs.Info{}, false, false
+	}
+	info, remote, ok := lookup()
+	if !ok {
+		return "", fmt.Errorf("@agents wait: no run with id %q (use list to see IDs)", id)
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(agentsWaitPoll)
+	defer tick.Stop()
+	started := time.Now()
+	for !info.Status.Terminal() {
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("@agents wait: interrupted after %s while %s was still %s: %w",
+				time.Since(started).Round(time.Second), id, info.Status, ctx.Err())
+		case <-deadline.C:
+			detail, _ := a.Show(id)
+			return fmt.Sprintf(agentsMsgWaitTimedOut, timeout, id, info.Status, detail), nil
+		case <-tick.C:
+		}
+		if info, remote, ok = lookup(); !ok {
+			return "", fmt.Errorf("@agents wait: run %q disappeared from the registry while waiting", id)
+		}
+	}
+	detail, err := a.Show(id)
+	if err != nil {
+		return "", err
+	}
+	scope := ""
+	if remote {
+		scope = " (mirrored from another process)"
+	}
+	return fmt.Sprintf(agentsMsgRunFinished, id, info.Status, info.Elapsed().Round(time.Second), scope, detail), nil
+}
+
+// Transcript implements plugins.AgentsWatcher: the last tail entries of the
+// run's activity log (turns, actions, final status, output excerpt). The
+// registry keeps that log, not the run's LLM conversation, and only for
+// runs owned by this process.
+func (a *liveAgentsAdapter) Transcript(id string, tail int) (string, error) {
+	log, ok := a.reg.ActivityLog(id)
+	if !ok {
+		if _, found := findRemoteAgentRun(id); found {
+			return "", fmt.Errorf("@agents transcript: run %q belongs to another process; its activity log is not mirrored", id)
+		}
+		return "", fmt.Errorf("@agents transcript: no run with id %q (use list to see IDs)", id)
+	}
+	info, _ := a.reg.Get(id)
+	total := len(log)
+	if tail > 0 && tail < total {
+		log = log[total-tail:]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "ACTIVITY LOG %s status=%s (%d of %d entries, oldest first; the runtime keeps turns/actions/status, not the LLM conversation):\n",
+		id, info.Status, len(log), total)
+	if total == 0 {
+		b.WriteString("(nothing recorded yet)\n")
+	}
+	for _, e := range log {
+		fmt.Fprintf(&b, "%s %s\n", e.At.Format("15:04:05"), e.Text)
+	}
+	return b.String(), nil
 }
 
 // formatRunLine renders one run as a single compact key=value line.

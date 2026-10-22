@@ -37,6 +37,17 @@ type MailAdapter interface {
 	History(n int) (string, error)
 }
 
+// MailPeeker is the optional extension a MailAdapter may implement to look
+// at a recipient's pending messages without draining them. The plugin
+// type-asserts it at call time so older adapters keep working.
+type MailPeeker interface {
+	Peek(recipient string) (string, error)
+}
+
+// mailDefaultRecipient is the inbox peek looks at when none is given — the
+// plugin runs inside the orchestrator loop.
+const mailDefaultRecipient = "orchestrator"
+
 var (
 	mailAdapterMu sync.RWMutex
 	mailAdapter   MailAdapter
@@ -63,8 +74,8 @@ func NewBuiltinMailPlugin() *BuiltinMailPlugin { return &BuiltinMailPlugin{} }
 
 func (p *BuiltinMailPlugin) Name() string        { return "@mail" }
 func (p *BuiltinMailPlugin) Description() string { return i18n.T("plugins.mail.description") }
-func (p *BuiltinMailPlugin) Usage() string       { return "@mail send|inbox|history" }
-func (p *BuiltinMailPlugin) Version() string     { return "1.0.0" }
+func (p *BuiltinMailPlugin) Usage() string       { return "@mail send|inbox|peek|history" }
+func (p *BuiltinMailPlugin) Version() string     { return "1.1.0" }
 func (p *BuiltinMailPlugin) Path() string        { return "[builtin]" }
 
 // Schema documents the tool for the agent system prompt catalog.
@@ -84,9 +95,17 @@ func (p *BuiltinMailPlugin) Schema() string {
 			},
 			{
 				"name":        "inbox",
-				"description": "Drain your own (orchestrator) inbox now instead of waiting for the next turn boundary.",
+				"description": "Drain your own (orchestrator) inbox now instead of waiting for the next turn boundary. Draining REMOVES the messages from the queue — use peek to look without consuming.",
 				"flags":       []map[string]interface{}{},
 				"examples":    []string{`{"cmd":"inbox"}`},
+			},
+			{
+				"name":        "peek",
+				"description": "Look at the pending (undelivered) messages of a recipient without draining them. Non-destructive; the messages still arrive on the recipient's next turn.",
+				"flags": []map[string]interface{}{
+					{"name": "for", "type": "string", "required": false, "description": "recipient to inspect (default orchestrator; a worker agent type like coder)"},
+				},
+				"examples": []string{`{"cmd":"peek"}`, `{"cmd":"peek","args":{"for":"coder"}}`, `peek coder`},
 			},
 			{
 				"name":        "history",
@@ -130,6 +149,16 @@ func (p *BuiltinMailPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		return adapter.Send(to, get("card_id", "cardId", "card"), text)
 	case "inbox", "drain", "read":
 		return adapter.Inbox()
+	case "peek", "look", "pending":
+		peeker, ok := adapter.(MailPeeker)
+		if !ok {
+			return "", errors.New("@mail peek: not supported by the wired mail adapter")
+		}
+		recipient := get("for", "recipient", "to", "agent", "inbox")
+		if recipient == "" {
+			recipient = mailDefaultRecipient
+		}
+		return peeker.Peek(recipient)
 	case "history", "recent", "log":
 		limit := jsonInt(payload, "limit", "n", "count")
 		if limit <= 0 {
@@ -137,7 +166,7 @@ func (p *BuiltinMailPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		}
 		return adapter.History(limit)
 	default:
-		return "", fmt.Errorf("@mail: unknown subcommand %q (expected send|inbox|history)", sub)
+		return "", fmt.Errorf("@mail: unknown subcommand %q (expected send|inbox|peek|history)", sub)
 	}
 }
 
@@ -171,14 +200,34 @@ func parseMailInvocation(args []string) (string, map[string]json.RawMessage, err
 		return sub, inner, nil
 	}
 
-	// argv fallback: "send <to> <text...>".
+	// argv fallback: "send <to> <text...>", "peek [recipient]",
+	// "history [--limit n]".
 	sub := first
 	inner := map[string]json.RawMessage{}
-	if sub == "send" && len(args) >= 3 {
-		rawTo, _ := json.Marshal(args[1])
-		rawText, _ := json.Marshal(strings.Join(args[2:], " "))
-		inner["to"] = rawTo
-		inner["text"] = rawText
+	if sub == "send" || sub == "post" {
+		if len(args) >= 3 {
+			rawTo, _ := json.Marshal(args[1])
+			rawText, _ := json.Marshal(strings.Join(args[2:], " "))
+			inner["to"] = rawTo
+			inner["text"] = rawText
+		}
+		return sub, inner, nil
+	}
+	positional, innerJSON := argvToInnerJSON(args[1:], nil, map[string]bool{"limit": true, "n": true, "count": true})
+	if innerJSON != "{}" {
+		if err := json.Unmarshal([]byte(innerJSON), &inner); err != nil {
+			inner = map[string]json.RawMessage{}
+		}
+	}
+	if positional != "" {
+		key := "for"
+		if sub == "history" || sub == "recent" || sub == "log" {
+			key = "limit"
+		}
+		if _, ok := inner[key]; !ok {
+			raw, _ := json.Marshal(positional)
+			inner[key] = raw
+		}
 	}
 	return sub, inner, nil
 }

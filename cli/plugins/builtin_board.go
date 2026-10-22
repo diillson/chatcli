@@ -43,6 +43,18 @@ type BoardAdapter interface {
 	Archive(olderThan string) (string, error)
 }
 
+// BoardEditor is the optional extension a BoardAdapter may implement to
+// expose edit, delete and unassign. The plugin type-asserts it at call time
+// so older adapters keep working without the verbs.
+type BoardEditor interface {
+	// Edit rewrites the title and/or description; empty keeps the field.
+	Edit(id, title, description string) (string, error)
+	// Delete removes the card permanently and echoes it back.
+	Delete(id string) (string, error)
+	// Unassign clears the card's assignee.
+	Unassign(id string) (string, error)
+}
+
 var (
 	boardAdapterMu sync.RWMutex
 	boardAdapter   BoardAdapter
@@ -70,9 +82,9 @@ func NewBuiltinBoardPlugin() *BuiltinBoardPlugin { return &BuiltinBoardPlugin{} 
 func (p *BuiltinBoardPlugin) Name() string        { return "@board" }
 func (p *BuiltinBoardPlugin) Description() string { return i18n.T("plugins.board.description") }
 func (p *BuiltinBoardPlugin) Usage() string {
-	return "@board create|list|show|move|assign|note|link|archive"
+	return "@board create|list|show|edit|move|assign|unassign|note|link|delete|archive"
 }
-func (p *BuiltinBoardPlugin) Version() string { return "1.0.0" }
+func (p *BuiltinBoardPlugin) Version() string { return "1.1.0" }
 func (p *BuiltinBoardPlugin) Path() string    { return "[builtin]" }
 
 // Schema documents the tool for the agent system prompt catalog.
@@ -108,6 +120,16 @@ func (p *BuiltinBoardPlugin) Schema() string {
 				"examples": []string{`{"cmd":"show","args":{"id":"card-3"}}`},
 			},
 			{
+				"name":        "edit",
+				"description": "Rewrite a card's title and/or description. An omitted field keeps its value; giving neither is an error.",
+				"flags": []map[string]interface{}{
+					{"name": "id", "type": "string", "required": true, "description": "card ID"},
+					{"name": "title", "type": "string", "required": false, "description": "new title"},
+					{"name": "description", "type": "string", "required": false, "description": "new description / acceptance criteria"},
+				},
+				"examples": []string{`{"cmd":"edit","args":{"id":"card-3","title":"Implement /foo (v2)"}}`, `edit card-3 --description "add tests"`},
+			},
+			{
 				"name":        "move",
 				"description": "Move a card to another column (records the transition).",
 				"flags": []map[string]interface{}{
@@ -124,6 +146,14 @@ func (p *BuiltinBoardPlugin) Schema() string {
 					{"name": "assignee", "type": "string", "required": true, "description": "worker agent type"},
 				},
 				"examples": []string{`{"cmd":"assign","args":{"id":"card-3","assignee":"reviewer"}}`},
+			},
+			{
+				"name":        "unassign",
+				"description": "Clear the card's assignee (the card goes back to unowned).",
+				"flags": []map[string]interface{}{
+					{"name": "id", "type": "string", "required": true, "description": "card ID"},
+				},
+				"examples": []string{`{"cmd":"unassign","args":{"id":"card-3"}}`, `unassign card-3`},
 			},
 			{
 				"name":        "note",
@@ -144,6 +174,14 @@ func (p *BuiltinBoardPlugin) Schema() string {
 					{"name": "job_id", "type": "string", "required": false, "description": "scheduler job ID"},
 				},
 				"examples": []string{`{"cmd":"link","args":{"id":"card-3","run_id":"run-7"}}`},
+			},
+			{
+				"name":        "delete",
+				"description": "Delete one card permanently (any column). The deleted card is echoed back in full so it can be recreated.",
+				"flags": []map[string]interface{}{
+					{"name": "id", "type": "string", "required": true, "description": "card ID"},
+				},
+				"examples": []string{`{"cmd":"delete","args":{"id":"card-3"}}`, `delete card-3`},
 			},
 			{
 				"name":        "archive",
@@ -206,6 +244,8 @@ func (p *BuiltinBoardPlugin) ExecuteWithStream(_ context.Context, args []string,
 			return "", errors.New(`@board assign: missing "id"`)
 		}
 		return adapter.Assign(id, get("assignee", "agent", "to"))
+	case "edit", "update", "rename", "unassign", "unclaim", "release", "delete", "remove", "rm":
+		return executeBoardEditor(adapter, sub, payload)
 	case "note", "comment":
 		id := boardCardID(payload)
 		text := get("text", "note", "message", "body")
@@ -224,7 +264,43 @@ func (p *BuiltinBoardPlugin) ExecuteWithStream(_ context.Context, args []string,
 	case "archive", "gc", "clean":
 		return adapter.Archive(get("older_than", "olderThan", "age"))
 	default:
-		return "", fmt.Errorf("@board: unknown subcommand %q (expected create|list|show|move|assign|note|link|archive)", sub)
+		return "", fmt.Errorf("@board: unknown subcommand %q (expected create|list|show|edit|move|assign|unassign|note|link|delete|archive)", sub)
+	}
+}
+
+// boardMsgEditorUnsupported is returned when the wired adapter predates the
+// edit/delete/unassign extension.
+const boardMsgEditorUnsupported = "@board: edit, unassign and delete are not supported by the wired board adapter"
+
+// executeBoardEditor runs the verbs of the optional BoardEditor extension
+// (edit, unassign, delete), all of which need a card ID.
+func executeBoardEditor(adapter BoardAdapter, sub string, payload map[string]json.RawMessage) (string, error) {
+	editor, ok := adapter.(BoardEditor)
+	if !ok {
+		return "", errors.New(boardMsgEditorUnsupported)
+	}
+	id := boardCardID(payload)
+	switch sub {
+	case "edit", "update", "rename":
+		if id == "" {
+			return "", errors.New(`@board edit: missing "id" (e.g. {"cmd":"edit","args":{"id":"card-3","title":"..."}})`)
+		}
+		title := strings.TrimSpace(jsonString(payload, "title", "name"))
+		description := strings.TrimSpace(jsonString(payload, "description", "desc", "body"))
+		if title == "" && description == "" {
+			return "", errors.New(`@board edit: nothing to change (give "title" and/or "description")`)
+		}
+		return editor.Edit(id, title, description)
+	case "unassign", "unclaim", "release":
+		if id == "" {
+			return "", errors.New(`@board unassign: missing "id"`)
+		}
+		return editor.Unassign(id)
+	default: // delete, remove, rm
+		if id == "" {
+			return "", errors.New(`@board delete: missing "id" (e.g. {"cmd":"delete","args":{"id":"card-3"}})`)
+		}
+		return editor.Delete(id)
 	}
 }
 
@@ -300,6 +376,9 @@ func parseBoardInvocation(args []string) (string, map[string]json.RawMessage, er
 	case "assign":
 		setIfMissing("id", firstTok)
 		setIfMissing("assignee", remainder)
+	case "edit", "update", "rename":
+		setIfMissing("id", firstTok)
+		setIfMissing("title", remainder)
 	case "link":
 		setIfMissing("id", firstTok)
 		setIfMissing("run_id", remainder)

@@ -1,0 +1,6 @@
+{
+  "plugins.board.describe.edit": "Editing board card",
+  "plugins.board.describe.unassign": "Unassigning board card",
+  "plugins.board.describe.delete": "Deleting board card",
+  "plugins.mail.describe.peek": "Peeking at pending mail for %s"
+}

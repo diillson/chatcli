@@ -1,7 +1,7 @@
 {
   "@agents": {
-    "version": "1.0.0",
-    "surface": "675b661338696405"
+    "version": "1.1.0",
+    "surface": "99786b166f10259a"
   },
   "@api-explorer": {
     "version": "2.1.0",
@@ -12,8 +12,8 @@
     "surface": "df0cfaa13004c3c9"
   },
   "@board": {
-    "version": "1.0.0",
-    "surface": "6b81c1870987476d"
+    "version": "1.1.0",
+    "surface": "74d1e5a4ece23b5a"
   },
   "@browser": {
     "version": "1.1.0",
@@ -80,8 +80,8 @@
     "surface": "46f0d5d1694e6488"
   },
   "@mail": {
-    "version": "1.0.0",
-    "surface": "b34c4c67aa3b2530"
+    "version": "1.1.0",
+    "surface": "8ef1e2248dd0fb26"
   },
   "@mcp-login": {
     "version": "1.0.0",
@@ -104,8 +104,8 @@
     "surface": "dc390005f7874074"
   },
   "@park": {
-    "version": "1.0.0",
-    "surface": "c0b4c4913df6339f"
+    "version": "1.1.0",
+    "surface": "9d52f401ca8d27a7"
   },
   "@proc": {
     "version": "1.1.0",

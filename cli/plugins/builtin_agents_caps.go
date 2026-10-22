@@ -59,9 +59,25 @@ func (p *BuiltinAgentsPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.agents.describe.show")
 	case "cancel", "stop", "kill":
 		return i18n.T("plugins.agents.describe.cancel")
+	case "wait", "join", "await":
+		return i18n.T("plugins.agents.describe.wait", agentsDescribeID(args))
+	case "transcript", "log", "activity", "tail":
+		return i18n.T("plugins.agents.describe.transcript", agentsDescribeID(args))
 	default:
 		return i18n.T("plugins.agents.describe.list")
 	}
+}
+
+// agentsDescribeID pulls the run ID out of an envelope or argv invocation
+// for the spinner label; "?" when it cannot be read cheaply.
+func agentsDescribeID(args []string) string {
+	if id := extractNestedArg(args, "id", "run_id", "runId", "run"); id != "" {
+		return id
+	}
+	if len(args) >= 2 && !strings.HasPrefix(strings.TrimSpace(args[0]), "{") && !strings.HasPrefix(args[1], "-") {
+		return args[1]
+	}
+	return "?"
 }
 
 // JSONSchema provides strict validation for native tool calls.
@@ -82,11 +98,13 @@ func (p *BuiltinAgentsPlugin) JSONSchema() string {
 			},
 			{
 				"properties": map[string]interface{}{
-					"cmd": map[string]interface{}{"enum": []string{"show", "cancel"}},
+					"cmd": map[string]interface{}{"enum": []string{"show", "cancel", "wait", "transcript"}},
 					"args": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
-							"id": map[string]interface{}{"type": "string", "minLength": 1},
+							"id":      map[string]interface{}{"type": "string", "minLength": 1},
+							"timeout": map[string]interface{}{"type": "string"},
+							"tail":    map[string]interface{}{"type": "integer", "minimum": 1, "maximum": agentsTranscriptLimit},
 						},
 						"required": []string{"id"},
 					},

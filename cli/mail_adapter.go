@@ -46,6 +46,29 @@ func (a *liveMailAdapter) Inbox() (string, error) {
 	return mail.FormatInbox(msgs), nil
 }
 
+// Peek implements plugins.MailPeeker: lists a recipient's pending messages
+// without removing them from the queue.
+func (a *liveMailAdapter) Peek(recipient string) (string, error) {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
+		return "", fmt.Errorf("@mail peek: empty recipient")
+	}
+	msgs := a.reg.Peek(recipient)
+	if len(msgs) == 0 {
+		return fmt.Sprintf("no pending mail for %s", recipient), nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "PENDING MAIL FOR %s (%d, oldest first; still queued — not drained):\n", recipient, len(msgs))
+	for _, m := range msgs {
+		fmt.Fprintf(&b, "%s from=%s", m.ID, m.From)
+		if m.CardID != "" {
+			fmt.Fprintf(&b, " card=%s", m.CardID)
+		}
+		fmt.Fprintf(&b, " at=%s: %s\n", m.At.Format("15:04:05"), truncateForUI(m.Text, 200))
+	}
+	return b.String(), nil
+}
+
 // History implements plugins.MailAdapter.
 func (a *liveMailAdapter) History(n int) (string, error) {
 	msgs := a.reg.Recent(n)

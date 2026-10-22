@@ -13,6 +13,7 @@
  *   for_cmd {cmd,  interval, deadline, success_when?} shell polling
  *   list    —                       inspect waiting parks (any session)
  *   note    {token?, text}          leave a directive for a parked agent
+ *   cancel  {token?, reason?}       end a parked wait now (the agent resumes)
  *
  * The park modes do NOT touch the scheduler directly — that is the agent
  * loop's responsibility, because only the loop has the live snapshot of
@@ -28,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/park"
@@ -67,6 +69,9 @@ Subcommands:
   note     {token?:"<prefix>", text:"..."} — leave a directive for a parked agent
             (newest park when token omitted; delivered at its resume — use it to
             inform, redirect, or ask it to change its park cadence next cycle)
+  cancel   {token?:"<prefix>", reason?:"..."} — cancel a parked wait NOW: the
+            scheduled wake is dropped and the agent resumes immediately with
+            outcome=cancelled (newest park when token omitted)
 
 When the park completes (timer fires, probe matches, or deadline passes)
 the agent resumes from where it stopped and a synthetic tool result with
@@ -82,7 +87,7 @@ cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.
-func (*BuiltinParkPlugin) Version() string { return "1.0.0" }
+func (*BuiltinParkPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinParkPlugin) Path() string { return "" }
@@ -168,6 +173,19 @@ func (*BuiltinParkPlugin) Schema() string {
 					`{"cmd":"note","args":{"text":"O deploy terminou — valide e encerre o monitoramento."}}`,
 				},
 			},
+			{
+				"name":        "cancel",
+				"description": "Cancel a parked wait now. The scheduled wake is dropped and the parked agent resumes immediately with outcome=cancelled (plus your reason), so it can wrap up or re-plan instead of waiting out the timer/probe. Newest park when token is omitted.",
+				"flags": []map[string]interface{}{
+					{"name": "token", "type": "string", "description": "Token prefix from list; newest park when omitted"},
+					{"name": "reason", "type": "string", "description": "Why the wait is being cut short; delivered to the resumed agent"},
+				},
+				"examples": []string{
+					`{"cmd":"cancel","args":{"token":"b733521e","reason":"the deploy already finished"}}`,
+					`{"cmd":"cancel"}`,
+					`cancel --token b733521e --reason "CI is green"`,
+				},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -204,6 +222,12 @@ func (p *BuiltinParkPlugin) ExecuteWithStream(ctx context.Context, args []string
 		out, nerr := executeParkNote(inner)
 		if nerr != nil {
 			return "", fmt.Errorf("@park: %w", nerr)
+		}
+		return out, nil
+	case "cancel":
+		out, cerr := executeParkCancel(inner)
+		if cerr != nil {
+			return "", fmt.Errorf("@park: %w", cerr)
 		}
 		return out, nil
 	}
@@ -245,7 +269,7 @@ func parseParkInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalParkCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd|list|note)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd|list|note|cancel)", cmdStr)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -288,8 +312,118 @@ func canonicalParkCmd(s string) string {
 		return "list"
 	case "note", "directive", "tell", "message":
 		return "note"
+	case "cancel", "abort", "wake", "resume_now", "unpark":
+		return "cancel"
 	}
 	return ""
+}
+
+// ParkCanceller is the runtime hook that ends a parked wait early: it drops
+// the scheduled wake and resumes the parked agent right away with
+// outcome=cancelled. The cli package wires it at boot (SetParkCanceller);
+// without it the cancel verb refuses, because deleting the snapshot alone
+// would orphan the scheduler job instead of resuming the agent.
+type ParkCanceller interface {
+	CancelPark(token, reason string) (string, error)
+}
+
+var (
+	parkCancellerMu sync.RWMutex
+	parkCanceller   ParkCanceller
+)
+
+// SetParkCanceller installs (or clears, with nil) the runtime hook.
+func SetParkCanceller(c ParkCanceller) {
+	parkCancellerMu.Lock()
+	defer parkCancellerMu.Unlock()
+	parkCanceller = c
+}
+
+func currentParkCanceller() ParkCanceller {
+	parkCancellerMu.RLock()
+	defer parkCancellerMu.RUnlock()
+	return parkCanceller
+}
+
+// resolveParkTarget picks the park a management verb acts on: the newest
+// snapshot when prefix is empty, otherwise the unique snapshot whose token
+// starts with prefix. verb only labels the errors.
+func resolveParkTarget(verb, prefix string) (*park.Snapshot, error) {
+	snaps, _ := park.List()
+	if len(snaps) == 0 {
+		return nil, fmt.Errorf("%s: no parked agents", verb)
+	}
+	if prefix == "" {
+		return snaps[0], nil // newest first
+	}
+	var matches []*park.Snapshot
+	for _, s := range snaps {
+		if strings.HasPrefix(s.Token, prefix) {
+			matches = append(matches, s)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("%s: no parked agent matches token prefix %q (use cmd=list)", verb, prefix)
+	case 1:
+		return matches[0], nil
+	default:
+		return nil, fmt.Errorf("%s: token prefix %q is ambiguous (%d matches — use cmd=list)", verb, prefix, len(matches))
+	}
+}
+
+// parkShortToken renders the 8-char token prefix used in model output.
+func parkShortToken(token string) string {
+	if len(token) > 8 {
+		return token[:8]
+	}
+	return token
+}
+
+// executeParkCancel ends a parked wait early through the runtime hook.
+// Args: {token?: prefix, reason?}. Without token, the newest park wins.
+func executeParkCancel(inner string) (string, error) {
+	var raw map[string]any
+	if strings.TrimSpace(inner) != "" {
+		if err := json.Unmarshal([]byte(inner), &raw); err != nil {
+			return "", fmt.Errorf(`cancel: parse args: %w. Expected {"token":"<prefix>","reason":"..."}`, err)
+		}
+	}
+	tokenPrefix := strings.TrimSpace(asParkString(raw, "token"))
+	if tokenPrefix == "" {
+		tokenPrefix = strings.TrimSpace(asParkString(raw, "id"))
+	}
+	reason := strings.TrimSpace(asParkString(raw, "reason"))
+	if reason == "" {
+		reason = strings.TrimSpace(asParkString(raw, "text"))
+	}
+	target, err := resolveParkTarget("cancel", tokenPrefix)
+	if err != nil {
+		return "", err
+	}
+	canceller := currentParkCanceller()
+	if canceller == nil {
+		return "", fmt.Errorf("cancel: no park runtime wired in this process; run /cancel-park %s in the session that owns the park", parkShortToken(target.Token))
+	}
+	if reason == "" {
+		reason = "cancelled via @park cancel"
+	}
+	detail, err := canceller.CancelPark(target.Token, reason)
+	if err != nil {
+		return "", fmt.Errorf("cancel: %w", err)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "cancelled park token=%s mode=%s", parkShortToken(target.Token), target.Park.Mode)
+	if target.Park.Note != "" {
+		fmt.Fprintf(&sb, " note=%q", target.Park.Note)
+	}
+	fmt.Fprintf(&sb, " reason=%q\n", reason)
+	sb.WriteString("The parked agent resumes now with outcome=cancelled; its scheduled wake was dropped.")
+	if strings.TrimSpace(detail) != "" {
+		sb.WriteString("\n")
+		sb.WriteString(detail)
+	}
+	return sb.String(), nil
 }
 
 // executeParkList renders every waiting park snapshot for the model:
@@ -327,7 +461,7 @@ func executeParkList() (string, error) {
 		}
 		fmt.Fprintf(&sb, " created=%s\n", s.CreatedAt.Format(time.RFC3339))
 	}
-	sb.WriteString("\nUse {\"cmd\":\"note\",\"args\":{\"token\":\"<prefix>\",\"text\":\"...\"}} to leave a directive; it is delivered when that agent resumes.")
+	sb.WriteString("\nUse {\"cmd\":\"note\",\"args\":{\"token\":\"<prefix>\",\"text\":\"...\"}} to leave a directive; it is delivered when that agent resumes. Use {\"cmd\":\"cancel\",\"args\":{\"token\":\"<prefix>\"}} to end a wait now.")
 	return sb.String(), nil
 }
 
@@ -358,38 +492,14 @@ func executeParkNote(inner string) (string, error) {
 	}
 	tokenPrefix := str("token", "park", "id")
 
-	snaps, _ := park.List()
-	if len(snaps) == 0 {
-		return "", errors.New("note: no parked agents to message")
+	target, err := resolveParkTarget("note", tokenPrefix)
+	if err != nil {
+		return "", err
 	}
-	var target *park.Snapshot
-	if tokenPrefix == "" {
-		target = snaps[0] // newest first
-	} else {
-		var matches []*park.Snapshot
-		for _, s := range snaps {
-			if strings.HasPrefix(s.Token, tokenPrefix) {
-				matches = append(matches, s)
-			}
-		}
-		switch len(matches) {
-		case 0:
-			return "", fmt.Errorf("note: no parked agent matches token prefix %q (use cmd=list)", tokenPrefix)
-		case 1:
-			target = matches[0]
-		default:
-			return "", fmt.Errorf("note: token prefix %q is ambiguous (%d matches — use cmd=list)", tokenPrefix, len(matches))
-		}
-	}
-
 	if err := park.AppendDirective(target.Token, text); err != nil {
 		return "", fmt.Errorf("note: %w", err)
 	}
-	short := target.Token
-	if len(short) > 8 {
-		short = short[:8]
-	}
-	return fmt.Sprintf(i18n.T("park.note.recorded"), short), nil
+	return fmt.Sprintf(i18n.T("park.note.recorded"), parkShortToken(target.Token)), nil
 }
 
 // parkFlagsToJSON converts ["--duration","5m","--note","ci"] into a

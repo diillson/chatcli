@@ -1,0 +1,6 @@
+{
+  "plugins.park.describe.cancel": "Cancelando espera pausada %s",
+  "plugins.park.describe.cancel_newest": "Cancelando a espera pausada mais recente",
+  "plugins.agents.describe.wait": "Aguardando execução de agent %s",
+  "plugins.agents.describe.transcript": "Lendo log de atividade da execução %s"
+}

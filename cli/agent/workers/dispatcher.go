@@ -448,6 +448,11 @@ func (d *Dispatcher) executeAgent(ctx context.Context, call AgentCall) AgentResu
 	if execErr != nil && result.Error == nil {
 		result.Error = execErr
 	}
+	// Keep an excerpt of the final output on the run's activity log so a
+	// finished worker can still be reviewed via @agents transcript.
+	if out := strings.TrimSpace(result.Output); out != "" {
+		liveRun.Note("output: " + out)
+	}
 	liveRun.End(result.Error)
 	// Expose the registry run ID so the orchestrator can link this
 	// execution to a board card (@board link) and inspect it (@agents show).
