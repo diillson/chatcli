@@ -1797,6 +1797,46 @@ func (a *AgentMode) toolResultCapFor(toolCallID string) int {
 	return a.toolResultCaps[toolCallID]
 }
 
+// skipAfterFailure records a mutating action that is not run because an
+// earlier action of the batch failed: a note for the model in the legacy
+// concatenation and a structured not-executed result, so native tool
+// results stay aligned with the calls.
+func (a *AgentMode) skipAfterFailure(i int, tc agent.ToolCall, out *strings.Builder, renderError func(string)) agent.ToolResult {
+	note := agent.BatchSkippedNote(i+1, tc.Name)
+	if renderError != nil {
+		renderError(note)
+	}
+	fmt.Fprintf(out, "--- Resultado da Ação %d (%s) ---\n%s\n\n", i+1, tc.Name, note)
+	return agent.ToolResult{Output: note, IsError: true, ErrorCode: toolResultErrorCodeNotExecuted}
+}
+
+// executeWithRetry runs the plugin once and, when a read-only call failed
+// on something transient (timeout, reset connection, 5xx) while its context
+// is still alive, once more after a short pause — a model round-trip costs
+// far more than the retry. A mutating call is never retried: its first
+// attempt may have landed. The result of a retry says what the first
+// attempt hit.
+func (a *AgentMode) executeWithRetry(ctx context.Context, plugin plugins.Plugin, toolName string, toolArgs []string, stream func(string)) (string, error) {
+	out, err := plugin.ExecuteWithStream(ctx, toolArgs, stream)
+	if err == nil || ctx.Err() != nil || !agent.IsTransientToolError(err) || !plugins.IsReadOnly(plugin, toolArgs) {
+		return out, err
+	}
+	firstErr := err
+	if a.logger != nil {
+		a.logger.Info("Retrying transient read-only tool failure", zap.String("tool", toolName), zap.Error(firstErr))
+	}
+	select {
+	case <-ctx.Done():
+		return out, firstErr
+	case <-time.After(agent.ToolRetryBackoff):
+	}
+	out, err = plugin.ExecuteWithStream(ctx, toolArgs, stream)
+	if err == nil {
+		out = agent.BatchRetriedNote(firstErr) + out
+	}
+	return out, err
+}
+
 // toolCallIsReadOnly reports whether a parsed tool call only observes,
 // through the plugin's own capability answer (unknown tools and
 // unparseable args count as mutating, like everywhere else).
@@ -3542,10 +3582,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// instead — it could build on the broken step — with a note
 				// that keeps the structured results aligned with the calls.
 				if batchHasError && !a.toolCallIsReadOnly(tc) {
-					note := agent.BatchSkippedNote(i+1, tc.Name)
-					renderError(note)
-					fmt.Fprintf(&batchOutputBuilder, "--- Resultado da Ação %d (%s) ---\n%s\n\n", i+1, tc.Name, note)
-					turnToolResults = append(turnToolResults, agent.ToolResult{Output: note, IsError: true, ErrorCode: toolResultErrorCodeNotExecuted})
+					turnToolResults = append(turnToolResults, a.skipAfterFailure(i, tc, &batchOutputBuilder, renderError))
 					continue
 				}
 				// --- SECURITY CHECK START ---
@@ -4019,20 +4056,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									if !isCompact {
 										a.cli.animation.ShowThinkingAnimation(spinnerMessage(boxLabel))
 									}
-									toolOutput, execErr = plugin.ExecuteWithStream(toolCtx, toolArgs, streamCallback)
-									if execErr != nil && toolCtx.Err() == nil && agent.IsTransientToolError(execErr) && plugins.IsReadOnly(plugin, toolArgs) {
-										// A read that hit a timeout, a reset or a
-										// 5xx gets one more try before the failure
-										// costs the model a round-trip; a write
-										// never does (it may have landed).
-										firstErr := execErr
-										a.logger.Info("Retrying transient read-only tool failure", zap.String("tool", toolName), zap.Error(firstErr))
-										time.Sleep(agent.ToolRetryBackoff)
-										toolOutput, execErr = plugin.ExecuteWithStream(toolCtx, toolArgs, streamCallback)
-										if execErr == nil {
-											toolOutput = agent.BatchRetriedNote(firstErr) + toolOutput
-										}
-									}
+									toolOutput, execErr = a.executeWithRetry(toolCtx, plugin, toolName, toolArgs, streamCallback)
 									a.cli.animation.StopThinkingAnimation()
 								}
 							}
