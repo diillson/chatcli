@@ -22,12 +22,26 @@ import (
 // prefix). Its output must never be compressed — see CompressHinted.
 const recallToolName = "recall"
 
-// isRecallTool reports whether toolName refers to the @recall builtin. Tool
-// names reach the layer either bare ("recall") or '@'-prefixed ("@recall")
-// since GetPlugin accepts both forms, so we normalize before comparing.
-func isRecallTool(toolName string) bool {
+// verbatimToolNames are the tools whose output is the evidence itself: saved
+// conversations and stored memories. The compressors detect by content, and a
+// conversation that talks about errors, warnings or file paths reads like a
+// log or a grep result, so the middle of a session the model opened to answer
+// from would be dropped behind "[N lines omitted]". These tools page and cap
+// their own output, and the per-result budget still bounds the rest.
+var verbatimToolNames = []string{recallToolName, "session", "memory"}
+
+// isVerbatimTool reports whether toolName is a tool whose output must reach
+// the model exactly as the tool produced it. Tool names reach the layer either
+// bare ("recall") or '@'-prefixed ("@recall") since GetPlugin accepts both
+// forms, so the name is normalized before comparing.
+func isVerbatimTool(toolName string) bool {
 	name := strings.TrimPrefix(strings.TrimSpace(toolName), "@")
-	return strings.EqualFold(name, recallToolName)
+	for _, v := range verbatimToolNames {
+		if strings.EqualFold(name, v) {
+			return true
+		}
+	}
+	return false
 }
 
 // Layer is the high-level facade the rest of ChatCLI talks to. It bundles a
@@ -263,7 +277,7 @@ func (l *Layer) CompressHinted(h Hint, content string) (string, Result) {
 	// so without this guard recall's output would be re-compressed: the model
 	// would receive a truncated view with a fresh <<ccr:KEY>> marker instead of
 	// the full original it explicitly asked for — defeating recall entirely.
-	if isRecallTool(h.ToolName) {
+	if isVerbatimTool(h.ToolName) {
 		return content, passthrough(content)
 	}
 	// Idempotent: content that already carries a CCR marker was compressed

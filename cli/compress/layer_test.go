@@ -162,6 +162,31 @@ func TestLayerNeverCompressesRecallOutput(t *testing.T) {
 	}
 }
 
+func TestLayerNeverCompressesMemoryToolOutput(t *testing.T) {
+	// A saved conversation that mentions errors and file paths reads like a
+	// log to the content detectors; @session and @memory return the evidence
+	// a question is answered from, so their output must reach the model whole.
+	l := NewLayer(Config{Mode: ModeLossyWithCCR, Store: NewMemoryStore(), Threshold: 100})
+	var sb strings.Builder
+	for ln := 1; ln <= 300; ln++ {
+		level := "INFO"
+		if ln%50 == 0 {
+			level = "ERROR"
+		}
+		fmt.Fprintf(&sb, "[%d] user: %s step %d of the build, I used Trello in my previous role\n", ln, level, ln)
+	}
+	original := sb.String()
+	if out, _ := l.CompressToolOutput("build", original); len(out) >= len(original) {
+		t.Fatal("test payload should compress as a log; otherwise the guard is untested")
+	}
+	for _, name := range []string{"@session", "session", "@memory", "Memory"} {
+		out, res := l.CompressToolOutput(name, original)
+		if out != original || res.Strategy != "passthrough" {
+			t.Fatalf("%s output must pass through verbatim, got %d bytes strategy=%q", name, len(out), res.Strategy)
+		}
+	}
+}
+
 func TestNewLayerFromEnvOff(t *testing.T) {
 	t.Setenv("CHATCLI_COMPRESSION", "off")
 	l := NewLayerFromEnv(t.TempDir())
