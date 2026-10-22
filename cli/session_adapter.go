@@ -278,7 +278,15 @@ func (a *sessionPluginAdapter) List(_ context.Context) (string, error) {
 	if a.cli == nil {
 		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
 	}
-	return a.cli.sessionListText()
+	return a.cli.sessionListText(0)
+}
+
+// ListN implements plugins.SessionListLimiter.
+func (a *sessionPluginAdapter) ListN(_ context.Context, limit int) (string, error) {
+	if a.cli == nil {
+		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
+	}
+	return a.cli.sessionListText(limit)
 }
 
 // ---------------------------------------------------------------------------

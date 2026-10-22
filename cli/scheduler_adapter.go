@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/diillson/chatcli/cli/plugins"
@@ -70,7 +71,7 @@ func (a *schedulerPluginAdapter) Owner() plugins.SchedulerOwner {
 
 func (a *schedulerPluginAdapter) ScheduleJob(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
 	inputJSON = a.withDefaultSkills(inputJSON)
-	return a.dispatch(ctx, owner, inputJSON, func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "schedule", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.ScheduleJob(ctx, so, inputJSON)
 	})
 }
@@ -102,26 +103,40 @@ func (a *schedulerPluginAdapter) withDefaultSkills(inputJSON string) string {
 }
 
 func (a *schedulerPluginAdapter) WaitUntil(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
-	return a.dispatch(ctx, owner, inputJSON, func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "wait", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.WaitUntil(ctx, so, inputJSON)
 	})
 }
 
 func (a *schedulerPluginAdapter) QueryJob(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
-	return a.dispatch(ctx, owner, inputJSON, func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "query", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.QueryJob(ctx, so, inputJSON)
 	})
 }
 
 func (a *schedulerPluginAdapter) ListJobs(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
-	return a.dispatch(ctx, owner, inputJSON, func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "list", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.ListJobs(ctx, so, inputJSON)
 	})
 }
 
 func (a *schedulerPluginAdapter) CancelJob(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
-	return a.dispatch(ctx, owner, inputJSON, func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "cancel", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.CancelJob(ctx, so, inputJSON)
+	})
+}
+
+// PauseJob implements plugins.SchedulerPauser.
+func (a *schedulerPluginAdapter) PauseJob(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "pause", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+		return t.PauseJob(ctx, so, inputJSON)
+	})
+}
+
+// ResumeJob implements plugins.SchedulerPauser.
+func (a *schedulerPluginAdapter) ResumeJob(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "resume", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+		return t.ResumeJob(ctx, so, inputJSON)
 	})
 }
 
@@ -133,6 +148,7 @@ func (a *schedulerPluginAdapter) dispatch(
 	ctx context.Context,
 	owner plugins.SchedulerOwner,
 	inputJSON string,
+	op string,
 	local func(*scheduler.ToolAdapter, scheduler.Owner) (string, error),
 ) (string, error) {
 	so := scheduler.Owner{
@@ -152,36 +168,85 @@ func (a *schedulerPluginAdapter) dispatch(
 		return local(tool, so)
 	}
 	if a.cli.schedulerRemote != nil {
-		// Remote adapter — forward via IPC. For this path we implement
-		// by calling Enqueue/List/Query/Cancel on the client directly.
-		return a.remote(ctx, so, inputJSON, local)
+		// Remote adapter — forward via IPC, routed by the operation.
+		return a.remote(ctx, so, inputJSON, op)
 	}
 	return "", scheduler.ErrSchedulerClosed
 }
 
-// remote is the fallback for IPC mode. It inspects the wrapped func
-// via a cheap identity trick (the caller tells us the operation via
-// the actual function value). Here we simply dispatch by the three
-// input shapes we know the tool_adapter uses.
-func (a *schedulerPluginAdapter) remote(
-	ctx context.Context,
-	owner scheduler.Owner,
-	inputJSON string,
-	_ func(*scheduler.ToolAdapter, scheduler.Owner) (string, error),
-) (string, error) {
-	// Decide by parsing inputJSON — every adapter method accepts the
-	// same ToolInput shape; the underlying semantics come from the
-	// wrapped operation. Because we can't introspect the closure, we
-	// route based on which fields are set in the input.
+// remote is the IPC path: each operation goes to its own daemon call.
+// Before, every operation was forwarded as an enqueue, so a list, query,
+// cancel or wait issued through the daemon created a job instead.
+func (a *schedulerPluginAdapter) remote(ctx context.Context, owner scheduler.Owner, inputJSON string, op string) (string, error) {
 	var in scheduler.ToolInput
-	if len(inputJSON) > 0 {
-		_ = jsonDecodeImpl(inputJSON, &in)
+	if len(strings.TrimSpace(inputJSON)) > 0 {
+		if err := jsonDecodeImpl(inputJSON, &in); err != nil {
+			return "", fmt.Errorf("scheduler %s: %w", op, err)
+		}
 	}
-	// Default: enqueue.
-	out, err := a.cli.schedulerRemote.Enqueue(ctx, owner, in)
+	c := a.cli.schedulerRemote
+	needID := func() error {
+		if strings.TrimSpace(in.ID) == "" {
+			return fmt.Errorf("scheduler %s: id is required", op)
+		}
+		return nil
+	}
+	var out any
+	switch op {
+	case "query":
+		if err := needID(); err != nil {
+			return "", err
+		}
+		j, err := c.Query(ctx, scheduler.JobID(in.ID))
+		if err != nil {
+			return "", err
+		}
+		out = scheduler.ToolOutput{OK: true, Job: j, Status: j.Status}
+	case "list":
+		filter := in.Filter
+		if filter.Owner == nil && owner.Kind == scheduler.OwnerAgent {
+			o := owner
+			filter.Owner = &o
+		}
+		jobs, err := c.List(ctx, filter)
+		if err != nil {
+			return "", err
+		}
+		out = scheduler.ToolOutput{OK: true, Jobs: jobs}
+	case "cancel":
+		if err := needID(); err != nil {
+			return "", err
+		}
+		if err := c.Cancel(ctx, owner, scheduler.JobID(in.ID), in.Reason); err != nil {
+			return "", err
+		}
+		out = scheduler.ToolOutput{OK: true, JobID: scheduler.JobID(in.ID), Status: scheduler.StatusCancelled}
+	case "pause":
+		if err := needID(); err != nil {
+			return "", err
+		}
+		if err := c.Pause(ctx, owner, scheduler.JobID(in.ID), in.Reason); err != nil {
+			return "", err
+		}
+		out = scheduler.ToolOutput{OK: true, JobID: scheduler.JobID(in.ID), Status: scheduler.StatusPaused}
+	case "resume":
+		if err := needID(); err != nil {
+			return "", err
+		}
+		if err := c.Resume(ctx, owner, scheduler.JobID(in.ID)); err != nil {
+			return "", err
+		}
+		out = scheduler.ToolOutput{OK: true, JobID: scheduler.JobID(in.ID), Status: scheduler.StatusPending}
+	default: // schedule, wait: both enqueue a job (wait carries its condition)
+		o, err := c.Enqueue(ctx, owner, in)
+		if err != nil {
+			return "", err
+		}
+		out = o
+	}
+	body, err := marshalJSONImpl(out)
 	if err != nil {
 		return "", err
 	}
-	body, _ := marshalJSONImpl(out)
 	return string(body), nil
 }

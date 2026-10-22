@@ -219,7 +219,7 @@ func (cli *ChatCLI) registerBuiltinSlashTools() {
 		Description: i18n.T("slash.session_list.description"),
 		ReadOnly:    true,
 		Handler: func(_ context.Context, _ map[string]any) (string, error) {
-			return cli.sessionListText()
+			return cli.sessionListText(0)
 		},
 	})
 }

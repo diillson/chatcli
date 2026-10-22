@@ -44,7 +44,7 @@ func (cli *ChatCLI) versionText(parent context.Context) string {
 // live remote client plus interactive disambiguation, which doesn't fit the
 // request-response shape the model expects (handleListSessions keeps owning
 // that interactive path).
-func (cli *ChatCLI) sessionListText() (string, error) {
+func (cli *ChatCLI) sessionListText(limit int) (string, error) {
 	if cli.sessionManager == nil {
 		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
 	}
@@ -54,6 +54,10 @@ func (cli *ChatCLI) sessionListText() (string, error) {
 	}
 	if len(names) == 0 {
 		return i18n.T("session.tool.list.empty"), nil
+	}
+	total := len(names)
+	if limit > 0 && len(names) > limit {
+		names = names[:limit]
 	}
 	titles := cli.sessionManager.SessionTitles()
 	var b strings.Builder
@@ -65,6 +69,9 @@ func (cli *ChatCLI) sessionListText() (string, error) {
 			line += " — " + t
 		}
 		b.WriteString(line + "\n")
+	}
+	if len(names) < total {
+		b.WriteString(i18n.T("session.tool.list.more", total-len(names), total) + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
 }

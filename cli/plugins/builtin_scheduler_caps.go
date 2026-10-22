@@ -54,6 +54,10 @@ func (p *BuiltinSchedulerPlugin) DescribeCall(args []string) string {
 		if id := extractStringArg(args, "id"); id != "" {
 			return i18n.T("plugins.scheduler.describe.cancel", id)
 		}
+	case "pause":
+		return i18n.T("plugins.scheduler.describe.pause", extractStringArg(args, "id"))
+	case "resume":
+		return i18n.T("plugins.scheduler.describe.resume", extractStringArg(args, "id"))
 	case "wait":
 		if u := extractStringArg(args, "until"); u != "" {
 			return i18n.T("plugins.scheduler.describe.wait", u)

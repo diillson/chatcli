@@ -253,3 +253,31 @@ func TestSession_FlatNativeArgs(t *testing.T) {
 		t.Fatalf("flat native query = %q", f.lastQuery)
 	}
 }
+
+type fakeSessionListLimiter struct {
+	fakeSessionAdapter
+	limit int
+}
+
+func (f *fakeSessionListLimiter) ListN(_ context.Context, limit int) (string, error) {
+	f.limit = limit
+	return "limited", nil
+}
+
+func TestSessionListLimit(t *testing.T) {
+	f := &fakeSessionListLimiter{}
+	SetSessionAdapter(f)
+	t.Cleanup(func() { SetSessionAdapter(nil) })
+	p := NewBuiltinSessionPlugin()
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"list","args":{"limit":5}}`})
+	if err != nil || out != "limited" || f.limit != 5 {
+		t.Fatalf("list limit: %q %v %d", out, err, f.limit)
+	}
+	if out, err := p.Execute(context.Background(), []string{`{"cmd":"list"}`}); err != nil || out != "sessions" {
+		t.Fatalf("plain list: %q %v", out, err)
+	}
+	SetSessionAdapter(&fakeSessionAdapter{})
+	if out, err := p.Execute(context.Background(), []string{`{"cmd":"list","args":{"limit":5}}`}); err != nil || out != "sessions" {
+		t.Fatalf("limit without the capability falls back: %q %v", out, err)
+	}
+}
