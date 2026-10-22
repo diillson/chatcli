@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // ToolRetryBackoff is the pause before the single retry of a transient
@@ -80,7 +82,7 @@ func BatchRetriedNote(firstErr error) string {
 	if firstErr != nil {
 		msg = firstErr.Error()
 		if len(msg) > 160 {
-			msg = msg[:160] + "…"
+			msg = textfold.Cut(msg, 160) + "…"
 		}
 	}
 	return fmt.Sprintf(batchRetriedFmt, msg)
