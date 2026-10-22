@@ -36,7 +36,7 @@ func TestToolCatalogAdapterDescribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Describe: %v", err)
 	}
-	if !strings.Contains(out, "- Ferramenta: @diagram") || !strings.Contains(out, "Subcomandos Disponíveis:") {
+	if !strings.Contains(out, "- Tool: @diagram") || !strings.Contains(out, "Available subcommands:") {
 		t.Fatalf("Describe must return the full prompt block, got: %.120s", out)
 	}
 
@@ -63,7 +63,7 @@ func TestToolCatalogAdapterList(t *testing.T) {
 	if !strings.Contains(out, "- @diagram (v") || !strings.Contains(out, "- @tools (v") {
 		t.Fatalf("List missing index lines: %q", out)
 	}
-	if strings.Contains(out, "Subcomandos") {
+	if strings.Contains(out, "Available subcommands:") {
 		t.Fatal("List must stay one line per tool — no schemas")
 	}
 }
@@ -99,7 +99,7 @@ func TestToolCatalogAdapterDescribeMCP(t *testing.T) {
 		t.Fatalf("Describe mcp tool: %v", err)
 	}
 	for _, want := range []string{
-		"- Ferramenta: mcp_read_file (MCP, servidor: fs)",
+		"- Tool: mcp_read_file (MCP, server: fs)",
 		"Reads a file from the sandbox.",
 		`"required"`,
 		`"path"`,

@@ -18,18 +18,18 @@ func TestToolBlockRendersTopLevelFlags(t *testing.T) {
 	recall := plugins.NewBuiltinRecallPlugin()
 	full := renderToolBlock(recall, false)
 	for _, want := range []string{
-		"- Ferramenta: @recall (v" + recall.Version() + ")", "Flags:", "- key (string) [obrigatório]",
+		"- Tool: @recall (v" + recall.Version() + ")", "Flags:", "- key (string) [required]",
 		"- offset (integer)", "- max_chars (integer)", "- match (string)", "Exemplos:", `{"key":"THE_KEY","match":"error"}`,
 	} {
 		if !strings.Contains(full, want) {
 			t.Fatalf("full block lacks %q:\n%s", want, full)
 		}
 	}
-	if strings.Contains(full, "Subcomandos") {
+	if strings.Contains(full, "Available subcommands:") {
 		t.Fatalf("a tool without subcommands must not print an empty subcommand list:\n%s", full)
 	}
 	compact := renderToolBlock(recall, true)
-	if !strings.Contains(compact, "Obrigatórios: key (string)") || !strings.Contains(compact, `{"key":"THE_KEY"}`) ||
+	if !strings.Contains(compact, "Required: key (string)") || !strings.Contains(compact, `{"key":"THE_KEY"}`) ||
 		strings.Contains(compact, "- offset (integer)") {
 		t.Fatalf("compact block keeps the required args and one example:\n%s", compact)
 	}
@@ -41,7 +41,7 @@ func TestToolBlockRendersTopLevelFlags(t *testing.T) {
 	if b := renderToolBlock(plugins.NewBuiltinAskPlugin(), false); !strings.Contains(b, "Exemplos:") || !strings.Contains(b, "Formato args:") {
 		t.Errorf("@ask: format and examples must reach the model:\n%s", b)
 	}
-	if b := renderToolBlock(plugins.NewBuiltinChannelsPlugin(), false); !strings.Contains(b, "Subcomandos Disponíveis:") {
+	if b := renderToolBlock(plugins.NewBuiltinChannelsPlugin(), false); !strings.Contains(b, "Available subcommands:") {
 		t.Errorf("@channels keeps its subcommands:\n%s", b)
 	}
 	if line := renderToolIndexLine(recall); !strings.HasPrefix(line, "- @recall (v"+recall.Version()+"): ") {

@@ -60,11 +60,11 @@ func isCoreTool(name string) bool { return coreToolNames[name] }
 // an on-demand description is byte-identical to an inline one.
 func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "- Ferramenta: %s%s\n", plugin.Name(), toolVersionTag(plugin))
-	fmt.Fprintf(&b, "  Descrição: %s\n", plugin.Description())
+	fmt.Fprintf(&b, "- Tool: %s%s\n", plugin.Name(), toolVersionTag(plugin))
+	fmt.Fprintf(&b, "  Description: %s\n", plugin.Description())
 
 	if plugin.Schema() == "" {
-		fmt.Fprintf(&b, "  Uso: %s\n", plugin.Usage())
+		fmt.Fprintf(&b, "  Usage: %s\n", plugin.Usage())
 		return b.String()
 	}
 
@@ -86,7 +86,7 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 		} `json:"subcommands"`
 	}
 	if err := json.Unmarshal([]byte(plugin.Schema()), &schema); err != nil {
-		fmt.Fprintf(&b, "  Uso: %s\n", plugin.Usage())
+		fmt.Fprintf(&b, "  Usage: %s\n", plugin.Usage())
 		return b.String()
 	}
 
@@ -102,7 +102,7 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 	}
 
 	if compact {
-		b.WriteString("  Subcomandos:\n")
+		b.WriteString("  Subcommands:\n")
 		for _, sub := range schema.Subcommands {
 			fmt.Fprintf(&b, "    - %s: %s\n", sub.Name, sub.Description)
 			var requiredFlags []string
@@ -112,16 +112,16 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 				}
 			}
 			if len(requiredFlags) > 0 {
-				b.WriteString("      Obrigatórios: " + strings.Join(requiredFlags, ", ") + "\n")
+				b.WriteString("      Required: " + strings.Join(requiredFlags, ", ") + "\n")
 			}
 			if len(sub.Examples) > 0 {
-				fmt.Fprintf(&b, "      Ex: %s\n", sub.Examples[0])
+				fmt.Fprintf(&b, "      Example: %s\n", sub.Examples[0])
 			}
 		}
 		return b.String()
 	}
 
-	b.WriteString("  Subcomandos Disponíveis:\n")
+	b.WriteString("  Available subcommands:\n")
 	for _, sub := range schema.Subcommands {
 		fmt.Fprintf(&b, "    - %s: %s\n", sub.Name, sub.Description)
 		if len(sub.Flags) > 0 {
@@ -129,7 +129,7 @@ func renderToolBlock(plugin plugins.Plugin, compact bool) string {
 			for _, flag := range sub.Flags {
 				req := ""
 				if flag.Required {
-					req = " [obrigatório]"
+					req = " [required]"
 				}
 				flagDesc := fmt.Sprintf("        - %s (%s)%s: %s", flag.Name, flag.Type, req, flag.Description)
 				if flag.Default != "" {
@@ -167,7 +167,7 @@ func renderTopLevelFlags(b *strings.Builder, flags []toolSchemaFlag, examples []
 			}
 		}
 		if len(required) > 0 {
-			b.WriteString("  Obrigatórios: " + strings.Join(required, ", ") + "\n")
+			b.WriteString("  Required: " + strings.Join(required, ", ") + "\n")
 		}
 		renderToolExamples(b, examples, "  ", 1)
 		return
@@ -177,7 +177,7 @@ func renderTopLevelFlags(b *strings.Builder, flags []toolSchemaFlag, examples []
 		for _, f := range flags {
 			req := ""
 			if f.Required {
-				req = " [obrigatório]"
+				req = " [required]"
 			}
 			line := fmt.Sprintf("    - %s (%s)%s: %s", f.Name, f.Type, req, f.Description)
 			if f.Default != "" {
@@ -281,20 +281,20 @@ func sentenceEnd(s string) int {
 // Shared shape with @tools describe so the model learns one format.
 func renderMCPToolBlock(tool mcp.MCPTool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "- Ferramenta: mcp_%s (MCP, servidor: %s)\n", tool.Name, tool.ServerName)
-	fmt.Fprintf(&b, "  Descrição: %s\n", tool.Description)
-	fmt.Fprintf(&b, "  Invocação: <tool_call name=\"mcp_%s\" args='{...}' /> (args = JSON validado pelo schema abaixo)\n", tool.Name)
+	fmt.Fprintf(&b, "- Tool: mcp_%s (MCP, server: %s)\n", tool.Name, tool.ServerName)
+	fmt.Fprintf(&b, "  Description: %s\n", tool.Description)
+	fmt.Fprintf(&b, "  Invocation: <tool_call name=\"mcp_%s\" args='{...}' /> (args = JSON validated by the schema below)\n", tool.Name)
 	if len(tool.Parameters) == 0 {
-		b.WriteString("  Parâmetros: nenhum — invoque com args='{}'\n")
+		b.WriteString("  Parameters: none — invoke with args='{}'\n")
 		return b.String()
 	}
 	schemaJSON, err := json.MarshalIndent(tool.Parameters, "    ", "  ")
 	if err != nil {
 		// A schema that came in over JSON-RPC always re-marshals; guard anyway.
-		b.WriteString("  Parâmetros: schema indisponível — invoque e o sistema retornará o schema\n")
+		b.WriteString("  Parameters: schema unavailable — invoke it and the system returns the schema\n")
 		return b.String()
 	}
-	b.WriteString("  Parâmetros (JSON Schema):\n    ")
+	b.WriteString("  Parameters (JSON Schema):\n    ")
 	b.Write(schemaJSON)
 	b.WriteString("\n")
 	return b.String()
