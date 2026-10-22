@@ -246,3 +246,15 @@ func (*BuiltinMemoryPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.memory.describe.default")
 	}
 }
+
+// --- @json --------------------------------------------------------------
+
+// IsReadOnly reports true for every @json invocation that parses: all six
+// verbs only read a file or inline text. Unparseable args fail closed.
+func (*BuiltinJSONPlugin) IsReadOnly(args []string) bool {
+	_, _, err := parseJSONToolInvocation(args)
+	return err == nil
+}
+
+// IsConcurrencySafe mirrors IsReadOnly: parallel reads never conflict.
+func (p *BuiltinJSONPlugin) IsConcurrencySafe(args []string) bool { return p.IsReadOnly(args) }
