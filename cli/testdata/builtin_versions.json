@@ -128,8 +128,8 @@
     "surface": "ec34835e25c5fdc3"
   },
   "@registry-tags": {
-    "version": "2.0.0",
-    "surface": "b6bf8d08e3d92a01"
+    "version": "2.1.0",
+    "surface": "103aacda296019db"
   },
   "@scheduler": {
     "version": "1.2.0",
@@ -160,8 +160,8 @@
     "surface": "df2da12174b88fda"
   },
   "@taskgraph": {
-    "version": "1.0.0",
-    "surface": "3cc7b970b29436aa"
+    "version": "1.1.0",
+    "surface": "7628d24ba7c22ceb"
   },
   "@todo": {
     "version": "1.1.0",

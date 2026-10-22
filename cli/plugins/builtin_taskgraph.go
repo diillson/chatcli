@@ -70,6 +70,9 @@ var taskGraphAdapterAtom atomic.Value // taskGraphAdapterHolder
 // SetTaskGraphAdapter wires the live adapter. Called from the top-level cli
 // package at startup; pass nil to detach.
 func SetTaskGraphAdapter(a TaskGraphAdapter) {
+	// A background run belongs to the adapter that started it: swapping or
+	// detaching the adapter ends its lifetime.
+	cancelTaskGraphBackground()
 	taskGraphAdapterAtom.Store(taskGraphAdapterHolder{a: a})
 }
 
@@ -102,11 +105,11 @@ func (*BuiltinTaskGraphPlugin) Usage() string {
 
 <tool_call name="@taskgraph" args='{"cmd":"run","args":{"graph":{"name":"my-feature","tasks":[{"id":"T1","title":"...","prompt":"...","validation":[{"run":"go test ./...","expect":"all green"}]},{"id":"T2","prompt":"...","deps":["T1"]}]}}}' />
 
-For real graphs write the plan JSON to a file first and pass {"cmd":"run","args":{"file":"/tmp/plan.json"}} — long inline args get truncated. run executes the WHOLE graph (streamed); status/show/list inspect; retry re-opens a failed task; cancel stops the active run; dash serves the live browser dashboard.`
+For real graphs write the plan JSON to a file first and pass {"cmd":"run","args":{"file":"/tmp/plan.json"}} — long inline args get truncated. run executes the WHOLE graph (streamed) and blocks until it ends; add "background": true (alias "async") to start it detached and get the run id back immediately with the exact {"cmd":"status","args":{"id":...}} call to poll — one background run at a time, its captured output tail shows up in status/show. status/show/list inspect; retry re-opens a failed task; cancel stops the active run (foreground or background); dash serves the live browser dashboard.`
 }
 
 // Version returns the plugin contract version.
-func (*BuiltinTaskGraphPlugin) Version() string { return "1.0.0" }
+func (*BuiltinTaskGraphPlugin) Version() string { return "1.1.0" }
 
 // Path returns "" so the tool catalog defers the full definition to the
 // index (the task-graph skill teaches the envelopes).
@@ -131,13 +134,14 @@ func (*BuiltinTaskGraphPlugin) Schema() string {
 			},
 			{
 				"name":        "run",
-				"description": "Execute a graph to completion (streams progress; the call returns the final report). Give a graph to plan+run in one call, or an id to run/resume a persisted plan (latest when omitted).",
+				"description": "Execute a graph to completion (streams progress; the call returns the final report). Give a graph to plan+run in one call, or an id to run/resume a persisted plan (latest when omitted). With background:true the call returns immediately with the run id and the status call to poll; one background run at a time.",
 				"flags": []map[string]interface{}{
 					{"name": "file", "type": "string", "required": false, "description": "path to a JSON file holding the plan — the RELIABLE form for real graphs: write it with @coder write, then run with file (long inline args get truncated into 'unexpected end of JSON input')"},
 					{"name": "graph", "type": "object", "required": false, "description": graphDesc + " (inline form — only for small graphs)"},
 					{"name": "id", "type": "string", "required": false, "description": "run id from plan/list (default: latest)"},
+					{"name": "background", "type": "bool", "required": false, "description": "true (alias async) starts the run detached and returns at once with the run id and the exact status call to poll; the run's output tail is shown by status/show; cancel stops it. Refused while another background run is active."},
 				},
-				"examples": []string{`{"cmd":"run","args":{"file":"/tmp/plan.json"}}`, `{"cmd":"run","args":{"id":"tg-20260829-153000"}}`},
+				"examples": []string{`{"cmd":"run","args":{"file":"/tmp/plan.json"}}`, `{"cmd":"run","args":{"id":"tg-20260829-153000"}}`, `{"cmd":"run","args":{"file":"/tmp/plan.json","background":true}}`},
 			},
 			{
 				"name":        "status",
@@ -230,15 +234,22 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		}
 		return adapter.Plan(graphJSON)
 	case "run", "start", "resume", "exec":
+		if taskGraphWantsBackground(payload) {
+			return startTaskGraphBackground(ctx, adapter, get("id", "run_id", "runId", "run"), graphJSON)
+		}
 		return adapter.Run(ctx, get("id", "run_id", "runId", "run"), graphJSON, onOutput)
 	case "status", "state", "progress":
-		return adapter.Status(get("id", "run_id", "runId", "run"))
+		id := get("id", "run_id", "runId", "run")
+		out, err := adapter.Status(id)
+		return withTaskGraphBackground(out, err, id)
 	case "show", "task", "inspect", "get":
 		task := get("task", "task_id", "taskId")
 		if task == "" {
 			return "", errors.New(`@taskgraph show: missing "task" (e.g. {"cmd":"show","args":{"task":"T3"}})`)
 		}
-		return adapter.Show(get("id", "run_id", "runId", "run"), task)
+		id := get("id", "run_id", "runId", "run")
+		out, err := adapter.Show(id, task)
+		return withTaskGraphBackground(out, err, id)
 	case "retry", "reopen":
 		task := get("task", "task_id", "taskId")
 		if task == "" {
@@ -246,7 +257,15 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		}
 		return adapter.Retry(ctx, get("id", "run_id", "runId", "run"), task, onOutput)
 	case "cancel", "stop", "abort":
-		return adapter.Cancel()
+		bgMsg, hadBG := cancelTaskGraphBackground()
+		out, err := adapter.Cancel()
+		if hadBG {
+			if err != nil {
+				return bgMsg, nil
+			}
+			return bgMsg + "\n" + out, nil
+		}
+		return out, err
 	case "list", "ls", "runs":
 		return adapter.List()
 	case "prune", "gc", "clean":

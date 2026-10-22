@@ -8,10 +8,13 @@
  *
  * Lists the tags published for a container image across public and private
  * OCI registries (Docker Hub, GCR, GHCR, Quay, ACR, Harbor, Artifactory, …).
- * It is keyless by default: credentials, when needed, are read from the
- * standard ~/.docker/config.json (or passed explicitly / via env), exactly
- * like docker and crane. No image is pulled — only the registry's read-only
- * tags API is queried — so it is safe, fast and side-effect free.
+ * It is keyless by default: credentials, when needed, come from the
+ * environment (CHATCLI_REGISTRY_<HOST>_TOKEN, CHATCLI_REGISTRY_TOKEN, the
+ * username/password pairs) or the standard docker config, exactly like
+ * docker and crane — never from the model, whose inline credentials would
+ * land in the transcript (still accepted for compatibility, but redacted
+ * from every echoed line). No image is pulled — only the registry's
+ * read-only tags API is queried — so it is safe, fast and side-effect free.
  *
  * Ported from plugins-examples/chatcli-dockerhub with the fixes the external
  * version lacked:
@@ -35,6 +38,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -81,6 +85,14 @@ type registryTagsArgs struct {
 	Sort string
 	// Last is a shorthand: the N most recent tags (implies Sort=newest, Limit=N).
 	Last int
+	// AuthSource names where the credentials came from (inline, env,
+	// docker-config, none) for the output line — never their values.
+	AuthSource string
+}
+
+// hasInlineCreds reports whether the call itself carried credentials.
+func (c registryTagsArgs) hasInlineCreds() bool {
+	return c.Token != "" || c.Username != "" || c.Password != ""
 }
 
 // fetchBudget is how many tags to pull from the registry before sorting. When
@@ -115,13 +127,15 @@ func (*BuiltinRegistryTagsPlugin) IsReadOnly(_ []string) bool { return true }
 // connection to a read-only API.
 func (*BuiltinRegistryTagsPlugin) IsConcurrencySafe(_ []string) bool { return true }
 
-// DescribeCall surfaces the image being queried in the spinner.
+// DescribeCall surfaces the image being queried in the spinner. It goes
+// through the real parser so a credential flag can never be mistaken for
+// the image and echoed on screen.
 func (*BuiltinRegistryTagsPlugin) DescribeCall(args []string) string {
-	img := extractStringArg(args, "image", "name", "repository", "ref")
-	if img == "" {
+	cfg, err := parseRegistryTagsArgs(args)
+	if err != nil || cfg.Image == "" {
 		return i18n.T("plugins.registrytags.description")
 	}
-	return i18n.T("plugins.registrytags.describe", img)
+	return i18n.T("plugins.registrytags.describe", cfg.Image)
 }
 
 // Usage explains the canonical invocation.
@@ -133,23 +147,36 @@ Flags (flat JSON or {"cmd":"tags","args":{...}} envelope):
             "ghcr.io/cli/cli", "myreg.example.com/team/app". The registry is
             inferred from the reference; Docker Hub is the default.
   registry  override the registry base URL (e.g. https://harbor.example.com)
-  username  registry username (private images)
-  password  registry password / token paired with username
-  token     pre-issued Bearer token (GHCR PAT, GCR OAuth, Harbor robot token)
   limit     max tags to return (default 200, ceiling 1000)
   sort      newest | oldest | name | pushed — order before truncating. Use
             newest/last to surface recent tags on registries that list
             oldest-first (e.g. GHCR); the fetch reads all pages, then sorts.
   last      shorthand: the N most recent tags (sort=newest, limit=N)
+  username / password / token
+            DISCOURAGED — anything passed here lands in the transcript. Kept
+            for backward compatibility only; the values are redacted from
+            every echoed line. Prefer the environment or docker config.
 
-Credentials are optional: when omitted, ~/.docker/config.json is consulted,
-then REGISTRY_USERNAME / REGISTRY_PASSWORD / REGISTRY_TOKEN. Public images need
-no credentials at all.`
+Credentials are never required for public images. For private ones the tool
+resolves them in this order and reports the winner as "auth: ..." (never the
+value):
+  1. inline username/password/token (discouraged, see above)
+  2. per-host env  CHATCLI_REGISTRY_<HOST>_TOKEN or
+                   CHATCLI_REGISTRY_<HOST>_USERNAME + _PASSWORD
+                   (<HOST> = registry host upper-cased, non-alphanumerics -> _,
+                   e.g. GHCR_IO, REGISTRY_EXAMPLE_COM_5000, DOCKER_IO for Hub)
+  3. generic env   CHATCLI_REGISTRY_TOKEN, or CHATCLI_REGISTRY_USERNAME +
+                   CHATCLI_REGISTRY_PASSWORD (legacy REGISTRY_* names also read)
+  4. docker config $DOCKER_CONFIG/config.json or ~/.docker/config.json "auths"
+                   (base64 user:pass or identitytoken). credsStore/credHelpers
+                   are NOT invoked — such hosts are reported and need an env var.
+  5. none (anonymous; public registries still work)
+Ask the user to export the variable instead of pasting a secret into a call.`
 }
 
 // Version is semver. 2.x marks the builtin port of the 3.x external example
 // (the version line is independent; the builtin is a fresh implementation).
-func (*BuiltinRegistryTagsPlugin) Version() string { return "2.0.0" }
+func (*BuiltinRegistryTagsPlugin) Version() string { return "2.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinRegistryTagsPlugin) Path() string { return "" }
@@ -162,23 +189,25 @@ func (*BuiltinRegistryTagsPlugin) Schema() string {
 			{
 				"name": "tags",
 				"description": "List the tags published for a container image across public and private OCI registries " +
-					"(Docker Hub, GCR, GHCR, Quay, ACR, Harbor, Artifactory). Keyless for public images; reads " +
-					"~/.docker/config.json or REGISTRY_USERNAME/PASSWORD/TOKEN for private ones. No image is pulled. " +
+					"(Docker Hub, GCR, GHCR, Quay, ACR, Harbor, Artifactory). Keyless for public images. For private ones " +
+					"credentials are resolved from the environment (CHATCLI_REGISTRY_<HOST>_TOKEN / CHATCLI_REGISTRY_TOKEN / " +
+					"CHATCLI_REGISTRY_USERNAME+PASSWORD) or $DOCKER_CONFIG|~/.docker/config.json — DO NOT pass secrets in the " +
+					"call; ask the user to export them. The output reports which source was used (auth: ...). No image is pulled. " +
 					"Use this to verify that an image:tag exists before referencing it in a Dockerfile, chart or manifest.",
 				"flags": []map[string]interface{}{
 					{"name": "image", "type": "string", "required": true, "description": "Image reference, e.g. 'redis', 'library/nginx', 'ghcr.io/cli/cli', 'myreg.example.com/team/app'."},
-					{"name": "registry", "type": "string", "description": "Override the registry base URL (e.g. https://harbor.example.com). Usually inferred from image."},
-					{"name": "username", "type": "string", "description": "Registry username for private images."},
-					{"name": "password", "type": "string", "description": "Registry password/token paired with username."},
-					{"name": "token", "type": "string", "description": "Pre-issued Bearer token (GHCR PAT, GCR OAuth, Harbor robot token)."},
-					{"name": "limit", "type": "integer", "description": "Max tags to return. Default 200, ceiling 1000."},
-					{"name": "sort", "type": "string", "description": "Order before truncating: newest (highest version first) | oldest | name | pushed (most recently pushed first, OCI). Omit for registry order. Needed to find the latest tags in registries that list oldest-first (e.g. GHCR)."},
-					{"name": "last", "type": "integer", "description": "Shorthand: the N most recent tags (implies sort=newest, limit=N)."},
+					{"name": "registry", "type": "string", "required": false, "description": "Override the registry base URL (e.g. https://harbor.example.com). Usually inferred from image."},
+					{"name": "limit", "type": "integer", "required": false, "description": "Max tags to return. Default 200, ceiling 1000."},
+					{"name": "sort", "type": "string", "required": false, "description": "Order before truncating: newest (highest version first) | oldest | name | pushed (most recently pushed first, OCI). Omit for registry order. Needed to find the latest tags in registries that list oldest-first (e.g. GHCR)."},
+					{"name": "last", "type": "integer", "required": false, "description": "Shorthand: the N most recent tags (implies sort=newest, limit=N)."},
+					{"name": "username", "type": "string", "required": false, "description": "DISCOURAGED (lands in the transcript; redacted from output). Backward-compatible only — use CHATCLI_REGISTRY_<HOST>_USERNAME or docker config instead."},
+					{"name": "password", "type": "string", "required": false, "description": "DISCOURAGED (lands in the transcript; redacted from output). Use CHATCLI_REGISTRY_<HOST>_PASSWORD instead."},
+					{"name": "token", "type": "string", "required": false, "description": "DISCOURAGED (lands in the transcript; redacted from output). Use CHATCLI_REGISTRY_<HOST>_TOKEN or CHATCLI_REGISTRY_TOKEN instead."},
 				},
 				"examples": []string{
 					`{"image":"redis"}`,
-					`{"image":"ghcr.io/cli/cli"}`,
-					`{"image":"myreg.example.com/team/app","username":"robot","password":"$REG_PASS"}`,
+					`{"image":"ghcr.io/cli/cli","last":5}`,
+					`{"image":"myreg.example.com/team/app"}  (private: user exports CHATCLI_REGISTRY_MYREG_EXAMPLE_COM_TOKEN first)`,
 				},
 			},
 		},
@@ -197,7 +226,7 @@ func (p *BuiltinRegistryTagsPlugin) Execute(ctx context.Context, args []string) 
 func (p *BuiltinRegistryTagsPlugin) ExecuteWithStream(ctx context.Context, args []string, onOutput func(string)) (string, error) {
 	cfg, err := parseRegistryTagsArgs(args)
 	if err != nil {
-		return "", fmt.Errorf("@registry-tags: %w", err)
+		return "", fmt.Errorf("@registry-tags: %w", redactRegistrySecrets(err, cfg))
 	}
 	emit := func(line string) {
 		if onOutput != nil {
@@ -207,21 +236,18 @@ func (p *BuiltinRegistryTagsPlugin) ExecuteWithStream(ctx context.Context, args 
 
 	registry, image := detectRegistryTarget(cfg.Image, cfg.Registry)
 	if err := validateRegistryURL(registry); err != nil {
-		return "", fmt.Errorf("@registry-tags: %w", err)
+		return "", fmt.Errorf("@registry-tags: %w", redactRegistrySecrets(err, cfg))
 	}
 
-	// Resolve credentials: explicit args/env win, else ~/.docker/config.json.
-	if cfg.Token == "" && cfg.Username == "" && cfg.Password == "" {
-		cfg.Username, cfg.Password, cfg.Token = loadDockerCredentials(registry)
-	}
+	resolveRegistryCredentials(registry, &cfg)
 	emit(i18n.T("plugins.registrytags.describe", image))
 
 	tags, truncated, err := fetchRegistryTags(ctx, registry, image, cfg)
 	if err != nil {
-		return "", fmt.Errorf("@registry-tags: %w", err)
+		return "", fmt.Errorf("@registry-tags: %w (auth: %s)", redactRegistrySecrets(err, cfg), cfg.AuthSource)
 	}
 	if len(tags) == 0 {
-		return i18n.T("plugins.registrytags.none", image), nil
+		return i18n.T("plugins.registrytags.none", image) + "\nauth: " + cfg.AuthSource, nil
 	}
 
 	host := registryHost(registry)
@@ -233,12 +259,125 @@ func (p *BuiltinRegistryTagsPlugin) ExecuteWithStream(ctx context.Context, args 
 	if truncated {
 		fmt.Fprintf(&b, ", %s", i18n.T("plugins.registrytags.truncated", cfg.Limit))
 	}
-	b.WriteByte('\n')
+	fmt.Fprintf(&b, "\nauth: %s\n", cfg.AuthSource)
+	if cfg.AuthSource == registryAuthInline {
+		b.WriteString(registryMsgInlineWarning + "\n")
+	}
 	for _, t := range tags {
 		b.WriteString(t)
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// Credential sources reported on the "auth:" line.
+const (
+	registryAuthInline = "inline (discouraged: credentials passed in the call are visible in the transcript)"
+	registryAuthNone   = "none (anonymous)"
+
+	registryMsgInlineWarning = "note: next time ask the user to export CHATCLI_REGISTRY_<HOST>_TOKEN (or _USERNAME/_PASSWORD) instead of passing credentials in the call."
+
+	// Environment variable names, generic and legacy. Per-host variants are
+	// derived with registryHostEnvKey.
+	registryTokenEnv       = "CHATCLI_REGISTRY_TOKEN"
+	registryUserEnv        = "CHATCLI_REGISTRY_USERNAME"
+	registryPassEnv        = "CHATCLI_REGISTRY_PASSWORD"
+	registryLegacyTokenEnv = "REGISTRY_TOKEN"
+	registryLegacyUserEnv  = "REGISTRY_USERNAME"
+	registryLegacyPassEnv  = "REGISTRY_PASSWORD"
+)
+
+// resolveRegistryCredentials fills cfg's credentials from the first source
+// that has them — inline, per-host env, generic env, legacy env, docker
+// config — and records the winner in cfg.AuthSource (names only, never
+// values).
+func resolveRegistryCredentials(registry string, cfg *registryTagsArgs) {
+	if cfg.hasInlineCreds() {
+		cfg.AuthSource = registryAuthInline
+		return
+	}
+	host := registryHost(registry)
+	for _, key := range registryHostEnvKeys(host) {
+		if registryCredsFromEnv(cfg, "CHATCLI_REGISTRY_"+key+"_TOKEN", "CHATCLI_REGISTRY_"+key+"_USERNAME", "CHATCLI_REGISTRY_"+key+"_PASSWORD") {
+			return
+		}
+	}
+	if registryCredsFromEnv(cfg, registryTokenEnv, registryUserEnv, registryPassEnv) {
+		return
+	}
+	if registryCredsFromEnv(cfg, registryLegacyTokenEnv, registryLegacyUserEnv, registryLegacyPassEnv) {
+		return
+	}
+	var note string
+	cfg.Username, cfg.Password, cfg.Token, note = loadDockerCredentials(registry)
+	switch {
+	case cfg.hasInlineCreds():
+		cfg.AuthSource = "docker-config (" + dockerConfigPath() + ")"
+	case note != "":
+		cfg.AuthSource = registryAuthNone + " — " + note
+	default:
+		cfg.AuthSource = registryAuthNone
+	}
+}
+
+// registryCredsFromEnv reads a token var, else a username+password pair,
+// and reports whether anything was found. The source line names the
+// variable(s), never the values.
+func registryCredsFromEnv(cfg *registryTagsArgs, tokenVar, userVar, passVar string) bool {
+	if v := strings.TrimSpace(os.Getenv(tokenVar)); v != "" {
+		cfg.Token = v
+		cfg.AuthSource = "env (" + tokenVar + ")"
+		return true
+	}
+	u, p := strings.TrimSpace(os.Getenv(userVar)), os.Getenv(passVar)
+	if u != "" || p != "" {
+		cfg.Username, cfg.Password = u, p
+		cfg.AuthSource = "env (" + userVar + " + " + passVar + ")"
+		return true
+	}
+	return false
+}
+
+// registryHostEnvKeys returns the env-key spellings for a registry host:
+// upper-cased with every non-alphanumeric turned into "_" (ghcr.io ->
+// GHCR_IO, localhost:5000 -> LOCALHOST_5000). Docker Hub also answers to
+// DOCKER_IO, the name people actually use for it.
+func registryHostEnvKeys(host string) []string {
+	keys := []string{registryHostEnvKey(host)}
+	if host == "hub.docker.com" {
+		keys = append(keys, "DOCKER_IO")
+	}
+	return keys
+}
+
+// registryHostEnvKey is the single-host form of registryHostEnvKeys.
+func registryHostEnvKey(host string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(host) {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+// redactRegistrySecrets replaces every inline credential value that shows
+// up in err's text with a marker, so a transport or parse error can never
+// echo a password back into the transcript.
+func redactRegistrySecrets(err error, cfg registryTagsArgs) error {
+	if err == nil || !cfg.hasInlineCreds() {
+		return err
+	}
+	msg := err.Error()
+	for _, secret := range []string{cfg.Token, cfg.Password} {
+		if len(secret) >= 3 {
+			msg = strings.ReplaceAll(msg, secret, "[redacted]")
+		}
+	}
+	return errors.New(msg)
 }
 
 // parseRegistryTagsArgs supports flat JSON, the {"cmd","args"} envelope and
@@ -791,27 +930,45 @@ func registryStatusErr(status int, body []byte) error {
 	}
 }
 
-// loadDockerCredentials reads ~/.docker/config.json and returns the
-// username/password (decoded from the base64 `auth`) or an identity token for
-// the registry that best matches host. credsStore/credHelpers (which shell out
-// to external docker-credential-* binaries) are intentionally not invoked.
-func loadDockerCredentials(registry string) (username, password, token string) {
+// dockerConfigPath is $DOCKER_CONFIG/config.json (the docker CLI's own
+// override) or ~/.docker/config.json.
+func dockerConfigPath() string {
+	if dir := strings.TrimSpace(os.Getenv("DOCKER_CONFIG")); dir != "" {
+		return filepath.Join(dir, "config.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", "", ""
+		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".docker", "config.json")) //#nosec G304 -- fixed, well-known per-user path
+	return filepath.Join(home, ".docker", "config.json")
+}
+
+// loadDockerCredentials reads the docker config and returns the
+// username/password (decoded from the base64 `auth`) or an identity token
+// for the registry that best matches host. credsStore/credHelpers (which
+// shell out to external docker-credential-* binaries) are intentionally not
+// invoked; when one would have served the host, note says so, so the user
+// learns why the login docker knows about did not apply and which env var
+// to export instead.
+func loadDockerCredentials(registry string) (username, password, token, note string) {
+	path := dockerConfigPath()
+	if path == "" {
+		return "", "", "", ""
+	}
+	data, err := os.ReadFile(path) //#nosec G304 -- fixed, well-known per-user path (or the docker CLI's own DOCKER_CONFIG override)
 	if err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 	var cfg struct {
 		Auths map[string]struct {
 			Auth          string `json:"auth"`
 			IdentityToken string `json:"identitytoken"`
 		} `json:"auths"`
+		CredsStore  string            `json:"credsStore"`
+		CredHelpers map[string]string `json:"credHelpers"`
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	want := registryHost(registry)
@@ -820,17 +977,25 @@ func loadDockerCredentials(registry string) (username, password, token string) {
 			continue
 		}
 		if entry.IdentityToken != "" {
-			return "", "", entry.IdentityToken
+			return "", "", entry.IdentityToken, ""
 		}
 		decoded, derr := base64.StdEncoding.DecodeString(entry.Auth)
 		if derr != nil {
 			continue
 		}
 		if u, p, ok := strings.Cut(string(decoded), ":"); ok {
-			return u, p, ""
+			return u, p, "", ""
 		}
 	}
-	return "", "", ""
+	for key, helper := range cfg.CredHelpers {
+		if registryKeyMatches(key, want) && helper != "" {
+			return "", "", "", "docker config uses credHelper " + helper + " for this host, which this tool does not invoke; export CHATCLI_REGISTRY_" + registryHostEnvKey(want) + "_TOKEN instead"
+		}
+	}
+	if cfg.CredsStore != "" {
+		return "", "", "", "docker config uses credsStore " + cfg.CredsStore + ", which this tool does not invoke; export CHATCLI_REGISTRY_" + registryHostEnvKey(want) + "_TOKEN instead"
+	}
+	return "", "", "", ""
 }
 
 // registryKeyMatches reports whether a ~/.docker/config.json auth key refers to
