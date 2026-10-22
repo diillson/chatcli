@@ -218,8 +218,12 @@ func fakeSession(t *testing.T) (*Session, func(cdpMessage)) {
 			}
 			_ = json.Unmarshal(msg.Params, &p)
 			switch {
-			case strings.Contains(p.Expression, "interactiveSel"):
-				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"title\":\"Fake Page\",\"url\":\"http://fake/\",\"interactive\":[\"[1] <a> Home -> /\"],\"text\":\"Hello world\"}"}}`)}
+			case strings.Contains(p.Expression, "markers"):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"title\":\"Fake Page\",\"url\":\"http://fake/\",\"interactive\":[\"[1] <a> Home -> /\"],\"text\":\"Hello world\",\"markers\":{}}"}}`)}
+			case strings.Contains(p.Expression, "mode: 'mouse'"):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"mode\":\"mouse\",\"x\":5,\"y\":6}"}}`)}
+			case strings.Contains(p.Expression, "kind: 'value'"):
+				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"kind\":\"value\",\"password\":false}"}}`)}
 			case strings.Contains(p.Expression, "location.href"):
 				return cdpMessage{Result: json.RawMessage(`{"result":{"type":"string","value":"{\"t\":\"Fake Page\",\"u\":\"http://fake/\"}"}}`)}
 			case strings.Contains(p.Expression, "NOTFOUND"):

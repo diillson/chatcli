@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/pulse"
-	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 const (
@@ -96,7 +95,9 @@ type Session struct {
 	goneReported bool
 	console      []ConsoleEntry
 	network      []NetworkEntry
+	networkIDs   []string                // request ids parallel to network, for response bodies
 	requests     map[string]NetworkEntry // requestId -> method/url awaiting response
+	lastNetwork  time.Time               // when the page last sent or received something
 	loadCh       chan struct{}           // closed on Page.loadEventFired; replaced per navigation
 }
 
@@ -379,6 +380,7 @@ func (s *Session) handleEvent(method string, params json.RawMessage, sessionID s
 		}
 		s.mu.Lock()
 		s.requests[ev.RequestID] = NetworkEntry{Method: ev.Request.Method, URL: ev.Request.URL, Type: ev.Type}
+		s.lastNetwork = time.Now()
 		s.mu.Unlock()
 
 	case "Network.responseReceived":
@@ -400,12 +402,42 @@ func (s *Session) handleEvent(method string, params json.RawMessage, sessionID s
 		}
 		delete(s.requests, ev.RequestID)
 		entry.Status = ev.Response.Status
-		s.network = append(s.network, entry)
-		if len(s.network) > maxRing {
-			s.network = s.network[len(s.network)-maxRing:]
+		s.appendNetworkLocked(entry, ev.RequestID)
+		s.mu.Unlock()
+
+	case "Network.loadingFailed":
+		// A request that never gets a response (blocked, DNS failure,
+		// aborted) must leave the pending set, or the page never looks
+		// idle; it is listed with status 0 and the failure as its type.
+		var ev struct {
+			RequestID string `json:"requestId"`
+			ErrorText string `json:"errorText"`
+			Canceled  bool   `json:"canceled"`
 		}
+		if json.Unmarshal(params, &ev) != nil {
+			return
+		}
+		s.mu.Lock()
+		entry, ok := s.requests[ev.RequestID]
+		delete(s.requests, ev.RequestID)
+		if ok && !ev.Canceled {
+			entry.Type = strings.TrimSpace(entry.Type + " failed: " + ev.ErrorText)
+			s.appendNetworkLocked(entry, "")
+		}
+		s.lastNetwork = time.Now()
 		s.mu.Unlock()
 	}
+}
+
+// appendNetworkLocked records one finished request (caller holds s.mu).
+func (s *Session) appendNetworkLocked(entry NetworkEntry, requestID string) {
+	s.network = append(s.network, entry)
+	s.networkIDs = append(s.networkIDs, requestID)
+	if len(s.network) > maxRing {
+		s.network = s.network[len(s.network)-maxRing:]
+		s.networkIDs = s.networkIDs[len(s.networkIDs)-maxRing:]
+	}
+	s.lastNetwork = time.Now()
 }
 
 func (s *Session) appendConsole(e ConsoleEntry) {
@@ -433,26 +465,101 @@ func (s *Session) Navigate(ctx context.Context, url string) (title, finalURL str
 	if _, err := s.call(ctx, "Page.navigate", map[string]interface{}{"url": url}); err != nil {
 		return "", "", err
 	}
+	if err := s.awaitLoad(ctx, loadCh); err != nil {
+		return "", "", err
+	}
+	s.awaitChallengeClear(ctx)
+	return s.pageIdentity(ctx)
+}
+
+// awaitLoad waits for the load event of the navigation that owns loadCh,
+// bounded by navigateWait (a page that never fires load still returns).
+func (s *Session) awaitLoad(ctx context.Context, loadCh chan struct{}) error {
 	timer := time.NewTimer(navigateWait)
 	defer timer.Stop()
 	select {
 	case <-loadCh:
 	case <-timer.C:
 	case <-ctx.Done():
-		return "", "", ctx.Err()
+		return ctx.Err()
 	}
-	return s.pageIdentity(ctx)
+	return nil
+}
+
+// challengeGrace is how long a navigation lingers on a bot challenge before
+// reporting it: a managed challenge often clears by itself in a real
+// browser within a few seconds, and the page behind it is what was asked
+// for.
+const challengeGrace = 8 * time.Second
+
+// awaitChallengeClear polls a page that landed on a bot challenge until the
+// challenge is gone or challengeGrace elapses. Errors are ignored: the
+// snapshot that follows reports whatever the page shows.
+func (s *Session) awaitChallengeClear(ctx context.Context) {
+	vendor, err := s.Challenge(ctx)
+	if err != nil || vendor == "" {
+		return
+	}
+	deadline := time.Now().Add(challengeGrace)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+		vendor, err = s.Challenge(ctx)
+		if err != nil || vendor == "" {
+			return
+		}
+	}
+}
+
+// Challenge reports the vendor of a bot challenge the page currently shows
+// instead of its content ("" when the page is real content).
+func (s *Session) Challenge(ctx context.Context) (string, error) {
+	scan, err := s.scanPage(ctx, 1, "")
+	if err != nil {
+		return "", err
+	}
+	return detectChallenge(scan), nil
 }
 
 // Back goes one step back in history and reports the new identity.
 func (s *Session) Back(ctx context.Context) (title, finalURL string, err error) {
-	span := s.beginAction(ctx, "back")
+	return s.historyStep(ctx, "back", "history.back()")
+}
+
+// Forward goes one step forward in history and reports the new identity.
+func (s *Session) Forward(ctx context.Context) (title, finalURL string, err error) {
+	return s.historyStep(ctx, "forward", "history.forward()")
+}
+
+// historyStep runs one history navigation.
+func (s *Session) historyStep(ctx context.Context, action, js string) (title, finalURL string, err error) {
+	span := s.beginAction(ctx, action)
 	defer func() { endNavigation(span, "", finalURL, err) }()
-	_, err = s.evalRaw(ctx, "history.back()")
+	_, err = s.evalRaw(ctx, js)
 	if err != nil {
 		return "", "", err
 	}
 	time.Sleep(700 * time.Millisecond) // history navigation has no reliable single event
+	return s.pageIdentity(ctx)
+}
+
+// Reload reloads the page and waits for it to load again.
+func (s *Session) Reload(ctx context.Context) (title, finalURL string, err error) {
+	span := s.beginAction(ctx, "reload")
+	defer func() { endNavigation(span, "", finalURL, err) }()
+	s.mu.Lock()
+	s.loadCh = make(chan struct{})
+	loadCh := s.loadCh
+	s.mu.Unlock()
+	if _, err := s.call(ctx, "Page.reload", nil); err != nil {
+		return "", "", err
+	}
+	if err := s.awaitLoad(ctx, loadCh); err != nil {
+		return "", "", err
+	}
 	return s.pageIdentity(ctx)
 }
 
@@ -477,79 +584,23 @@ func (s *Session) pageIdentity(ctx context.Context) (string, string, error) {
 	return id.T, id.U, nil
 }
 
-// snapshotJS stamps interactive elements with data-chatcli-ref and returns
-// the page identity, a numbered interactive-element listing and the visible
-// text. Kept as one expression so a single Runtime.evaluate does the job.
-const snapshotJS = `(() => {
-  const interactiveSel = 'a[href], button, input, select, textarea, [role="button"], [onclick]';
-  const els = Array.from(document.querySelectorAll(interactiveSel));
-  const vis = els.filter(el => {
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  });
-  const items = vis.slice(0, 150).map((el, i) => {
-    el.setAttribute('data-chatcli-ref', String(i + 1));
-    const tag = el.tagName.toLowerCase();
-    let label = (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-    let extra = '';
-    if (tag === 'a') extra = ' -> ' + (el.getAttribute('href') || '').slice(0, 120);
-    if (tag === 'input') extra = ' [type=' + (el.type || 'text') + ']';
-    return '[' + (i + 1) + '] <' + tag + '> ' + label + extra;
-  });
-  return JSON.stringify({
-    title: document.title,
-    url: location.href,
-    interactive: items,
-    text: (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n')
-  });
-})()`
-
 // Snapshot renders the current page as model-facing text: identity, numbered
 // interactive elements (click/type targets) and visible text capped at
-// maxBytes (0 = default).
+// maxBytes (0 = default). The scan behind it lives in dom.go.
 func (s *Session) Snapshot(ctx context.Context, maxBytes int) (string, error) {
-	span := s.beginAction(ctx, "snapshot")
-	v, err := s.doSnapshot(ctx, maxBytes)
-	span.EndErr(err)
-	return v, err
+	return s.SnapshotAt(ctx, maxBytes, 0)
 }
 
-// doSnapshot is Snapshot under its dashboard node.
-func (s *Session) doSnapshot(ctx context.Context, maxBytes int) (string, error) {
-	if maxBytes <= 0 {
-		maxBytes = defaultSnapshotBytes
-	}
-	raw, err := s.evalRaw(ctx, snapshotJS)
+// SnapshotAt is Snapshot with the page text window starting at byte offset,
+// so a long page is read in successive calls instead of being cut once.
+func (s *Session) SnapshotAt(ctx context.Context, maxBytes, offset int) (string, error) {
+	span := s.beginAction(ctx, "snapshot")
+	scan, err := s.scanPage(ctx, maxSnapshotItems, "")
+	span.EndErr(err)
 	if err != nil {
 		return "", err
 	}
-	var snap struct {
-		Title       string   `json:"title"`
-		URL         string   `json:"url"`
-		Interactive []string `json:"interactive"`
-		Text        string   `json:"text"`
-	}
-	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
-		return "", fmt.Errorf("parse snapshot: %w", err)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Page: %s\nURL: %s\n", snap.Title, snap.URL)
-	if len(snap.Interactive) > 0 {
-		b.WriteString("\nInteractive elements (use the [n] ref with click/type):\n")
-		for _, it := range snap.Interactive {
-			b.WriteString(it)
-			b.WriteString("\n")
-		}
-	}
-	text := strings.TrimSpace(snap.Text)
-	if len(text) > maxBytes {
-		text = textfold.Cut(text, maxBytes) + "\n… (page text truncated)"
-	}
-	if text != "" {
-		b.WriteString("\nPage text:\n")
-		b.WriteString(text)
-	}
-	return b.String(), nil
+	return renderSnapshot(scan, maxBytes, offset), nil
 }
 
 // resolveSelector turns a ref number from the last snapshot into its stamped
@@ -568,72 +619,18 @@ func resolveSelector(target string) string {
 	return fmt.Sprintf(`[data-chatcli-ref="%s"]`, trimmed)
 }
 
-// Click clicks the element addressed by a snapshot ref or CSS selector.
+// Click clicks the element addressed by a snapshot ref or CSS selector with
+// a real single left click (see ClickWith).
 func (s *Session) Click(ctx context.Context, target string) error {
-	span := s.beginAction(ctx, "click")
-	err := s.doClick(ctx, target)
-	span.EndErr(err)
+	_, err := s.ClickWith(ctx, target, ClickOptions{})
 	return err
 }
 
-// doClick is Click under its dashboard node.
-func (s *Session) doClick(ctx context.Context, target string) error {
-	sel := resolveSelector(target)
-	selJSON, _ := json.Marshal(sel)
-	js := fmt.Sprintf(`(() => {
-  const el = document.querySelector(%s);
-  if (!el) return 'NOTFOUND';
-  el.scrollIntoView({block: 'center'});
-  el.click();
-  return 'OK';
-})()`, selJSON)
-	out, err := s.evalRaw(ctx, js)
-	if err != nil {
-		return err
-	}
-	if strings.Contains(out, "NOTFOUND") {
-		return fmt.Errorf("no element matches %q — run snapshot first and use one of its [n] refs", target)
-	}
-	return nil
-}
-
-// Type focuses the element, sets its value with proper input events, and
-// optionally submits the enclosing form.
+// Type focuses the element and types text into it, replacing what it held
+// (see TypeWith); submit presses Enter / submits the enclosing form.
 func (s *Session) Type(ctx context.Context, target, text string, submit bool) error {
-	span := s.beginAction(ctx, "type")
-	err := s.doType(ctx, target, text, submit)
-	span.EndErr(err)
+	_, err := s.TypeWith(ctx, target, text, false, submit)
 	return err
-}
-
-// doType is Type under its dashboard node.
-func (s *Session) doType(ctx context.Context, target, text string, submit bool) error {
-	sel := resolveSelector(target)
-	selJSON, _ := json.Marshal(sel)
-	textJSON, _ := json.Marshal(text)
-	js := fmt.Sprintf(`(() => {
-  const el = document.querySelector(%s);
-  if (!el) return 'NOTFOUND';
-  el.scrollIntoView({block: 'center'});
-  el.focus();
-  const setter = Object.getOwnPropertyDescriptor(el.__proto__, 'value');
-  if (setter && setter.set) { setter.set.call(el, %s); } else { el.value = %s; }
-  el.dispatchEvent(new Event('input', {bubbles: true}));
-  el.dispatchEvent(new Event('change', {bubbles: true}));
-  if (%t) {
-    el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true}));
-    if (el.form) { el.form.requestSubmit ? el.form.requestSubmit() : el.form.submit(); }
-  }
-  return 'OK';
-})()`, selJSON, textJSON, textJSON, submit)
-	out, err := s.evalRaw(ctx, js)
-	if err != nil {
-		return err
-	}
-	if strings.Contains(out, "NOTFOUND") {
-		return fmt.Errorf("no element matches %q — run snapshot first and use one of its [n] refs", target)
-	}
-	return nil
 }
 
 // Scroll moves the viewport: direction up|down|top|bottom, or into view of a
@@ -650,7 +647,7 @@ func (s *Session) doScroll(ctx context.Context, direction, target string) error 
 	var js string
 	if strings.TrimSpace(target) != "" {
 		selJSON, _ := json.Marshal(resolveSelector(target))
-		js = fmt.Sprintf(`(() => { const el = document.querySelector(%s); if (!el) return 'NOTFOUND'; el.scrollIntoView({block:'center'}); return 'OK'; })()`, selJSON)
+		js = domScript(fmt.Sprintf(`(() => { const el = __cc.one(%s); if (!el) return 'NOTFOUND'; el.scrollIntoView({block:'center'}); return 'OK'; })()`, selJSON))
 	} else {
 		switch direction {
 		case "up":
@@ -674,7 +671,10 @@ func (s *Session) doScroll(ctx context.Context, direction, target string) error 
 }
 
 // Eval runs a JavaScript expression in the page and returns its value
-// rendered as text (JSON for objects).
+// rendered as text (JSON for objects). It runs in the DevTools REPL mode:
+// a `const`/`let` declared by one call may be declared again by the next
+// (no "already been declared" after a second eval) and top-level `await`
+// works.
 func (s *Session) Eval(ctx context.Context, expression string) (string, error) {
 	span := s.beginAction(ctx, "eval")
 	v, err := s.doEval(ctx, expression)
@@ -684,17 +684,27 @@ func (s *Session) Eval(ctx context.Context, expression string) (string, error) {
 
 // doEval is Eval under its dashboard node.
 func (s *Session) doEval(ctx context.Context, expression string) (string, error) {
-	return s.evalRaw(ctx, expression)
+	return s.evaluate(ctx, expression, true)
 }
 
 // evalRaw is Runtime.evaluate with returnByValue: results come back as JSON
 // text (strings verbatim, objects marshaled).
 func (s *Session) evalRaw(ctx context.Context, expression string) (string, error) {
-	res, err := s.call(ctx, "Runtime.evaluate", map[string]interface{}{
+	return s.evaluate(ctx, expression, false)
+}
+
+// evaluate runs expression in the page; repl selects the DevTools REPL mode
+// that tolerates redeclarations and top-level await.
+func (s *Session) evaluate(ctx context.Context, expression string, repl bool) (string, error) {
+	params := map[string]interface{}{
 		"expression":    expression,
 		"returnByValue": true,
 		"awaitPromise":  true,
-	})
+	}
+	if repl {
+		params["replMode"] = true
+	}
+	res, err := s.call(ctx, "Runtime.evaluate", params)
 	if err != nil {
 		return "", err
 	}
@@ -873,6 +883,18 @@ func (s *Session) killBrowser() {
 	if s.userDataDir != "" && s.ephemeral {
 		_ = os.RemoveAll(s.userDataDir)
 	}
+}
+
+// Ephemeral reports whether the session's profile is a throwaway that is
+// deleted on close (logins made in it vanish with it).
+func (s *Session) Ephemeral() bool { return s != nil && s.ephemeral && !s.attached }
+
+// NetworkQuiet reports whether the page has no request in flight and has
+// not sent or received anything for at least d.
+func (s *Session) NetworkQuiet(d time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.requests) == 0 && time.Since(s.lastNetwork) >= d
 }
 
 // Alive reports whether the session's connection is still usable.

@@ -100,11 +100,18 @@ func headlessEnabled() bool {
 	return true
 }
 
+// headlessWindowSize is the viewport of a headless session: a laptop
+// screen, so pages lay out their desktop version and screenshots show what
+// the user would see — the headless default of 800x600 renders many sites
+// in their narrow layout.
+const headlessWindowSize = "1280,900"
+
 // chromeArgs builds the launch command line. Besides the DevTools port and
 // the profile, it turns off the "AutomationControlled" blink feature: with
 // it on, navigator.webdriver is true and Google's sign-in refuses the
 // browser as "not secure" — which defeats the whole point of handing the
-// window to the user so they can log in.
+// window to the user so they can log in. The browser also speaks the
+// language ChatCLI runs in, so sites answer in it.
 func chromeArgs(headless bool, userDataDir string) []string {
 	args := []string{
 		"--remote-debugging-port=0",
@@ -116,12 +123,41 @@ func chromeArgs(headless bool, userDataDir string) []string {
 		"--disable-features=Translate",
 		"--disable-blink-features=AutomationControlled",
 		"--mute-audio",
+		"--accept-lang=" + acceptLanguage(),
 		"about:blank",
 	}
 	if headless {
-		args = append([]string{"--headless=new"}, args...)
+		args = append([]string{"--headless=new", "--window-size=" + headlessWindowSize}, args...)
 	}
 	return args
+}
+
+// acceptLanguage builds the Accept-Language the browser sends, from the
+// language ChatCLI itself runs in (CHATCLI_LANG, then the POSIX locale
+// variables), English last as every site's fallback.
+func acceptLanguage() string {
+	for _, key := range []string{"CHATCLI_LANG", "LC_ALL", "LC_MESSAGES", "LANG"} {
+		raw := strings.TrimSpace(os.Getenv(key))
+		if raw == "" || strings.EqualFold(raw, "C") || strings.EqualFold(raw, "POSIX") {
+			continue
+		}
+		if i := strings.IndexAny(raw, ".@"); i > 0 {
+			raw = raw[:i]
+		}
+		tag := strings.ReplaceAll(raw, "_", "-")
+		base := tag
+		if i := strings.IndexByte(base, '-'); i > 0 {
+			base = base[:i]
+		}
+		if strings.EqualFold(base, "en") {
+			if strings.EqualFold(tag, "en") {
+				return "en-US,en;q=0.9"
+			}
+			return tag + ",en;q=0.9"
+		}
+		return fmt.Sprintf("%s,%s;q=0.9,en-US;q=0.8,en;q=0.7", tag, base)
+	}
+	return "en-US,en;q=0.9"
 }
 
 // launchChrome starts the browser and returns the running command plus the
