@@ -11,7 +11,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -252,20 +251,26 @@ func TestMultipatch_PerFileLockSerializesConcurrentTx(t *testing.T) {
 		"unexpected tangled state: %q", final)
 }
 
-// TestMultipatch_AppliesOnceEvenWithDuplicateSearch documents the
-// design choice: each edit applies its search→replace exactly ONCE
-// (strings.Replace with n=1). The LLM can issue multiple edits with
-// the same file to replace multiple occurrences explicitly.
-func TestMultipatch_AppliesOnceEvenWithDuplicateSearch(t *testing.T) {
+// TestMultipatch_DuplicateSearchIsRefused documents the contract: an
+// edit lands in exactly ONE place. A search text that occurs several
+// times is refused with the lines it matched (replacing the first one
+// silently edited the wrong place without the model knowing); the model
+// adds context until the text is unique, or issues one edit per place.
+func TestMultipatch_DuplicateSearchIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "dup.txt", "foo bar foo baz foo")
 	eng, _, _ := newTestEngine(t, dir)
 
 	err := eng.Execute(context.Background(), "multipatch",
 		[]string{"--edits", `[{"file":"` + path + `","search":"foo","replace":"FOO"}]`})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "occurs 3 times")
+	assert.Equal(t, "foo bar foo baz foo", readFile(t, path))
+
+	// Context makes each occurrence unique; all three edits land in one
+	// transaction.
+	err = eng.Execute(context.Background(), "multipatch",
+		[]string{"--edits", `[{"file":"` + path + `","search":"foo bar","replace":"FOO bar"},{"file":"` + path + `","search":"bar foo baz","replace":"bar FOO baz"},{"file":"` + path + `","search":"baz foo","replace":"baz FOO"}]`})
 	require.NoError(t, err)
-	// Only the first occurrence flipped.
-	got := readFile(t, path)
-	assert.Equal(t, 1, strings.Count(got, "FOO"))
-	assert.Equal(t, 2, strings.Count(got, "foo"))
+	assert.Equal(t, "FOO bar FOO baz FOO", readFile(t, path))
 }

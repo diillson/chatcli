@@ -18,13 +18,14 @@ import (
 // clean.
 
 // IsReadOnly reports whether the @coder subcommand is read-only for
-// the given args. Only `read`, `search`, `tree`, `list`, `stat`,
-// `outline` and `map` are pure reads — every other subcommand (`exec`,
-// `write`, `patch`, `test`) mutates state.
+// the given args. read, search, tree, outline, map and the git
+// observers (status, diff, log, changed, branch) are pure reads — every
+// other subcommand (exec, write, patch, multipatch, test, rollback,
+// clean) mutates state.
 func (p *BuiltinCoderPlugin) IsReadOnly(args []string) bool {
 	sub := coderSubcommand(args)
 	switch sub {
-	case "read", "search", "tree", "list", "stat", "outline", "map":
+	case "read", "search", "tree", "outline", "map", "git-status", "git-diff", "git-log", "git-changed", "git-branch":
 		return true
 	case "checkpoint":
 		// Listing/creating snapshots only records state; restore REWRITES
@@ -74,6 +75,18 @@ func (p *BuiltinCoderPlugin) DescribeCall(args []string) string {
 		if d := extractStringArg(args, "dir", "path"); d != "" {
 			return i18n.T("plugins.coder.describe.tree", d)
 		}
+	case "multipatch":
+		return i18n.T("plugins.coder.describe.multipatch")
+	case "outline", "map":
+		if f := extractPathArg(args); f != "" {
+			return i18n.T("plugins.coder.describe.outline", f)
+		}
+	case "test":
+		return i18n.T("plugins.coder.describe.test")
+	case "checkpoint":
+		return i18n.T("plugins.coder.describe.checkpoint")
+	case "git-status", "git-diff", "git-log", "git-changed", "git-branch":
+		return i18n.T("plugins.coder.describe.git", strings.TrimPrefix(sub, "git-"))
 	}
 	if sub != "" {
 		return i18n.T("plugins.coder.describe.generic", sub)

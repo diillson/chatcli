@@ -15,7 +15,7 @@ import (
 
 const (
 	// Version is the @coder plugin version.
-	Version = "2.0.0"
+	Version = "2.1.0"
 
 	// DefaultMaxBytes is the default byte limit for file reads.
 	DefaultMaxBytes = 200_000
@@ -312,9 +312,13 @@ func (e *Engine) Execute(ctx context.Context, cmd string, args []string) error {
 	case "test":
 		return e.handleTest(ctx, args)
 	default:
-		return fmt.Errorf("comando desconhecido: %s", cmd)
+		return fmt.Errorf("unknown command %q (valid: %s)", cmd, strings.Join(Commands, "|"))
 	}
 }
+
+// Commands lists every subcommand Execute dispatches, in the order the
+// usage line shows them.
+var Commands = []string{"read", "write", "patch", "multipatch", "tree", "search", "outline", "map", "checkpoint", "exec", "git-status", "git-diff", "git-log", "git-changed", "git-branch", "test", "rollback", "clean"}
 
 func (e *Engine) printf(format string, a ...interface{}) {
 	_, _ = fmt.Fprintf(e.Out, format, a...)

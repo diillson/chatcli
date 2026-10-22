@@ -127,6 +127,10 @@ func TestBuiltinCoder_ReadOnlyForReads(t *testing.T) {
 		{[]string{"read"}, true},
 		{[]string{"search"}, true},
 		{[]string{"tree"}, true},
+		{[]string{"git-status"}, true},
+		{[]string{`{"cmd":"git-diff","args":{}}`}, true},
+		{[]string{"list"}, false}, // not a @coder verb — fail closed
+		{[]string{"multipatch"}, false},
 		{[]string{"exec"}, false},
 		{[]string{"write"}, false},
 		{[]string{"patch"}, false},

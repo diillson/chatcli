@@ -150,8 +150,8 @@ func TestEngineExecuteUnknown(t *testing.T) {
 	var buf bytes.Buffer
 	eng := NewEngine(&buf, &buf, "")
 	err := eng.Execute(context.TODO(), "unknown-cmd", nil)
-	if err == nil || !strings.Contains(err.Error(), "desconhecido") {
-		t.Errorf("expected unknown command error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown command") || !strings.Contains(err.Error(), "multipatch") {
+		t.Errorf("expected unknown command error listing the valid verbs, got %v", err)
 	}
 }
 
