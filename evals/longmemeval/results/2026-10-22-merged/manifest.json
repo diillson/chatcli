@@ -1,0 +1,21 @@
+{
+  "started": "2026-10-22T13:54:59",
+  "binary": "chatcli built from main 6ece9b07 (#1869, #1870 and #1871 merged)",
+  "binary_sha256": "e8693ec1e7fdd377c5c7960b48a0d89f514cfba410cf5d18b11b9979a94c63d7",
+  "binary_version": "\n── ChatCLI · Versão ───────────────────────────────────────────────────────────────────\n\n  Instalada            v1.223.1-0.20261022165422-6ece9b072166\n  Build                6ece9b072166 · 2026-10-22 16:54:22\n  Canal de instalação  go install\n  Última release       v1.223.0\n\n  ✓ Você já está na versão mais recente.\n\n",
+  "dataset": "longmemeval_s_cleaned.json (huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)",
+  "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "harness_sha256": "1d4ef86c340bedc77dee98119bb40c03f7893ab48ac598828751112ac19525cc",
+  "judge_prompts_sha256": "b5c88d0a0de08cc7ec3c68471bb4e39a1fb204fd399024d464707b48acf8adcc",
+  "answer_model": "claude-sonnet-5-5",
+  "judge_model": "claude-sonnet-5-5",
+  "mode": "coder",
+  "question_frame": "Answer my question using what you know about me from our previous conversations (they are saved as chat sessions). If those conversations do not contain the answer, say so. End with a short, direct final answer.\n\nQuestion: {q}",
+  "reference_clock": true,
+  "workers": 4,
+  "timeout_s": 600,
+  "picked": 500,
+  "split": "development = sha1(question_id) even (240 questions, the only ones whose failures were read while designing the changes); validation = odd (260, never read). One run over all 500 on the merged code.",
+  "finished": "2026-10-22T14:51:50",
+  "commit": "6ece9b072166"
+}
