@@ -113,6 +113,9 @@ const schemaVersion = 1
 // ErrNotFound is returned when a card ID does not exist.
 var ErrNotFound = errors.New("card not found")
 
+// ErrNothingToChange is returned by Update when no field was given.
+var ErrNothingToChange = errors.New("nothing to change")
+
 // Store is a mutex-serialized board with atomic file persistence.
 type Store struct {
 	mu   sync.Mutex
@@ -336,6 +339,51 @@ func (s *Store) Assign(id, assignee string) (Card, error) {
 		return nil
 	})
 	return updated, err
+}
+
+// Update rewrites a card's title and/or description. An empty argument
+// keeps the current value; when both are empty nothing is persisted and
+// ErrNothingToChange is returned.
+func (s *Store) Update(id, title, description string) (Card, error) {
+	title = strings.TrimSpace(title)
+	description = strings.TrimSpace(description)
+	if title == "" && description == "" {
+		return Card{}, fmt.Errorf("board: %w: %s", ErrNothingToChange, id)
+	}
+	var updated Card
+	err := s.mutate(func(doc *boardDoc) error {
+		c := findCard(doc, id)
+		if c == nil {
+			return fmt.Errorf("board: %w: %s", ErrNotFound, id)
+		}
+		if title != "" {
+			c.Title = title
+		}
+		if description != "" {
+			c.Description = description
+		}
+		c.UpdatedAt = time.Now()
+		updated = *c
+		return nil
+	})
+	return updated, err
+}
+
+// Delete removes a card permanently and returns it as it was, so the
+// caller can echo it back (or recreate it) after the fact.
+func (s *Store) Delete(id string) (Card, error) {
+	var removed Card
+	err := s.mutate(func(doc *boardDoc) error {
+		for i, c := range doc.Cards {
+			if c.ID == id {
+				removed = *c
+				doc.Cards = append(doc.Cards[:i], doc.Cards[i+1:]...)
+				return nil
+			}
+		}
+		return fmt.Errorf("board: %w: %s", ErrNotFound, id)
+	})
+	return removed, err
 }
 
 // AddNote appends a note to a card.

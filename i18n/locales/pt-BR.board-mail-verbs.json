@@ -1,0 +1,6 @@
+{
+  "plugins.board.describe.edit": "Editando card do board",
+  "plugins.board.describe.unassign": "Removendo atribuição do card",
+  "plugins.board.describe.delete": "Excluindo card do board",
+  "plugins.mail.describe.peek": "Espiando mensagens pendentes de %s"
+}

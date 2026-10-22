@@ -36,10 +36,11 @@ func mailSubcommand(args []string) string {
 	return first
 }
 
-// IsReadOnly: history observes; send enqueues and inbox drains (mutating).
+// IsReadOnly: history and peek observe; send enqueues and inbox drains
+// (mutating).
 func (p *BuiltinMailPlugin) IsReadOnly(args []string) bool {
 	switch mailSubcommand(args) {
-	case "history", "recent", "log":
+	case "history", "recent", "log", "peek", "look", "pending":
 		return true
 	}
 	return false
@@ -57,6 +58,12 @@ func (p *BuiltinMailPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.mail.describe.send")
 	case "history", "recent", "log":
 		return i18n.T("plugins.mail.describe.history")
+	case "peek", "look", "pending":
+		recipient := extractNestedArg(args, "for", "recipient", "to", "agent")
+		if recipient == "" {
+			recipient = mailDefaultRecipient
+		}
+		return i18n.T("plugins.mail.describe.peek", recipient)
 	default:
 		return i18n.T("plugins.mail.describe.inbox")
 	}
@@ -70,11 +77,12 @@ func (p *BuiltinMailPlugin) JSONSchema() string {
 		"oneOf": []map[string]interface{}{
 			{
 				"properties": map[string]interface{}{
-					"cmd": map[string]interface{}{"enum": []string{"inbox", "history"}},
+					"cmd": map[string]interface{}{"enum": []string{"inbox", "peek", "history"}},
 					"args": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
 							"limit": map[string]interface{}{"type": "integer", "minimum": 1},
+							"for":   map[string]interface{}{"type": "string"},
 						},
 					},
 				},

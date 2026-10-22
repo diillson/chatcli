@@ -153,6 +153,58 @@ func (a *liveBoardAdapter) Assign(id, assignee string) (string, error) {
 	return "assigned " + formatCardLine(card), nil
 }
 
+// Edit implements plugins.BoardEditor: rewrites title and/or description
+// (empty keeps the field; both empty is refused by the store).
+func (a *liveBoardAdapter) Edit(id, title, description string) (string, error) {
+	card, err := a.store.Update(id, title, description)
+	if err != nil {
+		return "", err
+	}
+	a.mutated()
+	return "edited " + formatCardLine(card), nil
+}
+
+// Unassign implements plugins.BoardEditor: clears the card's assignee.
+func (a *liveBoardAdapter) Unassign(id string) (string, error) {
+	card, err := a.store.Assign(id, "")
+	if err != nil {
+		return "", err
+	}
+	a.mutated()
+	return "unassigned " + formatCardLine(card), nil
+}
+
+// Delete implements plugins.BoardEditor: hard-deletes the card and echoes
+// it back in full so the orchestrator can recreate it if the deletion was
+// a mistake.
+func (a *liveBoardAdapter) Delete(id string) (string, error) {
+	card, err := a.store.Delete(id)
+	if err != nil {
+		return "", err
+	}
+	a.mutated()
+	var b strings.Builder
+	fmt.Fprintf(&b, "deleted %s (permanently). It was:\n", card.ID)
+	fmt.Fprintf(&b, "title=%s\ncolumn=%s\n", card.Title, card.Column)
+	if card.Assignee != "" {
+		fmt.Fprintf(&b, "assignee=%s\n", card.Assignee)
+	}
+	if card.Description != "" {
+		fmt.Fprintf(&b, "description=%s\n", card.Description)
+	}
+	if len(card.RunIDs) > 0 {
+		fmt.Fprintf(&b, "runs=%s\n", strings.Join(card.RunIDs, ","))
+	}
+	if len(card.JobIDs) > 0 {
+		fmt.Fprintf(&b, "jobs=%s\n", strings.Join(card.JobIDs, ","))
+	}
+	for _, n := range card.Notes {
+		fmt.Fprintf(&b, "note: [%s %s] %s\n", n.Author, n.At.Format("15:04:05"), n.Text)
+	}
+	b.WriteString("Recreate it with @board create if this was a mistake.")
+	return b.String(), nil
+}
+
 // Note implements plugins.BoardAdapter.
 func (a *liveBoardAdapter) Note(id, author, text string) (string, error) {
 	if strings.TrimSpace(author) == "" {
