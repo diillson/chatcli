@@ -104,7 +104,7 @@ ChatCLI keeps itself current with `/update` (Homebrew, `go install` or a signatu
 <td width="50%" valign="top">
 
 ### 🤖 Coder agent
-A ReAct loop with 46 builtin tools: files, search, shell, git, tests, LSP diagnostics, a real browser, Git forges, background processes. Every call goes through an allow/ask/deny policy; edits are checkpointed in a shadow repository; an optional OS sandbox confines commands. [Coder mode →](https://chatcli.edilsonfreitas.com/usage/coder-mode)
+A ReAct loop with 50 builtin tools: files, search, shell, git, tests, LSP navigation and rename, JSON/YAML and diffs, secrets and archives, a real browser, Git forges, background processes. Every call goes through an allow/ask/deny policy; edits are checkpointed in a shadow repository; an optional OS sandbox confines commands. [Coder mode →](https://chatcli.edilsonfreitas.com/usage/coder-mode)
 
 </td>
 <td width="50%" valign="top">
