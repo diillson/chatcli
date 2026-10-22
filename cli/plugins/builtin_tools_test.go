@@ -113,3 +113,23 @@ func TestToolsCaps(t *testing.T) {
 		t.Fatal("@tools must advertise read-only + concurrency-safe")
 	}
 }
+
+func TestToolsDescribeSeveralNames(t *testing.T) {
+	withFakeCatalog(t)
+	p := NewBuiltinToolsPlugin()
+	out, err := p.Execute(context.Background(), []string{`{"cmd":"describe","args":{"names":["@forge","@proc","@forge"]}}`})
+	if err != nil || out != "FULL DEF OF @forge\n\nFULL DEF OF @proc" {
+		t.Fatalf("names array: %q %v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{`{"cmd":"describe","args":{"name":"@diagram, mcp_read_file"}}`})
+	if err != nil || out != "FULL DEF OF @diagram\n\nFULL DEF OF mcp_read_file" {
+		t.Fatalf("comma list: %q %v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{"describe", "--names", "@a,@b"})
+	if err != nil || out != "FULL DEF OF @a\n\nFULL DEF OF @b" {
+		t.Fatalf("flat names: %q %v", out, err)
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"cmd":"describe","args":{"names":[]}}`}); err == nil {
+		t.Fatal("empty names must error")
+	}
+}

@@ -53,15 +53,15 @@ func TestDeferredCatalogKeepsCoreAndIndexesRest(t *testing.T) {
 	out := renderCatalog(catalogPlugins(), true)
 
 	// Core: full definition present.
-	if !strings.Contains(out, "- Ferramenta: @coder") {
+	if !strings.Contains(out, "- Tool: @coder") {
 		t.Fatal("@coder (core) must keep its full definition")
 	}
-	if !strings.Contains(out, "- Ferramenta: @tools") {
+	if !strings.Contains(out, "- Tool: @tools") {
 		t.Fatal("@tools (the catalog key) must keep its full definition")
 	}
 
 	// Deferred: index line yes, full block no.
-	if strings.Contains(out, "- Ferramenta: @diagram") {
+	if strings.Contains(out, "- Tool: @diagram") {
 		t.Fatal("@diagram must be deferred to the index, not fully rendered")
 	}
 	if !strings.Contains(out, "- @diagram (v") {
@@ -76,7 +76,7 @@ func TestDeferredCatalogKeepsCoreAndIndexesRest(t *testing.T) {
 // builtin renders its full block and no index section exists.
 func TestFullCatalogKeepsLegacyShape(t *testing.T) {
 	out := renderCatalog(catalogPlugins(), false)
-	if !strings.Contains(out, "- Ferramenta: @diagram") {
+	if !strings.Contains(out, "- Tool: @diagram") {
 		t.Fatal("full mode must render every tool's definition")
 	}
 	if strings.Contains(out, "Tool index:") {
@@ -143,7 +143,7 @@ func TestNewToolsRenderSubcommands(t *testing.T) {
 	}
 	for _, tc := range cases {
 		block := renderToolBlock(tc.p, false)
-		if !strings.Contains(block, "Subcomandos Disponíveis") {
+		if !strings.Contains(block, "Available subcommands") {
 			t.Fatalf("%s: describe block has no subcommand section:\n%s", tc.p.Name(), block)
 		}
 		if !strings.Contains(block, tc.want) {

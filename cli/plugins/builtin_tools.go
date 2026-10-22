@@ -69,11 +69,12 @@ func (*BuiltinToolsPlugin) Usage() string {
 
 Subcommands (cmd + args):
   describe {name}   full definition of one tool (builtin: subcommands/flags/examples; mcp_*: parameter JSON Schema)
+  describe {names}  several tools in one call: {"names":["@diagram","@forge"]} (or "name":"@diagram,@forge")
   list     {}       one-line index of every available tool, MCP tools included`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinToolsPlugin) Version() string { return "1.1.0" }
+func (*BuiltinToolsPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinToolsPlugin) Path() string { return "" }
@@ -85,11 +86,12 @@ func (*BuiltinToolsPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "describe",
-				"description": "full definition of one tool: subcommands/flags/examples for builtins, parameter JSON Schema for MCP tools (mcp_* names)",
+				"description": "full definition of one or more tools: subcommands/flags/examples for builtins, parameter JSON Schema for MCP tools (mcp_* names); pass names (array) to expand several in one call",
 				"flags": []map[string]interface{}{
-					{"name": "name", "description": "tool name, with or without the @ prefix; MCP tools use their mcp_ prefix", "type": "string", "required": true},
+					{"name": "name", "description": "tool name, with or without the @ prefix; MCP tools use their mcp_ prefix; a comma-separated list expands several", "type": "string"},
+					{"name": "names", "description": "several tool names in one call", "type": "array"},
 				},
-				"examples": []string{`{"cmd":"describe","args":{"name":"@diagram"}}`, `{"cmd":"describe","args":{"name":"mcp_read_file"}}`},
+				"examples": []string{`{"cmd":"describe","args":{"name":"@diagram"}}`, `{"cmd":"describe","args":{"names":["@forge","@proc","mcp_read_file"]}}`},
 			},
 			{
 				"name":        "list",
@@ -123,19 +125,62 @@ func (p *BuiltinToolsPlugin) ExecuteWithStream(_ context.Context, args []string,
 	}
 	switch cmd {
 	case "describe":
-		var in struct {
-			Name string `json:"name"`
+		names := describeNames(inner)
+		if len(names) == 0 {
+			return "", errors.New(`@tools describe: "name" is required (or "names" for several tools)`)
 		}
-		_ = json.Unmarshal([]byte(inner), &in)
-		if strings.TrimSpace(in.Name) == "" {
-			return "", errors.New(`@tools describe: "name" is required`)
+		if len(names) == 1 {
+			return adapter.Describe(names[0])
 		}
-		return adapter.Describe(in.Name)
+		var parts []string
+		for _, n := range names {
+			out, err := adapter.Describe(n)
+			if err != nil {
+				out = fmt.Sprintf("%s: %v", n, err)
+			}
+			parts = append(parts, out)
+		}
+		return strings.Join(parts, "\n\n"), nil
 	case "list":
 		return adapter.List()
 	default:
 		return "", fmt.Errorf("@tools: unknown cmd %q (valid: describe|list)", cmd)
 	}
+}
+
+// describeNames reads the tool names of a describe call: "names" (an array
+// or a comma-separated string) and "name" (one, or comma-separated), in
+// that order, without duplicates.
+func describeNames(inner string) []string {
+	var in struct {
+		Name  string          `json:"name"`
+		Names json.RawMessage `json:"names"`
+	}
+	_ = json.Unmarshal([]byte(inner), &in)
+	var raw []string
+	if len(in.Names) > 0 {
+		var list []string
+		if json.Unmarshal(in.Names, &list) == nil {
+			raw = append(raw, list...)
+		} else {
+			var one string
+			if json.Unmarshal(in.Names, &one) == nil {
+				raw = append(raw, strings.Split(one, ",")...)
+			}
+		}
+	}
+	raw = append(raw, strings.Split(in.Name, ",")...)
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range raw {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	return out
 }
 
 // parseToolsInvocation accepts the JSON envelope {cmd, args} or the argv form
