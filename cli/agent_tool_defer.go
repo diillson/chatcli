@@ -87,7 +87,12 @@ func (a *AgentMode) prepareDeferredTools() string {
 	a.activatedTools = map[string]bool{}
 	a.deferrableTools = nil
 	a.deferrableCount = 0
-	if a.cli == nil || a.cli.mcpManager == nil || a.cli.mcpManager.ToolCount() == 0 {
+	a.builtinToolDefs = a.builtinNativeDefs()
+	var mcpTools []models.ToolDefinition
+	if a.cli != nil && a.cli.mcpManager != nil {
+		mcpTools = a.cli.mcpManager.GetTools()
+	}
+	if len(a.builtinToolDefs) == 0 && len(mcpTools) == 0 {
 		return ""
 	}
 	var core []models.ToolDefinition
@@ -96,13 +101,21 @@ func (a *AgentMode) prepareDeferredTools() string {
 	}
 	core = append(core, workers.PluginToolDefinitions()...)
 
-	deferrable := a.cli.mcpManager.GetTools()
-	plan := workers.PlanToolDefs(core, deferrable, nil, a.toolDeferThreshold())
+	deferrable := append(append([]models.ToolDefinition{}, a.builtinToolDefs...), mcpTools...)
+	a.deferrableTools = deferrable
+	// Builtins are the loop's own bounded set and travel first: as many as
+	// fit beside the core are activated from the start, MCP tools follow
+	// under the same threshold, and the rest wait in the index.
+	threshold := a.toolDeferThreshold()
+	if budget := threshold - workers.SerializedChars(core); budget > 0 {
+		foldArrivedTools(a.builtinToolDefs, nil, a.activatedTools, budget)
+	}
+	plan := workers.PlanToolDefs(core, deferrable, a.activatedTools, threshold)
 	if plan.Deferred == 0 {
 		return ""
 	}
-	a.deferrableTools = deferrable
-	a.deferrableCount = a.cli.mcpManager.ToolCount()
+	// The MCP count is what adoptToolsConnectedMidRun compares against.
+	a.deferrableCount = len(mcpTools)
 	a.logger.Info("deferring tool definitions behind a searchable index",
 		zap.Int("deferred", plan.Deferred),
 		zap.Int("loaded", len(plan.Defs)))
@@ -138,7 +151,7 @@ func (a *AgentMode) adoptToolsConnectedMidRun() {
 	if a.activatedTools == nil {
 		a.activatedTools = map[string]bool{}
 	}
-	current := a.cli.mcpManager.GetTools()
+	current := append(append([]models.ToolDefinition{}, a.builtinToolDefs...), a.cli.mcpManager.GetTools()...)
 	arrived, activated := foldArrivedTools(current, a.deferrableTools, a.activatedTools, a.toolDeferThreshold())
 	a.deferrableTools = current
 	a.logger.Info("deferred tool set changed mid-run",

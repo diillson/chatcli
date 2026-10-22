@@ -64,6 +64,9 @@ type AgentMode struct {
 	// usually needed again, and re-searching for it would cost a round
 	// trip each time.
 	activatedTools map[string]bool
+	// builtinToolDefs are the native definitions synthesized from the
+	// builtins' schemas for this run; they travel with the MCP tools.
+	builtinToolDefs []models.ToolDefinition
 	// deferrableTools is the set the index advertises, kept so a
 	// find_tools call can be answered without rebuilding it.
 	deferrableTools []models.ToolDefinition
@@ -3070,6 +3073,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						Args: argsStr,
 						Raw:  argsStr,
 					})
+				} else if tc, isBuiltin := a.nativeBuiltinCall(ntc); isBuiltin {
+					// Any other builtin: its synthesized definition carries
+					// the {cmd,args} envelope its own parser accepts.
+					toolCalls = append(toolCalls, tc)
 				} else {
 					// Coder tool: map to @coder with JSON args
 					subcmd, _ := workers.NativeToolNameToSubcmd(ntc.Name)

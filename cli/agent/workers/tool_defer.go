@@ -77,7 +77,7 @@ type ToolPlan struct {
 // the search tool, and the rest are advertised through the index.
 func PlanToolDefs(core, deferrable []models.ToolDefinition, activated map[string]bool, threshold int) ToolPlan {
 	all := append(append([]models.ToolDefinition{}, core...), deferrable...)
-	if len(deferrable) == 0 || serializedChars(all) <= threshold {
+	if len(deferrable) == 0 || SerializedChars(all) <= threshold {
 		return ToolPlan{Defs: all}
 	}
 
@@ -180,7 +180,7 @@ func firstSentence(s string) string {
 	return cut + "…"
 }
 
-func serializedChars(defs []models.ToolDefinition) int {
+func SerializedChars(defs []models.ToolDefinition) int {
 	if len(defs) == 0 {
 		return 0
 	}

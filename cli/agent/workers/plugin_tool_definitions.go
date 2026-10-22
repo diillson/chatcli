@@ -37,7 +37,7 @@ func PluginToolDefinitions() []models.ToolDefinition {
 			Type: "function",
 			Function: models.ToolFunctionDef{
 				Name:        "web_search",
-				Description: "Search the web using DuckDuckGo and return results with titles, URLs, and snippets. Use this to find current information, documentation, or answers to questions.",
+				Description: "Search the web (DuckDuckGo by default; SearXNG, Brave or another configured engine) and return results with titles, URLs, and snippets. Use this to find current information, documentation, or answers to questions.",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -263,6 +263,17 @@ var nativePluginToolMap = map[string]struct {
 			return []string{string(raw)}
 		},
 	},
+}
+
+// IsNativeBuiltin reports whether a builtin ("@websearch") has a
+// hand-written native definition in nativePluginToolMap.
+func IsNativeBuiltin(pluginName string) bool {
+	for _, m := range nativePluginToolMap {
+		if m.PluginName == pluginName {
+			return true
+		}
+	}
+	return false
 }
 
 // IsNativePluginTool checks if a native tool function name maps to a plugin.

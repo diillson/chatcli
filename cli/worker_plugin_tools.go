@@ -31,6 +31,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 var (
@@ -144,17 +145,21 @@ func nativeNameForBuiltin(grant string) string {
 }
 
 // synthesizePluginDef builds a native tool definition from a builtin's
-// Schema() — a {cmd: enum(subcommands), args: object} envelope that matches
-// every builtin's own lenient parser.
+// Schema(). A tool with one subcommand (or none) takes its arguments flat,
+// typed from its flags; a tool with several keeps the {cmd, args} envelope
+// every builtin's parser accepts, with cmd an enum of the subcommands and
+// args typed as the union of their flags, each flag saying which
+// subcommands use it — so the model sees the arguments, not just the verbs.
 func synthesizePluginDef(defName string, plugin plugins.Plugin) (models.ToolDefinition, bool) {
 	var schema struct {
 		Description string                 `json:"description"`
 		ArgsFormat  string                 `json:"argsFormat"`
 		Parameters  map[string]interface{} `json:"parameters"`
-		Flags       []toolSchemaFlag       `json:"flags"`
+		Flags       []nativeSchemaFlag     `json:"flags"`
 		Subcommands []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
+			Name        string             `json:"name"`
+			Description string             `json:"description"`
+			Flags       []nativeSchemaFlag `json:"flags"`
 		} `json:"subcommands"`
 	}
 	if json.Unmarshal([]byte(plugin.Schema()), &schema) != nil {
@@ -175,26 +180,64 @@ func synthesizePluginDef(defName string, plugin plugins.Plugin) (models.ToolDefi
 			}, true
 		}
 	}
+	// One subcommand is the tool itself (read, search, tree…): flat, typed.
+	if len(schema.Subcommands) == 1 {
+		if params := flagsJSONSchema(schema.Subcommands[0].Flags); params != nil {
+			desc := strings.TrimSpace(schema.Subcommands[0].Description)
+			if desc == "" {
+				desc = plugin.Description()
+			}
+			return models.ToolDefinition{
+				Type:     "function",
+				Function: models.ToolFunctionDef{Name: defName, Description: desc, Parameters: params},
+			}, true
+		}
+	}
 	cmds := make([]string, 0, len(schema.Subcommands))
 	var b strings.Builder
 	b.WriteString(schema.Description)
 	if len(schema.Subcommands) > 0 {
 		b.WriteString(" Subcommands: ")
 	}
+	// args is the union of every subcommand's flags, each saying who uses it.
+	argProps := map[string]interface{}{}
+	usedBy := map[string][]string{}
 	for i, sc := range schema.Subcommands {
 		cmds = append(cmds, sc.Name)
 		if i > 0 {
 			b.WriteString("; ")
 		}
 		fmt.Fprintf(&b, "%s (%s)", sc.Name, sc.Description)
+		if names := flagNames(sc.Flags); names != "" {
+			fmt.Fprintf(&b, " args: %s", names)
+		}
+		for _, f := range sc.Flags {
+			if f.Name == "" {
+				continue
+			}
+			usedBy[f.Name] = append(usedBy[f.Name], sc.Name)
+			if _, seen := argProps[f.Name]; !seen {
+				argProps[f.Name] = flagJSONSchemaProp(f)
+			}
+		}
+	}
+	for name, who := range usedBy {
+		if prop, ok := argProps[name].(map[string]interface{}); ok && len(who) < len(cmds) {
+			prop["description"] = strings.TrimSpace(fmt.Sprintf("%v (%s)", prop["description"], strings.Join(who, ", ")))
+		}
 	}
 	desc := plugin.Description()
 	if d := strings.TrimSpace(b.String()); d != "" {
 		desc = d
 	}
+	desc = textfold.Cut(desc, nativeDefDescriptionMax)
 	cmdProp := map[string]interface{}{"type": "string", "description": "subcommand"}
 	if len(cmds) > 0 {
 		cmdProp["enum"] = cmds
+	}
+	argsProp := map[string]interface{}{"type": "object", "description": "subcommand arguments"}
+	if len(argProps) > 0 {
+		argsProp["properties"] = argProps
 	}
 	return models.ToolDefinition{
 		Type: "function",
@@ -205,7 +248,7 @@ func synthesizePluginDef(defName string, plugin plugins.Plugin) (models.ToolDefi
 				"type": "object",
 				"properties": map[string]interface{}{
 					"cmd":  cmdProp,
-					"args": map[string]interface{}{"type": "object", "description": "subcommand arguments"},
+					"args": argsProp,
 				},
 				"required": []string{"cmd"},
 			},
@@ -213,33 +256,78 @@ func synthesizePluginDef(defName string, plugin plugins.Plugin) (models.ToolDefi
 	}, true
 }
 
-// flagsJSONSchema turns a builtin's top-level flags into the JSON Schema of a
+// nativeSchemaFlag is one flag of a builtin's Schema(), tolerant of the
+// default being a number or a boolean rather than a string.
+type nativeSchemaFlag struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Type        string      `json:"type"`
+	Default     interface{} `json:"default"`
+	Required    bool        `json:"required"`
+}
+
+// flagNames renders "a, b?, c" (optional flags marked with ?).
+func flagNames(flags []nativeSchemaFlag) string {
+	parts := make([]string, 0, len(flags))
+	for _, f := range flags {
+		if f.Name == "" {
+			continue
+		}
+		if f.Required {
+			parts = append(parts, f.Name)
+		} else {
+			parts = append(parts, f.Name+"?")
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// flagJSONSchemaProp is one flag as a JSON Schema property.
+func flagJSONSchemaProp(f nativeSchemaFlag) map[string]interface{} {
+	typ := strings.ToLower(strings.TrimSpace(f.Type))
+	switch typ {
+	case "string", "integer", "number", "boolean", "array", "object":
+	case "int":
+		typ = "integer"
+	case "bool":
+		typ = "boolean"
+	default:
+		typ = "string"
+	}
+	prop := map[string]interface{}{"type": typ, "description": textfold.Cut(f.Description, nativeDefFlagDescriptionMax)}
+	if typ == "array" {
+		prop["items"] = map[string]interface{}{}
+	}
+	return prop
+}
+
+// nativeDefDescriptionMax and nativeDefFlagDescriptionMax bound a
+// synthesized definition: every builtin's schema travels with the turn,
+// so a verbose one would crowd the others out of the defer threshold.
+const (
+	nativeDefDescriptionMax     = 700
+	nativeDefFlagDescriptionMax = 160
+)
+
+// flagsJSONSchema turns a builtin's flags into the JSON Schema of a
 // native tool's parameters, nil when there are none.
-func flagsJSONSchema(flags []toolSchemaFlag) map[string]interface{} {
+func flagsJSONSchema(flags []nativeSchemaFlag) map[string]interface{} {
 	if len(flags) == 0 {
 		return nil
 	}
 	props := make(map[string]interface{}, len(flags))
 	var required []string
 	for _, f := range flags {
-		typ := strings.ToLower(strings.TrimSpace(f.Type))
-		switch typ {
-		case "string", "integer", "number", "boolean", "array", "object":
-		case "int":
-			typ = "integer"
-		case "bool":
-			typ = "boolean"
-		default:
-			typ = "string"
+		if f.Name == "" {
+			continue
 		}
-		prop := map[string]interface{}{"type": typ, "description": f.Description}
-		if typ == "array" {
-			prop["items"] = map[string]interface{}{}
-		}
-		props[f.Name] = prop
+		props[f.Name] = flagJSONSchemaProp(f)
 		if f.Required {
 			required = append(required, f.Name)
 		}
+	}
+	if len(props) == 0 {
+		return nil
 	}
 	out := map[string]interface{}{"type": "object", "properties": props}
 	if len(required) > 0 {

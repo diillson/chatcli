@@ -8,6 +8,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/diillson/chatcli/cli/plugins"
@@ -88,5 +89,42 @@ func TestRunWorkerPluginToolSerializesUnsafe(t *testing.T) {
 	// mcp_ without a manager errors cleanly.
 	if _, err := cli.runWorkerPluginTool(context.Background(), "mcp_x", "{}"); err == nil {
 		t.Fatal("mcp_ without manager must error")
+	}
+}
+
+func TestSynthesizePluginDef_FlatForSingleVerbAndTypedUnionForMany(t *testing.T) {
+	// @read declares one subcommand that is the tool itself → flat params.
+	def, ok := synthesizePluginDef("read", plugins.NewBuiltinReadPlugin())
+	if !ok {
+		t.Fatal("read must synthesize")
+	}
+	raw, _ := json.Marshal(def.Function.Parameters)
+	if strings.Contains(string(raw), `"cmd"`) || !strings.Contains(string(raw), `"file"`) || !strings.Contains(string(raw), `"required":["file"]`) {
+		t.Fatalf("single-verb tool must be flat and typed: %s", raw)
+	}
+	// @osv has two subcommands → envelope with cmd enum and typed args union.
+	def, ok = synthesizePluginDef("osv", plugins.NewBuiltinOsvPlugin())
+	if !ok {
+		t.Fatal("osv must synthesize")
+	}
+	raw, _ = json.Marshal(def.Function.Parameters)
+	for _, want := range []string{`"enum":["scan","check"]`, `"path":{`, `"ecosystem":{`, `"version":{`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("multi-verb tool must type the union of its flags (%s): %s", want, raw)
+		}
+	}
+	if !strings.Contains(string(raw), "(check)") || !strings.Contains(string(raw), "(scan)") {
+		t.Fatalf("a flag used by some subcommands must say which: %s", raw)
+	}
+	if !strings.Contains(def.Function.Description, "scan (") || !strings.Contains(def.Function.Description, "args: path?") || !strings.Contains(def.Function.Description, "args: ecosystem, package, version") {
+		t.Fatalf("description must list each subcommand with its args: %q", def.Function.Description)
+	}
+	// A numeric default in a schema must not break synthesis.
+	var tolerant nativeSchemaFlag
+	if err := json.Unmarshal([]byte(`{"name":"depth","type":"int","default":3}`), &tolerant); err != nil || tolerant.Name != "depth" {
+		t.Fatalf("numeric default must parse: %v", err)
+	}
+	if flagNames([]nativeSchemaFlag{{Name: "a", Required: true}, {Name: "b"}}) != "a, b?" {
+		t.Fatal("flagNames marks optional flags")
 	}
 }
