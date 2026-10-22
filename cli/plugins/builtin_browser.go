@@ -258,7 +258,7 @@ const (
 	browserMsgClosed        = "Browser session closed."
 	browserMsgClosedLogins  = "Browser session closed. Its throwaway profile is gone with it: any login made in this browser must be done again on the next open (CHATCLI_BROWSER_PROFILE keeps logins across sessions)."
 	browserMsgClickedFmt    = "Clicked %s."
-	browserMsgTypedSecret   = "Typed into %s (a password field — the text is not echoed)."
+	browserMsgTypedHidden   = "Typed into %s (a password field — the text is not echoed)."
 	browserMsgClearedFmt    = "Cleared %s."
 	browserMsgForwardFmt    = "Went forward to: %s (%s)"
 	browserMsgReloadedFmt   = "Reloaded: %s (%s)"
@@ -711,7 +711,7 @@ func browserCmdType(ctx context.Context, b BrowserBackend, inv browserInvocation
 		return b.Snapshot(ctx, inv.max)
 	}
 	if secret {
-		return fmt.Sprintf(browserMsgTypedSecret, inv.target), nil
+		return fmt.Sprintf(browserMsgTypedHidden, inv.target), nil
 	}
 	return fmt.Sprintf(browserMsgTypedFmt, inv.text, inv.target), nil
 }
