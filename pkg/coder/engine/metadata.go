@@ -38,13 +38,19 @@ type PluginSchema struct {
 	Subcommands []SubcommandDefinition `json:"subcommands"`
 }
 
+// PluginVersion is the version of the @coder tool surface the model sees:
+// bumped whenever a subcommand, flag or its documented behaviour changes
+// (the builtin versions test enforces it). Version above is the engine's
+// original contract constant and stays as it is for API compatibility.
+const PluginVersion = "2.1.0"
+
 // GetMetadata returns the @coder plugin metadata.
 func GetMetadata() Metadata {
 	return Metadata{
 		Name:        "@coder",
 		Description: "Suite de engenharia completa (IO, Search, Exec, Git, Test, Backup, Rollback, Patch).",
 		Usage:       `@coder <read|write|patch|multipatch|tree|search|outline|map|checkpoint|exec|git-status|git-diff|git-log|git-changed|git-branch|test|rollback|clean> [flags]`,
-		Version:     Version,
+		Version:     PluginVersion,
 	}
 }
 

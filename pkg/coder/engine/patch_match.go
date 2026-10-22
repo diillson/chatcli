@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/diillson/chatcli/pkg/textfold"
 )
 
 // patchMatch is where a search text was found in a file.
@@ -253,7 +255,7 @@ func closestLine(content, search string) (line int, text string, ok bool) {
 	}
 	text = strings.TrimSpace(lines[best])
 	if len(text) > 100 {
-		text = text[:100] + "…"
+		text = textfold.Cut(text, 100) + "…"
 	}
 	return best + 1, text, true
 }

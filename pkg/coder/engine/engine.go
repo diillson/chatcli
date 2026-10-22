@@ -15,7 +15,7 @@ import (
 
 const (
 	// Version is the @coder plugin version.
-	Version = "2.1.0"
+	Version = "2.0.0"
 
 	// DefaultMaxBytes is the default byte limit for file reads.
 	DefaultMaxBytes = 200_000
