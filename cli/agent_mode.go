@@ -1851,6 +1851,13 @@ func (a *AgentMode) toolCallIsReadOnly(tc agent.ToolCall) bool {
 	return plugins.IsReadOnly(p, []string{tc.Args})
 }
 
+// Model-facing answers for a call to a tool that is not there (named per
+// house style, never inline literals): they point at the catalog listing.
+const (
+	toolMsgMCPUnknownFmt = "MCP tool '%s' does not exist or its server is disconnected — call @tools list to see what is available."
+	toolMsgUnknownFmt    = "Tool '%s' does not exist or is not installed — call @tools list to see the available tools."
+)
+
 // stageViewedImage queues an image the @view tool attached mid-run for the
 // next turn boundary.
 func (a *AgentMode) stageViewedImage(img models.ImageContent, name string) {
@@ -3820,7 +3827,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						}
 					} else {
 						execErr = fmt.Errorf("MCP tool não encontrado")
-						toolOutput = fmt.Sprintf("MCP tool '%s' does not exist or its server is disconnected — call @tools list to see what is available.", mcpToolName)
+						toolOutput = fmt.Sprintf(toolMsgMCPUnknownFmt, mcpToolName)
 					}
 				} else if parseErr != nil {
 					// Non-MCP tool with parse error
@@ -3841,7 +3848,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					plugin, found := a.cli.pluginManager.GetPlugin(toolName)
 					if !found {
 						execErr = fmt.Errorf("plugin não encontrado")
-						toolOutput = fmt.Sprintf("Tool '%s' does not exist or is not installed — call @tools list to see the available tools.", toolName)
+						toolOutput = fmt.Sprintf(toolMsgUnknownFmt, toolName)
 
 						if a.isCoderMode {
 							var available []string
