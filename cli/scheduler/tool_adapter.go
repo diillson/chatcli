@@ -274,6 +274,38 @@ func (t *ToolAdapter) CancelJob(_ context.Context, owner Owner, rawIn string) (s
 	return jsonOK(ToolOutput{OK: true, JobID: JobID(in.ID), Status: StatusCancelled})
 }
 
+// PauseJob implements the pause_job tool: a pending, blocked or waiting
+// job leaves the queue until resumed (a running one must be cancelled).
+func (t *ToolAdapter) PauseJob(_ context.Context, owner Owner, rawIn string) (string, error) {
+	var in ToolInput
+	if err := json.Unmarshal([]byte(rawIn), &in); err != nil {
+		return jsonError(err)
+	}
+	if in.ID == "" {
+		return jsonError(fmt.Errorf("pause_job: id is required"))
+	}
+	if err := t.s.Pause(JobID(in.ID), firstNonEmpty(in.Reason, "agent-paused"), owner); err != nil {
+		return jsonError(err)
+	}
+	return jsonOK(ToolOutput{OK: true, JobID: JobID(in.ID), Status: StatusPaused})
+}
+
+// ResumeJob implements the resume_job tool: a paused job goes back to
+// pending and re-enters the queue.
+func (t *ToolAdapter) ResumeJob(_ context.Context, owner Owner, rawIn string) (string, error) {
+	var in ToolInput
+	if err := json.Unmarshal([]byte(rawIn), &in); err != nil {
+		return jsonError(err)
+	}
+	if in.ID == "" {
+		return jsonError(fmt.Errorf("resume_job: id is required"))
+	}
+	if err := t.s.Resume(JobID(in.ID), owner); err != nil {
+		return jsonError(err)
+	}
+	return jsonOK(ToolOutput{OK: true, JobID: JobID(in.ID), Status: StatusPending})
+}
+
 // ─── helpers ──────────────────────────────────────────────────
 
 func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {

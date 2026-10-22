@@ -30,6 +30,13 @@ type SessionAdapter interface {
 	List(ctx context.Context) (string, error)
 }
 
+// SessionListLimiter is an OPTIONAL capability a SessionAdapter may
+// implement: listing at most limit sessions (newest first), so a store with
+// hundreds of saved sessions does not flood one result.
+type SessionListLimiter interface {
+	ListN(ctx context.Context, limit int) (string, error)
+}
+
 // SessionReader is an OPTIONAL capability a SessionAdapter may implement to
 // back the @session get subcommand — paginated reading of one saved
 // conversation, so the model can pull past context without loading the
@@ -149,7 +156,7 @@ that matter. To keep working under a name: save (new) or attach (existing).`
 }
 
 // Version is semver.
-func (*BuiltinSessionPlugin) Version() string { return "1.3.0" }
+func (*BuiltinSessionPlugin) Version() string { return "1.4.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSessionPlugin) Path() string { return "" }
@@ -193,8 +200,11 @@ func (*BuiltinSessionPlugin) Schema() string {
 			},
 			{
 				"name":        "list",
-				"description": "List saved session names.",
-				"examples":    []string{`{"cmd":"list"}`},
+				"description": "List saved session names (newest first); limit caps how many.",
+				"flags": []map[string]interface{}{
+					{"name": "limit", "type": "int", "description": "At most this many sessions (default: all)"},
+				},
+				"examples": []string{`{"cmd":"list"}`, `{"cmd":"list","args":{"limit":20}}`},
 			},
 			{
 				"name":        "save",
@@ -300,6 +310,15 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 		}
 		return reader.Get(ctx, in.Name, lenientInt(in.Offset), lenientInt(in.Limit), in.Query)
 	case "list":
+		var in struct {
+			Limit int `json:"limit"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		if in.Limit > 0 {
+			if ll, ok := adapter.(SessionListLimiter); ok {
+				return ll.ListN(ctx, in.Limit)
+			}
+		}
 		return adapter.List(ctx)
 	case "save", "fork", "attach", "detach":
 		// Write ops require the optional SessionWriter capability. Note the

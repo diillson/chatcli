@@ -1,0 +1,5 @@
+{
+  "plugins.scheduler.describe.pause": "@scheduler pause: %s",
+  "plugins.scheduler.describe.resume": "@scheduler resume: %s",
+  "session.tool.list.more": "  … %d more of %d (raise limit to see them)"
+}

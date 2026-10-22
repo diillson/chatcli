@@ -98,6 +98,26 @@ func jsonString(raw map[string]json.RawMessage, keys ...string) string {
 // returns the first parseable int. Strings that contain a valid int
 // (e.g. "10") are coerced — the LLM occasionally emits stringified
 // numbers and we don't want to reject those.
+// jsonStringList reads the first present key as a JSON array of strings
+// or as a comma-separated string (the agent flattener stringifies arrays).
+func jsonStringList(raw map[string]json.RawMessage, keys ...string) []string {
+	for _, k := range keys {
+		v, ok := raw[k]
+		if !ok {
+			continue
+		}
+		var list []string
+		if json.Unmarshal(v, &list) == nil {
+			return list
+		}
+		var one string
+		if json.Unmarshal(v, &one) == nil {
+			return splitFileList(one)
+		}
+	}
+	return nil
+}
+
 func jsonInt(raw map[string]json.RawMessage, keys ...string) int {
 	for _, k := range keys {
 		val, ok := raw[k]

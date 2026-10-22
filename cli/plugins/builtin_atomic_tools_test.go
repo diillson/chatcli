@@ -7,6 +7,7 @@
 package plugins
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -316,4 +317,64 @@ func indexOf(haystack []string, needle string) int {
 		}
 	}
 	return -1
+}
+
+func TestSearchModesAndFilesOnly(t *testing.T) {
+	p, err := parseSearchArgs([]string{`{"term":"config.Load(","literal":true,"case_sensitive":true,"context":2,"files_only":true,"max_results":50}`})
+	if err != nil || !p.Literal || !p.CaseSensitive || p.Context != 2 || !p.FilesOnly || p.MaxResults != 50 {
+		t.Fatalf("parse: %+v %v", p, err)
+	}
+	argv := strings.Join(buildSearchArgv(p), " ")
+	if strings.Contains(argv, "--regex") || !strings.Contains(argv, "--case-sensitive") || !strings.Contains(argv, "--context 2") || !strings.Contains(argv, "--max-results 50") {
+		t.Fatalf("argv: %s", argv)
+	}
+	if argv := strings.Join(buildSearchArgv(searchArgs{Term: "x"}), " "); !strings.Contains(argv, "--regex") || !strings.Contains(argv, "--max-results 200") {
+		t.Fatalf("defaults: %s", argv)
+	}
+	p, _ = parseSearchArgs([]string{"search", "--term", "x", "--literal", "--files-only", "false", "--context", "3"})
+	if !p.Literal || p.FilesOnly || p.Context != 3 {
+		t.Fatalf("flat flags: %+v", p)
+	}
+	out := filesOnlySummary("a.go:10:3:hit\nb.go:2:1:hit\na.go-11-ctx\na.go:12:1:hit\nnot a match line\n")
+	if !strings.HasPrefix(out, "2 file(s), 3 match(es):\na.go (2)\nb.go (1)") {
+		t.Fatalf("files only: %q", out)
+	}
+	if filesOnlySummary("nothing here\n") != "nothing here\n" {
+		t.Fatal("no matches: output passes through")
+	}
+}
+
+func TestReadSeveralFilesAndTreeCaps(t *testing.T) {
+	p, err := parseReadArgs([]string{`{"files":["go.mod","Makefile"],"from_line":1,"to_line":5}`})
+	if err != nil || len(p.Files) != 2 || p.File != "" {
+		t.Fatalf("files parse: %+v %v", p, err)
+	}
+	argv := strings.Join(buildReadArgv(p), " ")
+	if !strings.HasPrefix(argv, "--file go.mod Makefile --start 1 --end 5") {
+		t.Fatalf("files argv: %s", argv)
+	}
+	p, _ = parseReadArgs([]string{"read", "--files", "a.go, b.go"})
+	if len(p.Files) != 2 || p.Files[1] != "b.go" {
+		t.Fatalf("flat files: %+v", p)
+	}
+	if argv := strings.Join(buildReadArgv(readArgs{File: "x.go", Files: []string{"y.go"}}), " "); argv != "--file x.go y.go" {
+		t.Fatalf("file + files: %s", argv)
+	}
+	withFakeAtomicEngine := NewBuiltinReadPlugin()
+	if _, err := withFakeAtomicEngine.Execute(context.Background(), []string{`{"from_line":1}`}); err == nil || !strings.Contains(err.Error(), "files") {
+		t.Fatalf("no file nor files: %v", err)
+	}
+
+	tr, err := parseTreeArgs([]string{`{"dir":".","exclude":"dist,coverage","max_entries":300,"include_hidden":true}`})
+	if err != nil || tr.MaxEntries != 300 || !tr.IncludeHidden || tr.Exclude != "dist,coverage" {
+		t.Fatalf("tree parse: %+v %v", tr, err)
+	}
+	argv = strings.Join(buildTreeArgv(tr), " ")
+	if !strings.Contains(argv, "--ignore dist,coverage") || !strings.Contains(argv, "--max-entries 300") || !strings.Contains(argv, "--include-hidden") {
+		t.Fatalf("tree argv: %s", argv)
+	}
+	tr, _ = parseTreeArgs([]string{"--dir", ".", "--max-entries", "10", "--include-hidden"})
+	if tr.MaxEntries != 10 || !tr.IncludeHidden || tr.Dir != "." {
+		t.Fatalf("tree flat: %+v", tr)
+	}
 }

@@ -41,7 +41,7 @@ func (p *BuiltinTreePlugin) Description() string {
 func (p *BuiltinTreePlugin) Usage() string { return "@tree <dir>" }
 
 // Version follows semver tied to the engine contract.
-func (p *BuiltinTreePlugin) Version() string { return "1.0.0" }
+func (p *BuiltinTreePlugin) Version() string { return "1.1.0" }
 
 // Path is the builtin sentinel.
 func (p *BuiltinTreePlugin) Path() string { return "[builtin]" }
@@ -54,15 +54,18 @@ func (p *BuiltinTreePlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "tree",
-				"description": "Show a recursive directory structure as an ASCII tree, optionally bounded by depth.",
+				"description": "Show a recursive directory structure as an indented listing, bounded by depth and by an entry cap (the listing says when the cap cut it). .git, node_modules and vendor are always skipped; dotfiles unless include_hidden.",
 				"flags": []map[string]interface{}{
 					{"name": "dir", "type": "string", "description": "Directory to list (default: current workspace)"},
-					{"name": "depth", "type": "integer", "description": "Max recursion depth (default 3)"},
-					{"name": "exclude", "type": "string", "description": "Glob pattern of names to skip (e.g. 'node_modules')"},
+					{"name": "depth", "type": "integer", "description": "Max recursion depth (default 6)"},
+					{"name": "exclude", "type": "string", "description": "Comma-separated exact names to skip anywhere in the tree (e.g. 'dist,coverage')"},
+					{"name": "max_entries", "type": "integer", "description": "Stop after this many entries (default 2000)"},
+					{"name": "include_hidden", "type": "boolean", "description": "Also list dotfiles and dot-directories (default false)"},
 				},
 				"examples": []string{
 					`{"dir":"."}`,
 					`{"dir":"./src","depth":2}`,
+					`{"dir":".","exclude":"dist,coverage","max_entries":300,"include_hidden":true}`,
 				},
 			},
 		},
@@ -118,9 +121,11 @@ func (p *BuiltinTreePlugin) ExecuteWithStream(ctx context.Context, args []string
 
 // treeArgs is the typed view of @tree's JSON input.
 type treeArgs struct {
-	Dir     string
-	Depth   int
-	Exclude string
+	Dir           string
+	Depth         int
+	Exclude       string
+	MaxEntries    int
+	IncludeHidden bool
 }
 
 // parseTreeArgs supports both flat JSON and the @coder envelope shape.
@@ -144,7 +149,9 @@ func parseTreeArgs(args []string) (treeArgs, error) {
 		}
 		out.Dir = jsonString(raw, "dir", "path", "directory")
 		out.Depth = jsonInt(raw, "depth", "maxDepth")
-		out.Exclude = jsonString(raw, "exclude", "skip")
+		out.Exclude = jsonString(raw, "exclude", "skip", "ignore")
+		out.MaxEntries = jsonInt(raw, "max_entries", "maxEntries", "limit")
+		out.IncludeHidden = jsonBool(raw, "include_hidden", "includeHidden", "hidden")
 		return out, nil
 	}
 	for i := 0; i < len(args); i++ {
@@ -159,11 +166,18 @@ func parseTreeArgs(args []string) (treeArgs, error) {
 				out.Depth, _ = strconv.Atoi(args[i+1])
 				i++
 			}
-		case "--exclude":
+		case "--exclude", "--ignore":
 			if i+1 < len(args) {
 				out.Exclude = args[i+1]
 				i++
 			}
+		case "--max_entries", "--max-entries":
+			if i+1 < len(args) {
+				out.MaxEntries, _ = strconv.Atoi(args[i+1])
+				i++
+			}
+		case "--include_hidden", "--include-hidden":
+			out.IncludeHidden = flatBoolAt(args, &i)
 		default:
 			if out.Dir == "" && !strings.HasPrefix(args[i], "-") {
 				out.Dir = args[i]
@@ -187,6 +201,12 @@ func buildTreeArgv(p treeArgs) []string {
 	}
 	if p.Exclude != "" {
 		argv = append(argv, "--ignore", p.Exclude)
+	}
+	if p.MaxEntries > 0 {
+		argv = append(argv, "--max-entries", strconv.Itoa(p.MaxEntries))
+	}
+	if p.IncludeHidden {
+		argv = append(argv, "--include-hidden")
 	}
 	return argv
 }

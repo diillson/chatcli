@@ -55,7 +55,7 @@ func (p *BuiltinReadPlugin) Description() string {
 func (p *BuiltinReadPlugin) Usage() string { return "@read <file>" }
 
 // Version follows semver for the plugin; tied to the engine's contract.
-func (p *BuiltinReadPlugin) Version() string { return "1.0.0" }
+func (p *BuiltinReadPlugin) Version() string { return "1.1.0" }
 
 // Path is a sentinel matching the existing builtin convention.
 func (p *BuiltinReadPlugin) Path() string { return "[builtin]" }
@@ -69,9 +69,10 @@ func (p *BuiltinReadPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "read",
-				"description": "Read file contents (optionally line range, head, tail, or base64 encoded)",
+				"description": "Read file contents with line numbers (optionally a line range, head, tail, or base64); files reads several files in one call (same range options apply to each). A whole-file read is capped at 2000 lines and says how to continue.",
 				"flags": []map[string]interface{}{
-					{"name": "file", "type": "string", "required": true, "description": "Absolute or workspace-relative file path"},
+					{"name": "file", "type": "string", "required": true, "description": "Absolute or workspace-relative file path (required unless files is given)"},
+					{"name": "files", "type": "array", "description": "Several file paths to read in one call"},
 					{"name": "from_line", "type": "integer", "description": "1-indexed starting line (inclusive)"},
 					{"name": "to_line", "type": "integer", "description": "1-indexed ending line (inclusive)"},
 					{"name": "head", "type": "integer", "description": "Read only the first N lines"},
@@ -82,6 +83,7 @@ func (p *BuiltinReadPlugin) Schema() string {
 				"examples": []string{
 					`{"file":"main.go"}`,
 					`{"file":"main.go","from_line":10,"to_line":50}`,
+					`{"files":["go.mod","Makefile",".golangci.yml"]}`,
 					`{"file":"image.png","encoding":"base64"}`,
 				},
 			},
@@ -104,8 +106,8 @@ func (p *BuiltinReadPlugin) ExecuteWithStream(ctx context.Context, args []string
 	if err != nil {
 		return "", err
 	}
-	if parsed.File == "" {
-		return "", fmt.Errorf("file required (usage: @read {\"file\":\"path\"})")
+	if parsed.File == "" && len(parsed.Files) == 0 {
+		return "", fmt.Errorf("file required (usage: @read {\"file\":\"path\"} or {\"files\":[\"a\",\"b\"]})")
 	}
 
 	argv := buildReadArgv(parsed)
@@ -145,6 +147,7 @@ func (p *BuiltinReadPlugin) ExecuteWithStream(ctx context.Context, args []string
 // easier to test (no engine spin-up needed).
 type readArgs struct {
 	File     string
+	Files    []string
 	FromLine int
 	ToLine   int
 	Head     int
@@ -184,6 +187,7 @@ func parseReadArgs(args []string) (readArgs, error) {
 			}
 		}
 		out.File = jsonString(raw, "file", "path", "filepath")
+		out.Files = jsonStringList(raw, "files", "paths")
 		out.FromLine = jsonInt(raw, "from_line", "start", "fromLine")
 		out.ToLine = jsonInt(raw, "to_line", "end", "toLine")
 		out.Head = jsonInt(raw, "head")
@@ -198,6 +202,11 @@ func parseReadArgs(args []string) (readArgs, error) {
 		case "--file":
 			if i+1 < len(args) {
 				out.File = args[i+1]
+				i++
+			}
+		case "--files", "--paths":
+			if i+1 < len(args) {
+				out.Files = append(out.Files, splitFileList(args[i+1])...)
 				i++
 			}
 		case "--from_line", "--start":
@@ -246,7 +255,16 @@ func parseReadArgs(args []string) (readArgs, error) {
 // and explicit means a flag rename in the engine breaks at exactly
 // this one site and not in twelve places.
 func buildReadArgv(p readArgs) []string {
-	argv := []string{"--file", p.File}
+	all := append([]string{}, p.Files...)
+	if p.File != "" {
+		all = append([]string{p.File}, all...)
+	}
+	if len(all) == 0 {
+		all = []string{""}
+	}
+	// The engine takes one --file and any number of positional files.
+	argv := []string{"--file", all[0]}
+	argv = append(argv, all[1:]...)
 	if p.FromLine > 0 {
 		argv = append(argv, "--start", strconv.Itoa(p.FromLine))
 	}

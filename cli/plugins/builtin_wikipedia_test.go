@@ -8,6 +8,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,5 +129,71 @@ func TestWikipediaSearchNoResults(t *testing.T) {
 	// stable regardless of locale loading.
 	if !strings.Contains(out, "no_results") || !strings.Contains(out, "zzz") {
 		t.Fatalf("expected no-results message, got %q", out)
+	}
+}
+
+const wikiArticle = "Alan Turing was a mathematician.\n\n\n== Early life ==\nBorn in London.\n\n\n=== Family ===\nHis father worked abroad.\n\n\n== Career ==\nHe worked at Bletchley Park.\n\n\n== See also ==\n"
+
+func wikiExtractServer(t *testing.T) func() {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("exintro") != "" {
+			t.Errorf("section/full reads must not ask for the intro only")
+		}
+		body, _ := json.Marshal(map[string]interface{}{"query": map[string]interface{}{"pages": map[string]interface{}{"1": map[string]string{"title": "Alan Turing", "extract": wikiArticle}}}})
+		_, _ = w.Write(body)
+	}))
+	old := wikipediaBaseURL
+	wikipediaBaseURL = func(string) string { return server.URL }
+	return func() { server.Close(); wikipediaBaseURL = old }
+}
+
+func TestWikipediaSectionsAndSectionRead(t *testing.T) {
+	defer wikiExtractServer(t)()
+	p := NewBuiltinWikipediaPlugin()
+	out, err := p.Execute(context.Background(), []string{`{"title":"Alan Turing","sections":true}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"4 section(s)", "1. Early life", "  2.   Family", "3. Career", `"section":"<heading or index>"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("sections missing %q: %q", want, out)
+		}
+	}
+	out, err = p.Execute(context.Background(), []string{`{"read":"Alan Turing","section":"early LIFE"}`})
+	if err != nil || !strings.Contains(out, "Born in London.") || !strings.Contains(out, "### Family") || strings.Contains(out, "Bletchley") {
+		t.Fatalf("section by heading (with its children, not its siblings) = %q %v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{`{"read":"Alan Turing","section":"3"}`})
+	if err != nil || !strings.Contains(out, "Bletchley Park") || strings.Contains(out, "London") {
+		t.Fatalf("section by index = %q %v", out, err)
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"read":"Alan Turing","section":"9"}`}); err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("index out of range: %v", err)
+	}
+	if _, err := p.Execute(context.Background(), []string{`{"read":"Alan Turing","section":"nothing"}`}); err == nil || !strings.Contains(err.Error(), "sections:true") {
+		t.Fatalf("unknown heading hints at sections: %v", err)
+	}
+	out, err = p.Execute(context.Background(), []string{`{"read":"Alan Turing","section":"car"}`})
+	if err != nil || !strings.Contains(out, "Bletchley") {
+		t.Fatalf("unique substring match = %q %v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{`{"read":"Alan Turing","full":true,"max_chars":40}`})
+	if err != nil || !strings.Contains(out, "of ") || !strings.Contains(out, "chars shown") || strings.Contains(out, "Bletchley") {
+		t.Fatalf("full read capped = %q %v", out, err)
+	}
+	out, err = p.Execute(context.Background(), []string{"--read", "Alan Turing", "--full", "--max_chars", "100000"})
+	if err != nil || !strings.Contains(out, "Bletchley") {
+		t.Fatalf("flat full read = %q %v", out, err)
+	}
+	a, _ := parseWikipediaArgs([]string{`{"read":"x","max_chars":999999}`})
+	if a.MaxChars != wikipediaMaxChars {
+		t.Fatalf("max_chars clamp = %d", a.MaxChars)
+	}
+	if lvl, h, ok := parseWikiHeading("=== Family ==="); !ok || lvl != 3 || h != "Family" {
+		t.Fatalf("heading parse = %d %q %v", lvl, h, ok)
+	}
+	if _, _, ok := parseWikiHeading("== =="); ok {
+		t.Fatal("empty heading must not parse")
 	}
 }

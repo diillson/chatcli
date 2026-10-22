@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/diillson/chatcli/cli/workspace"
@@ -47,6 +48,10 @@ type memoryWorker struct {
 	// extraction pass; the worker keeps only the memory-specific watermark and
 	// the failure-notice latch.
 	coord *runCoordinator
+	// rerunQueued is set by a segment nudge that found a pass running: the
+	// pass runs once more when it ends instead of leaving the segment queued
+	// until the next nudge.
+	rerunQueued atomic.Bool
 
 	// Resilience: segments that fail every provider are queued on disk at
 	// pendingDir and drained on later runs.
@@ -248,13 +253,19 @@ func (mw *memoryWorker) nudgeSegment(ctx context.Context, segment []models.Messa
 		mw.logger.Warn("Memory worker: could not queue RPC segment", zap.Error(err))
 		return
 	}
+	detached := context.WithoutCancel(ctx)
 	if mw.coord.isRunning() {
-		return
+		// A pass holds the gate: it will run once more when it ends, with
+		// the backlog as it stands then. The re-check closes the window in
+		// which the pass released the gate between our two reads.
+		mw.rerunQueued.Store(true)
+		if mw.coord.isRunning() || !mw.rerunQueued.Swap(false) {
+			return
+		}
 	}
 	// The cadence delta is the whole queued backlog, not just this segment:
 	// RPC turns accumulate in the WAL until the min-new-messages threshold is
 	// met, mirroring the REPL's "extract every couple of turns" rhythm.
-	detached := context.WithoutCancel(ctx)
 	backlog := mw.pendingBacklogCount()
 	mw.spawn(func() { mw.extractQueued(detached, backlog) })
 }
@@ -277,6 +288,17 @@ func (mw *memoryWorker) pendingBacklogCount() int {
 // as maybeExtract, counting the queued segment's messages as the new-item
 // delta — for RPC turns the delta lives in the queue, not in cli.history.
 func (mw *memoryWorker) extractQueued(ctx context.Context, newMessages int) {
+	mw.runQueuedPass(ctx, newMessages)
+	// A segment nudged while this pass held the gate was queued but could
+	// not schedule a pass of its own: run one now with the current backlog.
+	if mw.rerunQueued.Swap(false) {
+		backlog := mw.pendingBacklogCount()
+		mw.spawn(func() { mw.extractQueued(ctx, backlog) })
+	}
+}
+
+// runQueuedPass is one extraction pass over the queue under the gate.
+func (mw *memoryWorker) runQueuedPass(ctx context.Context, newMessages int) {
 	if !mw.coord.tryAcquire(newMessages) {
 		return
 	}

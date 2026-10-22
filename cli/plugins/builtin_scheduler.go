@@ -7,6 +7,8 @@
  *   query      { id }                                         → job
  *   list       { filter? }                                    → []summary
  *   cancel     { id, reason? }                                → ok
+ *   pause      { id, reason? }                                → ok (queued job held; resume brings it back)
+ *   resume     { id }                                         → ok
  *
  * Because the top-level ChatCLI owns the scheduler but the plugin is
  * instantiated before it, the plugin uses a package-level adapter
@@ -38,6 +40,14 @@ type SchedulerAdapter interface {
 	CancelJob(ctx context.Context, owner SchedulerOwner, inputJSON string) (string, error)
 }
 
+// SchedulerPauser is an OPTIONAL capability of the wired SchedulerAdapter:
+// pausing a queued job and resuming it. Separate interface because
+// SchedulerAdapter is exported API.
+type SchedulerPauser interface {
+	PauseJob(ctx context.Context, owner SchedulerOwner, inputJSON string) (string, error)
+	ResumeJob(ctx context.Context, owner SchedulerOwner, inputJSON string) (string, error)
+}
+
 // SchedulerOwner is the package-local mirror of scheduler.Owner (the
 // plugins package cannot import cli/scheduler without an import cycle).
 type SchedulerOwner struct {
@@ -46,12 +56,18 @@ type SchedulerOwner struct {
 	Tag  string
 }
 
-var schedulerAdapterAtom atomic.Value // stores SchedulerAdapter
+// schedulerAdapterHolder wraps the adapter so the atom always stores one
+// concrete type: atomic.Value panics when two stores carry different
+// concrete types, which is what swapping the live adapter for another
+// implementation (or a test fake) did.
+type schedulerAdapterHolder struct{ a SchedulerAdapter }
+
+var schedulerAdapterAtom atomic.Value // stores schedulerAdapterHolder
 
 // SetSchedulerAdapter wires the live adapter. Called from the top-level
-// cli package after initScheduler.
+// cli package after initScheduler; pass nil to detach.
 func SetSchedulerAdapter(a SchedulerAdapter) {
-	schedulerAdapterAtom.Store(a)
+	schedulerAdapterAtom.Store(schedulerAdapterHolder{a: a})
 }
 
 // currentSchedulerAdapter returns the wired adapter or nil.
@@ -60,8 +76,8 @@ func currentSchedulerAdapter() SchedulerAdapter {
 	if v == nil {
 		return nil
 	}
-	a, _ := v.(SchedulerAdapter)
-	return a
+	h, _ := v.(schedulerAdapterHolder)
+	return h.a
 }
 
 // BuiltinSchedulerPlugin is the @scheduler tool.
@@ -111,6 +127,8 @@ Subcommands (use cmd + args; do/when are required for schedule):
   query     {id}
   list      {filter?:{owner, statuses, tag, name_substr, include_terminal}}
   cancel    {id, reason?}
+  pause     {id, reason?}     hold a pending/blocked/waiting job (a running one must be cancelled)
+  resume    {id}              put a paused job back in the queue
 
 Aliases accepted for natural phrasing: delay→when, command/cmd/exec/run→do,
   in/after→when, i-know/iKnow/iknow/know→i_know. Bare durations like "5m"
@@ -122,7 +140,7 @@ the job pre-authorizes itself at fire time (denylist rules still reject):
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinSchedulerPlugin) Version() string { return "1.1.0" }
+func (*BuiltinSchedulerPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSchedulerPlugin) Path() string { return "" }
@@ -210,6 +228,23 @@ func (*BuiltinSchedulerPlugin) Schema() string {
 				},
 				"examples": []string{`{"cmd":"cancel","args":{"id":"job-abc123","reason":"superseded"}}`},
 			},
+			{
+				"name":        "pause",
+				"description": "Hold a pending, blocked or waiting job out of the queue until resumed (a running job must be cancelled instead).",
+				"flags": []map[string]interface{}{
+					{"name": "id", "type": "string", "required": true, "description": "Job id to pause"},
+					{"name": "reason", "type": "string", "description": "Free-form reason (audited)"},
+				},
+				"examples": []string{`{"cmd":"pause","args":{"id":"job-abc123","reason":"waiting for the fix"}}`},
+			},
+			{
+				"name":        "resume",
+				"description": "Put a paused job back in the queue.",
+				"flags": []map[string]interface{}{
+					{"name": "id", "type": "string", "required": true, "description": "Job id to resume"},
+				},
+				"examples": []string{`{"cmd":"resume","args":{"id":"job-abc123"}}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -258,9 +293,18 @@ func (p *BuiltinSchedulerPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return adapter.ListJobs(ctx, adapter.Owner(), inner)
 	case "cancel":
 		return adapter.CancelJob(ctx, adapter.Owner(), inner)
+	case "pause", "resume":
+		pz, ok := adapter.(SchedulerPauser)
+		if !ok {
+			return "", fmt.Errorf("@scheduler %s: not available in this session", cmd)
+		}
+		if cmd == "pause" {
+			return pz.PauseJob(ctx, adapter.Owner(), inner)
+		}
+		return pz.ResumeJob(ctx, adapter.Owner(), inner)
 	default:
 		return "", fmt.Errorf(
-			"@scheduler: unknown cmd %q (valid: schedule|wait|query|list|cancel). "+
+			"@scheduler: unknown cmd %q (valid: schedule|wait|query|list|cancel|pause|resume). "+
 				`Example: {"cmd":"schedule","args":{"name":"x","when":"+5m","do":"/run echo hi"}}`,
 			cmd,
 		)
@@ -339,6 +383,10 @@ func canonicalSchedulerCmd(s string) string {
 		return "list"
 	case "cancel":
 		return "cancel"
+	case "pause", "hold", "suspend":
+		return "pause"
+	case "resume", "unpause", "unhold", "continue":
+		return "resume"
 	}
 	return ""
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,7 +51,7 @@ func (p *BuiltinSearchPlugin) Description() string {
 func (p *BuiltinSearchPlugin) Usage() string { return "@search <regex>" }
 
 // Version follows semver tied to the engine's contract.
-func (p *BuiltinSearchPlugin) Version() string { return "1.0.0" }
+func (p *BuiltinSearchPlugin) Version() string { return "1.1.0" }
 
 // Path is the builtin sentinel.
 func (p *BuiltinSearchPlugin) Path() string { return "[builtin]" }
@@ -64,16 +65,22 @@ func (p *BuiltinSearchPlugin) Schema() string {
 		"subcommands": []map[string]interface{}{
 			{
 				"name":        "search",
-				"description": "Search files for a regex pattern (Go regexp syntax) and return matching lines with file:line prefixes.",
+				"description": "Search files for a pattern and return matching lines as file:line:col: text. Regex (Go syntax) by default, case-insensitive; literal:true matches the text as typed; context adds surrounding lines; files_only lists the files with a match count instead of every line (cheap first pass on a large tree).",
 				"flags": []map[string]interface{}{
-					{"name": "term", "type": "string", "required": true, "description": "Regex pattern (Go regexp syntax)"},
+					{"name": "term", "type": "string", "required": true, "description": "Pattern (Go regexp syntax; literal text with literal:true)"},
 					{"name": "dir", "type": "string", "description": "Directory to search recursively (default: current workspace)"},
 					{"name": "max_results", "type": "integer", "description": "Cap on the number of matching lines (default 200)"},
 					{"name": "include", "type": "string", "description": "Glob pattern for files to include (e.g. '*.go')"},
+					{"name": "literal", "type": "boolean", "description": "Match term as plain text, not a regex (default false)"},
+					{"name": "case_sensitive", "type": "boolean", "description": "Match case exactly (default false)"},
+					{"name": "context", "type": "integer", "description": "Lines of context before and after each match (default 0)"},
+					{"name": "files_only", "type": "boolean", "description": "Return only the matching files with their match counts (default false)"},
 				},
 				"examples": []string{
 					`{"term":"Login","dir":"./src"}`,
 					`{"term":"TODO\\(.*\\)","include":"*.go"}`,
+					`{"term":"config.Load(","literal":true,"files_only":true}`,
+					`{"term":"func Login","context":3,"case_sensitive":true}`,
 				},
 			},
 		},
@@ -128,15 +135,74 @@ func (p *BuiltinSearchPlugin) ExecuteWithStream(ctx context.Context, args []stri
 	if execErr != nil {
 		return fullOutput.String(), fmt.Errorf("@search failed: %w", execErr)
 	}
+	if parsed.FilesOnly {
+		return filesOnlySummary(fullOutput.String()), nil
+	}
 	return fullOutput.String(), nil
+}
+
+// filesOnlySummary folds a file:line:col: listing into one line per file
+// with its match count, most matches first — the shape of a first pass
+// over a large tree, before reading the lines of the files that matter.
+func filesOnlySummary(out string) string {
+	counts := map[string]int{}
+	var order []string
+	for _, line := range strings.Split(out, "\n") {
+		path, ok := matchLinePath(line)
+		if !ok {
+			continue
+		}
+		if _, seen := counts[path]; !seen {
+			order = append(order, path)
+		}
+		counts[path]++
+	}
+	if len(order) == 0 {
+		return out
+	}
+	sort.SliceStable(order, func(i, j int) bool { return counts[order[i]] > counts[order[j]] })
+	var b strings.Builder
+	total := 0
+	for _, p := range order {
+		total += counts[p]
+	}
+	fmt.Fprintf(&b, "%d file(s), %d match(es):\n", len(order), total)
+	for _, p := range order {
+		fmt.Fprintf(&b, "%s (%d)\n", p, counts[p])
+	}
+	return b.String()
+}
+
+// matchLinePath returns the file of a "path:line:col:" or "path:line:"
+// match line; false for context lines and anything else.
+func matchLinePath(line string) (string, bool) {
+	i := strings.Index(line, ":")
+	if i <= 0 {
+		return "", false
+	}
+	rest := line[i+1:]
+	j := strings.Index(rest, ":")
+	if j <= 0 {
+		return "", false
+	}
+	for _, r := range rest[:j] {
+		if r < '0' || r > '9' {
+			return "", false
+		}
+	}
+	return line[:i], true
 }
 
 // searchArgs is the typed view of @search's JSON input.
 type searchArgs struct {
-	Term       string
-	Dir        string
-	MaxResults int
-	Include    string
+	Term          string
+	Dir           string
+	MaxResults    int
+	Include       string
+	Literal       bool
+	CaseSensitive bool
+	Context       int
+	FilesOnly     bool
 }
 
 // parseSearchArgs converts the LLM-supplied JSON envelope into typed
@@ -164,6 +230,10 @@ func parseSearchArgs(args []string) (searchArgs, error) {
 		out.Dir = jsonString(raw, "dir", "path", "directory")
 		out.MaxResults = jsonInt(raw, "max_results", "maxResults", "limit")
 		out.Include = jsonString(raw, "include", "glob")
+		out.Literal = jsonBool(raw, "literal", "fixed", "plain")
+		out.CaseSensitive = jsonBool(raw, "case_sensitive", "caseSensitive")
+		out.Context = jsonInt(raw, "context", "context_lines")
+		out.FilesOnly = jsonBool(raw, "files_only", "filesOnly", "files")
 		return out, nil
 	}
 	// Positional / flag form (legacy CLI path).
@@ -189,6 +259,17 @@ func parseSearchArgs(args []string) (searchArgs, error) {
 				out.Include = args[i+1]
 				i++
 			}
+		case "--literal", "--fixed":
+			out.Literal = flatBoolAt(args, &i)
+		case "--case_sensitive", "--case-sensitive":
+			out.CaseSensitive = flatBoolAt(args, &i)
+		case "--context":
+			if i+1 < len(args) {
+				out.Context, _ = strconv.Atoi(args[i+1])
+				i++
+			}
+		case "--files_only", "--files-only":
+			out.FilesOnly = flatBoolAt(args, &i)
 		default:
 			if out.Term == "" && !strings.HasPrefix(args[i], "-") {
 				out.Term = args[i]
@@ -208,15 +289,45 @@ func parseSearchArgs(args []string) (searchArgs, error) {
 // when --regex is absent — exposing that subtle dual-mode to the LLM
 // would invite confusion.
 func buildSearchArgv(p searchArgs) []string {
-	argv := []string{"--term", p.Term, "--regex"}
+	argv := []string{"--term", p.Term}
+	if !p.Literal {
+		argv = append(argv, "--regex")
+	}
+	if p.CaseSensitive {
+		argv = append(argv, "--case-sensitive")
+	}
+	if p.Context > 0 {
+		argv = append(argv, "--context", strconv.Itoa(p.Context))
+	}
 	if p.Dir != "" {
 		argv = append(argv, "--dir", p.Dir)
 	}
-	if p.MaxResults > 0 {
-		argv = append(argv, "--max-results", strconv.Itoa(p.MaxResults))
+	limit := p.MaxResults
+	if limit <= 0 {
+		limit = searchDefaultMaxResults // the cap the schema promises
 	}
+	argv = append(argv, "--max-results", strconv.Itoa(limit))
 	if p.Include != "" {
 		argv = append(argv, "--glob", p.Include)
 	}
 	return argv
+}
+
+// searchDefaultMaxResults is the cap applied when the call sets none.
+const searchDefaultMaxResults = 200
+
+// flatBoolAt reads a boolean flag at args[*i]: a following true/false
+// token is consumed, a bare flag means true.
+func flatBoolAt(args []string, i *int) bool {
+	if *i+1 < len(args) {
+		switch strings.ToLower(args[*i+1]) {
+		case "true", "1", "yes":
+			*i++
+			return true
+		case "false", "0", "no":
+			*i++
+			return false
+		}
+	}
+	return true
 }
