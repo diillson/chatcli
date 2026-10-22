@@ -176,3 +176,44 @@ func (*BuiltinMoaPlugin) DescribeCall(args []string) string {
 	}
 	return i18n.T("plugins.moa.describe.ask")
 }
+
+// --- @secrets ---
+
+func (*BuiltinSecretsPlugin) DescribeCall(args []string) string {
+	cmd, in, err := parseSecretsInvocation(args)
+	if err != nil {
+		return i18n.T("plugins.secrets.describe.default")
+	}
+	switch cmd {
+	case "check":
+		return i18n.T("plugins.secrets.describe.check")
+	case "rules":
+		return i18n.T("plugins.secrets.describe.rules")
+	}
+	target := jsonString(in, "path", "dir", "file")
+	if jsonBool(in, "staged") {
+		target = "git index"
+	} else if target == "" {
+		target = "."
+	}
+	return i18n.T("plugins.secrets.describe.scan", describeTrunc(target, 50))
+}
+
+// --- @archive ---
+
+func (*BuiltinArchivePlugin) DescribeCall(args []string) string {
+	cmd, in, err := parseArchiveInvocation(args)
+	if err != nil {
+		return i18n.T("plugins.archive.describe.default")
+	}
+	file := describeTrunc(jsonString(in, "file", "path", "archive"), 50)
+	switch cmd {
+	case "read":
+		return i18n.T("plugins.archive.describe.read", describeTrunc(jsonString(in, "entry", "name", "member"), 40), file)
+	case "extract":
+		return i18n.T("plugins.archive.describe.extract", file, describeTrunc(jsonString(in, "to", "dest", "dir"), 40))
+	case "create":
+		return i18n.T("plugins.archive.describe.create", file)
+	}
+	return i18n.T("plugins.archive.describe.list", file)
+}

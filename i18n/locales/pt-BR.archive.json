@@ -1,0 +1,8 @@
+{
+  "plugins.archive.description": "Manipulação segura de arquivos compactados: lista ou lê entradas de zip/tar/tar.gz/tar.bz2, extrai com proteção contra zip-slip e limites de tamanho, cria pacotes zip ou tar.gz determinísticos a partir de caminhos do workspace.",
+  "plugins.archive.describe.default": "📦 Arquivo compactado",
+  "plugins.archive.describe.list": "📦 Listando %s",
+  "plugins.archive.describe.read": "📦 Lendo %s de %s",
+  "plugins.archive.describe.extract": "📦 Extraindo %s para %s",
+  "plugins.archive.describe.create": "📦 Criando %s"
+}

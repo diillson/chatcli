@@ -1,0 +1,8 @@
+{
+  "plugins.archive.description": "Safe archive handling: list or read entries of zip/tar/tar.gz/tar.bz2, extract with zip-slip protection and size limits, create deterministic zip or tar.gz bundles from workspace paths.",
+  "plugins.archive.describe.default": "📦 Archive",
+  "plugins.archive.describe.list": "📦 Listing %s",
+  "plugins.archive.describe.read": "📦 Reading %s from %s",
+  "plugins.archive.describe.extract": "📦 Extracting %s to %s",
+  "plugins.archive.describe.create": "📦 Creating %s"
+}

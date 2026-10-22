@@ -2278,6 +2278,12 @@ func registerCoreBuiltins(pluginMgr *plugins.Manager) {
 	// @osv — keyless dependency vulnerability scanning via OSV.dev.
 	// Self-contained (HTTP + filesystem), no adapter wiring needed.
 	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinOsvPlugin())
+	// @secrets — leaked-credential scanner (tree / git index / inline
+	// text) with redacted findings. Pure Go, no network, workspace-bound.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSecretsPlugin())
+	// @archive — list/read/extract/create zip and tar bundles with
+	// zip-slip protection and size limits. Pure Go, workspace-bound.
+	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinArchivePlugin())
 	// @session — search past saved conversations. Wired below to the
 	// SessionManager.
 	pluginMgr.RegisterBuiltinPlugin(plugins.NewBuiltinSessionPlugin())
