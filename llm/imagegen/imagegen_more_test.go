@@ -90,9 +90,12 @@ func TestKnownModels(t *testing.T) {
 	if len(models) == 0 {
 		t.Fatal("empty catalog")
 	}
+	// A model that is in service for as long as the test can be read: the
+	// catalog drops a model on its shutdown date, so naming one that is about
+	// to retire turns the test red on that day.
 	var hasGptImage, hasResponses bool
 	for _, m := range models {
-		if m.Name == "gpt-image-1" && m.API == "images" {
+		if m.Name == "gpt-image-2.5-flare" && m.API == "images" {
 			hasGptImage = true
 		}
 		if m.API == "responses" {
