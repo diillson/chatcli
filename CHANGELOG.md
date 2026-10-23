@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.224.0](https://github.com/diillson/chatcli/compare/v1.223.0...v1.224.0) (2026-10-23)
+
+
+### Features
+
+* **agent:** a failed action no longer discards its independent siblings, and transient read failures retry once ([#1849](https://github.com/diillson/chatcli/issues/1849)) ([961b452](https://github.com/diillson/chatcli/commit/961b4528c4c0bda15a379a27e816a8aa547f4ef3))
+* **agent:** todo blocked and cancelled statuses; plain-text content in the XML tool protocol ([#1868](https://github.com/diillson/chatcli/issues/1868)) ([b7a0eb1](https://github.com/diillson/chatcli/commit/b7a0eb1eb4592cc81c4251265a0d1a586cd93dfb))
+* **agent:** tool results past their cap are saved to disk and previewed to the budget ([#1848](https://github.com/diillson/chatcli/issues/1848)) ([af8b374](https://github.com/diillson/chatcli/commit/af8b3745124c1f24f899ab1b289e694d7f2c7114))
+* **browser:** [@browser](https://github.com/browser) 1.1.0 with text, find, clear, downloads, response bodies, headless identity and seen screenshots ([#1857](https://github.com/diillson/chatcli/issues/1857)) ([87e5f5f](https://github.com/diillson/chatcli/commit/87e5f5f00cca5dd0414f780f36c0364266c3d3d9))
+* **browser:** page scan v2, real mouse clicks, editor-aware typing and bot-challenge detection ([#1843](https://github.com/diillson/chatcli/issues/1843)) ([2dc1d2c](https://github.com/diillson/chatcli/commit/2dc1d2cde418c129c0678a0484e6ada09b32776c))
+* **catalog:** English scaffolding for the tool catalog and describe several tools in one call ([#1854](https://github.com/diillson/chatcli/issues/1854)) ([6abf4b1](https://github.com/diillson/chatcli/commit/6abf4b1b9f5046589d892e661dbad2a10478008f))
+* **coder:** exact patch with ambiguity refusal, closest-line hint, indentation tolerance and --all ([#1847](https://github.com/diillson/chatcli/issues/1847)) ([72b6731](https://github.com/diillson/chatcli/commit/72b6731a24de10da8507140c75db975369cf108c))
+* **coder:** git-show, git-blame, find, move, delete and stat; English engine; every builtin as a native tool ([#1859](https://github.com/diillson/chatcli/issues/1859)) ([9e79d07](https://github.com/diillson/chatcli/commit/9e79d07f22613253d5e34752b8d18dcd3af79e87))
+* **forge:** review, merge, check out, close and undraft PRs, create and close issues, rerun workflows, filter CI logs, filtered listings ([#1851](https://github.com/diillson/chatcli/issues/1851)) ([9a10b6d](https://github.com/diillson/chatcli/commit/9a10b6dfdbd1126cc629e39e6016e9bb6bdb6e8c))
+* **hub:** park cancel across processes and remote agent transcripts ([#1867](https://github.com/diillson/chatcli/issues/1867)) ([4b43169](https://github.com/diillson/chatcli/commit/4b431693733f4813171ca6abcfdb58870680a4f8))
+* **plugins:** board edit/delete/unassign, mail peek, park cancel, agents wait/transcript ([#1860](https://github.com/diillson/chatcli/issues/1860)) ([36e145a](https://github.com/diillson/chatcli/commit/36e145a37e1ecb73c7809c9b6c8b9f2903a1fa70))
+* **plugins:** capability parity across the builtin tools ([#1845](https://github.com/diillson/chatcli/issues/1845)) ([23cd4db](https://github.com/diillson/chatcli/commit/23cd4dbf0e1e46ada64fc8140ec3c52b0c54a2a9))
+* **plugins:** diff builtin for unified diffs and patch apply ([#1866](https://github.com/diillson/chatcli/issues/1866)) ([fc20496](https://github.com/diillson/chatcli/commit/fc2049615f593522539d24cb520d00edea9e4182))
+* **plugins:** json builtin for structured-data reads ([#1862](https://github.com/diillson/chatcli/issues/1862)) ([777990e](https://github.com/diillson/chatcli/commit/777990e69e4c431b3fe236960f0abf27ea649ea8))
+* **plugins:** keep large responses on disk and page the spec listing ([#1856](https://github.com/diillson/chatcli/issues/1856)) ([f6d7770](https://github.com/diillson/chatcli/commit/f6d777025ac89616b9d68f02e86132c4d77ac577))
+* **plugins:** list facts with ids, preview and by-id forget; append and reword tasks ([#1855](https://github.com/diillson/chatcli/issues/1855)) ([35b11ad](https://github.com/diillson/chatcli/commit/35b11adcb4280abb386fd9dc5829557cca5b4914))
+* **plugins:** lsp rename, implementation and workspace symbols; compress files ([#1864](https://github.com/diillson/chatcli/issues/1864)) ([4657ea0](https://github.com/diillson/chatcli/commit/4657ea03b2dd3434833d3e0a6b164efdecadf7b5))
+* **plugins:** registry credentials from the environment; taskgraph background run ([#1865](https://github.com/diillson/chatcli/issues/1865)) ([142e9b5](https://github.com/diillson/chatcli/commit/142e9b58275851e2b6db59ae93cc34c9ef5c3b6f))
+* **plugins:** scheduler pause/resume, search modes, multi-file read, tree limits, osv lockfiles and wikipedia sections ([#1858](https://github.com/diillson/chatcli/issues/1858)) ([bdcc974](https://github.com/diillson/chatcli/commit/bdcc9740fb7165e80a31fe65fbb92bc1f6be7b4a))
+* **plugins:** secrets scanner and archive builtins ([#1861](https://github.com/diillson/chatcli/issues/1861)) ([b6bd953](https://github.com/diillson/chatcli/commit/b6bd953debce087e8ab9ed382b7713cccbb94468))
+* **proc:** wait until a process prints a line or exits, and grep its logs ([#1853](https://github.com/diillson/chatcli/issues/1853)) ([74b38ee](https://github.com/diillson/chatcli/commit/74b38ee69b88f7914eeb76839218bed6c58922a8))
+* **recall:** calendar-day ages, graded session search, [@date](https://github.com/date) and a completeness protocol ([#1871](https://github.com/diillson/chatcli/issues/1871)) ([6ece9b0](https://github.com/diillson/chatcli/commit/6ece9b072166782799decf339bcd4bb21c36edf6))
+* **web:** webfetch returns what an error page said and accepts any 2xx; websearch never searches its own JSON ([#1850](https://github.com/diillson/chatcli/issues/1850)) ([742daf5](https://github.com/diillson/chatcli/commit/742daf58d3877402ac0f96d0ff262b34d996ce2c))
+
+
+### Bug Fixes
+
+* **agent:** ask again when a coder response leaks function-call markup instead of ending the task ([#1875](https://github.com/diillson/chatcli/issues/1875)) ([5b8d280](https://github.com/diillson/chatcli/commit/5b8d2805b3f4edea8b22a1c8d941efa34682d826))
+* **build:** Go 1.27.3 for the crypto/x509 fix (CVE-2026-111943, GO-2026-6809) ([#1846](https://github.com/diillson/chatcli/issues/1846)) ([99a2c18](https://github.com/diillson/chatcli/commit/99a2c18bec0e7a8a75279c0309582ccf4e012499))
+* **compress:** hand [@session](https://github.com/session) and [@memory](https://github.com/memory) output to the model whole ([#1869](https://github.com/diillson/chatcli/issues/1869)) ([f202374](https://github.com/diillson/chatcli/commit/f2023742ec1f246f2da7d54af5d81cb531c9159d))
+* **imagegen:** stop TestKnownModels from requiring a model on its shutdown day ([#1876](https://github.com/diillson/chatcli/issues/1876)) ([0bcad4c](https://github.com/diillson/chatcli/commit/0bcad4c7e7517e92dc39e8285cb6970c7f323ba7))
+* **plugins:** keep a park token prefix as text through the argv form ([#1870](https://github.com/diillson/chatcli/issues/1870)) ([4da094d](https://github.com/diillson/chatcli/commit/4da094de416aceb045c4cc6ef7ba79a2e8dc97dc))
+
 ## [1.223.0](https://github.com/diillson/chatcli/compare/v1.222.0...v1.223.0) (2026-10-20)
 
 
