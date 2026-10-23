@@ -2411,6 +2411,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 	}
 
 	// --- LOOP PRINCIPAL DO AGENTE (ReAct) ---
+	// Consecutive coder-mode responses that leaked tool-call markup and got a
+	// correction (see looksLikeLeakedToolMarkup); reset by any turn that acts.
+	leakedMarkupCorrections := 0
+
 	for turn := 0; turn < maxTurns; turn++ {
 		// Verificar cancelamento pelo usuário (Ctrl+C)
 		select {
@@ -3267,6 +3271,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// =========================
 		if a.isCoderMode {
 			if len(toolCalls) > 0 {
+				leakedMarkupCorrections = 0
 				// Require the <plan> block before acting
 				if !hasReasoningTag(thoughtText) {
 					a.cli.history = append(a.cli.history, models.Message{
@@ -3307,6 +3312,21 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					})
 					continue
 				}
+			}
+
+			// A response whose "tool call" is function-call markup in a format
+			// chatcli does not run would otherwise end the task as if it were
+			// the final answer, with the action never executed. Say so, once
+			// per attempt up to a small bound, and let the model resend it.
+			if len(toolCalls) == 0 && leakedMarkupCorrections < maxLeakedMarkupCorrections && looksLikeLeakedToolMarkup(aiResponse) {
+				leakedMarkupCorrections++
+				a.logger.Warn("Coder response leaked tool-call markup; asking for the tool_call format",
+					zap.Int("correction", leakedMarkupCorrections))
+				a.cli.history = append(a.cli.history, models.Message{
+					Role:    "user",
+					Content: leakedToolMarkupFeedback(aiResponse),
+				})
+				continue
 			}
 
 			// Prohibit loose code blocks in coder mode
