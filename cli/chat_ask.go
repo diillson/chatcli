@@ -76,7 +76,7 @@ func (cli *ChatCLI) maybeChatAskTurn(
 	}
 	// Providers without native tools (e.g. Claude in OAuth mode): XML transport.
 	out, err := cli.executeChatAskXML(ctx, activeClient, userInput, additionalContext,
-		tempHistory, effectiveMaxTokens, stopSpinner, on)
+		tempHistory, effectiveMaxTokens, resolution, stopSpinner, on)
 	return out, true, err
 }
 
@@ -147,6 +147,9 @@ func (cli *ChatCLI) executeChatAskNative(
 	for round := 0; ; round++ {
 		resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
 		if err != nil && cli.refreshClientOnAuthError(err) {
+			resp, err = tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
+		}
+		if err != nil && cli.describeRejectedImages(ctx, err, resolution.Provider, resolution.Model, &history) {
 			resp, err = tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
 		}
 		if err != nil {
@@ -271,6 +274,7 @@ func (cli *ChatCLI) executeChatAskXML(
 	userInput, additionalContext string,
 	tempHistory []models.Message,
 	effectiveMaxTokens int,
+	resolution SkillClientResolution,
 	stopSpinner func(),
 	on chatExceptions,
 ) (string, error) {
@@ -298,6 +302,9 @@ func (cli *ChatCLI) executeChatAskXML(
 	for round := 0; ; round++ {
 		resp, err := activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
 		if cli.refreshClientOnAuthError(err) {
+			resp, err = activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
+		}
+		if err != nil && cli.describeRejectedImages(ctx, err, resolution.Provider, resolution.Model, &history) {
 			resp, err = activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
 		}
 		if err != nil {

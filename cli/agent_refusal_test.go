@@ -33,7 +33,7 @@ func TestResendTurnAfterRefusalNudgesAndIsBounded(t *testing.T) {
 	a := &AgentMode{cli: cliObj, logger: zap.NewNop()}
 	turn := []models.Message{{Role: "user", Content: "build the api"}, {Role: "assistant", Content: "reading"}}
 
-	require.True(t, a.resendTurnAfter(refusalErr(), &turn))
+	require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), &turn))
 	require.Len(t, turn, 3)
 	assert.Equal(t, "user", turn[2].Role)
 	assert.Contains(t, turn[2].Content, "stop_reason: refusal")
@@ -43,14 +43,14 @@ func TestResendTurnAfterRefusalNudgesAndIsBounded(t *testing.T) {
 	assert.Equal(t, 1, a.refusalRetries)
 	assert.Empty(t, cliObj.agentRouteOverrideHandle(), "off: the resend stays on the same model")
 
-	require.True(t, a.resendTurnAfter(refusalErr(), &turn))
+	require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), &turn))
 	assert.Equal(t, 2, a.refusalRetries)
-	assert.False(t, a.resendTurnAfter(refusalErr(), &turn), "a third refusal ends the run with the cause")
+	assert.False(t, a.resendTurnAfter(context.Background(), refusalErr(), &turn), "a third refusal ends the run with the cause")
 	assert.Len(t, turn, 4, "no nudge is appended once the run gives up")
 
 	a.resetPerRunState()
 	assert.Equal(t, 0, a.refusalRetries, "the budget is per run")
-	require.True(t, a.resendTurnAfter(refusalErr(), nil), "a nil outgoing history is tolerated")
+	require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), nil), "a nil outgoing history is tolerated")
 }
 
 func TestResendTurnAfterIgnoresOtherFailures(t *testing.T) {
@@ -59,10 +59,10 @@ func TestResendTurnAfterIgnoresOtherFailures(t *testing.T) {
 	a := &AgentMode{cli: cliObj, logger: zap.NewNop()}
 	turn := []models.Message{{Role: "user", Content: "x"}}
 
-	assert.False(t, a.resendTurnAfter(nil, &turn))
-	assert.False(t, a.resendTurnAfter(errors.New("connection reset"), &turn))
+	assert.False(t, a.resendTurnAfter(context.Background(), nil, &turn))
+	assert.False(t, a.resendTurnAfter(context.Background(), errors.New("connection reset"), &turn))
 	maxed := &llmclient.EmptyResponseError{Provider: "ClaudeAI", StopReason: llmclient.StopReasonMaxTokens}
-	assert.False(t, a.resendTurnAfter(maxed, &turn), "an empty reply that is not a refusal takes the existing recovery paths")
+	assert.False(t, a.resendTurnAfter(context.Background(), maxed, &turn), "an empty reply that is not a refusal takes the existing recovery paths")
 	assert.Len(t, turn, 1)
 	assert.Empty(t, cliObj.history)
 	assert.Equal(t, 0, a.refusalRetries)
@@ -82,7 +82,7 @@ func TestRefusalFallbackServesOneTurnThenHandsBack(t *testing.T) {
 	ctx := context.Background()
 	turn := []models.Message{{Role: "user", Content: "x"}}
 
-	require.True(t, a.resendTurnAfter(refusalErr(), &turn))
+	require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), &turn))
 	assert.Equal(t, "CLAUDEAI:claude-opus-5-5", cliObj.agentRouteOverrideHandle(), "Fable falls back to Opus on the same provider")
 	assert.Len(t, turn, 2, "the nudge travels with the resend")
 
@@ -107,7 +107,7 @@ func TestRefusalFallbackRestoresTheUsersOverride(t *testing.T) {
 	a := &AgentMode{cli: cliObj, logger: zap.NewNop()}
 	ctx := context.Background()
 
-	require.True(t, a.resendTurnAfter(refusalErr(), nil))
+	require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), nil))
 	assert.Equal(t, "CLAUDEAI:claude-haiku-4-5-20251001", cliObj.agentRouteOverrideHandle(), "an explicit handle is used as given")
 	a.clientAndCtxForTurn(ctx) // the fallback turn
 	a.clientAndCtxForTurn(ctx) // the turn after
@@ -125,18 +125,18 @@ func TestRefusalFallbackBecomesStickyAndResetsPerRun(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 1; i <= agentRefusalMaxRetries; i++ {
-		require.True(t, a.resendTurnAfter(refusalErr(), nil), "refusal %d", i)
+		require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), nil), "refusal %d", i)
 		a.clientAndCtxForTurn(ctx) // fallback turn
 		a.clientAndCtxForTurn(ctx) // back on Fable
 		assert.Empty(t, cliObj.agentRouteOverrideHandle(), "refusal %d: one-turn fallback", i)
 	}
-	require.True(t, a.resendTurnAfter(refusalErr(), nil), "a third refusal does not end the run")
+	require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), nil), "a third refusal does not end the run")
 	assert.True(t, a.refusalSticky)
 	for i := 0; i < 3; i++ {
 		a.clientAndCtxForTurn(ctx)
 		assert.Equal(t, "CLAUDEAI:claude-opus-5-5", cliObj.agentRouteOverrideHandle(), "sticky: the route stays")
 	}
-	require.True(t, a.resendTurnAfter(refusalErr(), nil), "refused on the fallback too: one more resend, same route")
+	require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), nil), "refused on the fallback too: one more resend, same route")
 	assert.Equal(t, "CLAUDEAI:claude-opus-5-5", cliObj.agentRouteOverrideHandle())
 
 	// A new run starts clean, on the user's model. (Run clears the override
@@ -166,7 +166,7 @@ func TestRefusalNoticePrintsOnATerminal(t *testing.T) {
 	cliObj.Model = "claude-fable-5-1"
 	a := &AgentMode{cli: cliObj, logger: zap.NewNop()}
 	turn := []models.Message{}
-	out := captureStdout(t, func() { require.True(t, a.resendTurnAfter(refusalErr(), &turn)) })
+	out := captureStdout(t, func() { require.True(t, a.resendTurnAfter(context.Background(), refusalErr(), &turn)) })
 	assert.Contains(t, out, "claude-opus-5")
 	assert.Contains(t, out, "1/2")
 }
@@ -214,7 +214,7 @@ func TestRefusalReasonLine(t *testing.T) {
 	turn := []models.Message{}
 	err := fmt.Errorf("turn: %w", &llmclient.EmptyResponseError{Provider: "ClaudeAI", Model: "claude-fable-5-1", StopReason: llmclient.StopReasonRefusal,
 		Details: &llmclient.StopDetails{Category: "cyber", Explanation: "exploit development"}})
-	out := captureStdout(t, func() { require.True(t, a.resendTurnAfter(err, &turn)) })
+	out := captureStdout(t, func() { require.True(t, a.resendTurnAfter(context.Background(), err, &turn)) })
 	assert.Contains(t, out, "cyber")
 	assert.Contains(t, out, "exploit development")
 	assert.Contains(t, out, "claude-opus-5")

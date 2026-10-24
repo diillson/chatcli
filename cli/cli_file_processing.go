@@ -233,7 +233,7 @@ func (cli *ChatCLI) gateImagesForRoute(ctx context.Context, provider, model stri
 		return nil, ""
 	}
 
-	switch cli.resolveVisionModeFor(provider, model) {
+	switch cli.resolveVisionModeCtx(ctx, provider, model, true) {
 	case visionNative:
 		return cli.compressImagesForVision(images), ""
 	case visionOff:

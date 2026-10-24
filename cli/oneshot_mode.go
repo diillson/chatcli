@@ -274,9 +274,10 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	// and the MCP/ACP chat turn (explicit CLI flags already resolved
 	// cli.Client, and a hint failure degrades to the session client).
 	activeClient := cli.Client
+	routeProvider, routeModel := cli.Provider, cli.Model
 	if modelHint != "" {
-		if c, _, _, err := cli.resolveRPCChatClient(modelHint, RPCChatOpts{}); err == nil && c != nil {
-			activeClient = c
+		if c, p, m, err := cli.resolveRPCChatClient(modelHint, RPCChatOpts{}); err == nil && c != nil {
+			activeClient, routeProvider, routeModel = c, p, m
 		}
 	}
 	ctx = cli.applyChatEffortHint(ctx, routeEffortForPrompt(userInput, skillEffort))
@@ -320,6 +321,9 @@ func (cli *ChatCLI) RunOnce(ctx context.Context, input string, disableAnimation 
 	aiResponse, err := activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 	// Auto-retry on OAuth token expiration (401)
 	if cli.refreshClientOnAuthError(err) {
+		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
+	}
+	if err != nil && cli.describeRejectedImages(ctx, err, routeProvider, routeModel) {
 		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, cli.history, effectiveMaxTokens)
 	}
 	// Overflow recovery (bounded), notices on stderr so stdout stays pipeable.

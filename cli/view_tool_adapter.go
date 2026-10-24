@@ -30,7 +30,8 @@ const (
 	viewMsgPDFUnreadFmt = "%q is not a readable PDF within the %d MB limit"
 	viewMsgNotImageFmt  = "%q is not a readable png/jpeg/gif/webp image within the attachment size limit"
 	viewMsgNoLoop       = "no agent loop is running to attach the image to — in chat mode use @file instead"
-	viewMsgDisabled     = "vision input is disabled or unavailable for the current model (see CHATCLI_VISION_INPUT)"
+	viewMsgDisabled     = "vision input is disabled (CHATCLI_VISION_INPUT=off): the image was not attached"
+	viewMsgNoDescriber  = "the current model (%s) does not take image input and no vision model could describe the image (none reachable with this account). Tell the user: switch to a vision model, or set CHATCLI_VISION_PROVIDER and CHATCLI_VISION_MODEL to one they can use"
 )
 
 // viewToolAdapter is the concrete plugins.ViewAdapter.
@@ -66,7 +67,10 @@ func (a *viewToolAdapter) ViewImage(ctx context.Context, path string) (string, e
 	if strings.TrimSpace(desc) != "" {
 		return fmt.Sprintf(viewMsgDescribedFmt, path, desc), nil
 	}
-	return "", errors.New(viewMsgDisabled)
+	if a.cli.resolveVisionModeCtx(ctx, a.cli.Provider, a.cli.Model, false) == visionOff {
+		return "", errors.New(viewMsgDisabled)
+	}
+	return "", fmt.Errorf(viewMsgNoDescriber, a.cli.Model)
 }
 
 // viewPDF attaches a PDF to the running loop (native for models that read

@@ -967,7 +967,7 @@ func (cli *ChatCLI) executeLLMTurn(
 			tempHistory, effectiveMaxTokens, resolution, stopSpinner)
 	}
 	return cli.executeBufferedTurn(ctx, activeClient, userInput, additionalContext,
-		tempHistory, effectiveMaxTokens, stopSpinner)
+		tempHistory, effectiveMaxTokens, resolution, stopSpinner)
 }
 
 // executeStreamingTurn runs the streaming path. It also drives the
@@ -990,6 +990,9 @@ func (cli *ChatCLI) executeStreamingTurn(
 		if fresh, ok := client.AsStreamingClient(cli.clientAfterRefresh(activeClient, resolution.Changed)); ok {
 			sc = fresh
 		}
+		chunks, err = sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+	}
+	if err != nil && cli.describeRejectedImages(ctx, err, resolution.Provider, resolution.Model, &tempHistory) {
 		chunks, err = sc.SendPromptStream(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 	}
 
@@ -1033,11 +1036,15 @@ func (cli *ChatCLI) executeBufferedTurn(
 	userInput, additionalContext string,
 	tempHistory []models.Message,
 	effectiveMaxTokens int,
+	resolution SkillClientResolution,
 	stopSpinner func(),
 ) (string, error) {
 	aiResponse, err := activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 	if cli.refreshClientOnAuthError(err) {
 		activeClient = cli.clientAfterRefresh(activeClient, false)
+		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
+	}
+	if err != nil && cli.describeRejectedImages(ctx, err, resolution.Provider, resolution.Model, &tempHistory) {
 		aiResponse, err = activeClient.SendPrompt(ctx, userInput+additionalContext, tempHistory, effectiveMaxTokens)
 	}
 	cli.animation.StopThinkingAnimation()
