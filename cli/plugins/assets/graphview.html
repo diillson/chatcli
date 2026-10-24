@@ -182,6 +182,9 @@ if (nodes.length === 0) document.getElementById("empty").style.display = "flex";
 
 // ---- camera ----
 let cam = { x: 0, y: 0, scale: 1 };
+// MIN_SCALE lets "fit" frame a laid-out graph of thousands of nodes (it
+// spreads over hundreds of thousands of units); nodes never draw below 2px.
+const MIN_SCALE = 0.002;
 function worldToScreen(x, y) { return [ (x - cam.x) * cam.scale + canvas.clientWidth / 2, (y - cam.y) * cam.scale + canvas.clientHeight / 2 ]; }
 function screenToWorld(sx, sy) { return [ (sx - canvas.clientWidth / 2) / cam.scale + cam.x, (sy - canvas.clientHeight / 2) / cam.scale + cam.y ]; }
 
@@ -203,16 +206,25 @@ function fitToView() {
   const vis = nodes.filter(visible);
   if (vis.length === 0) return;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of vis) {
-    minX = Math.min(minX, n.x - n.r); minY = Math.min(minY, n.y - n.r);
-    maxX = Math.max(maxX, n.x + n.r); maxY = Math.max(maxY, n.y + n.r);
+  if (vis.length > EXACT_MAX) {
+    // Big graphs: frame the bulk (2nd to 98th percentile on each axis). A few
+    // loosely linked nodes settle far out and would otherwise shrink the whole
+    // graph to a dot; they stay reachable by zooming out.
+    const xs = vis.map(n => n.x).sort((a, b) => a - b), ys = vis.map(n => n.y).sort((a, b) => a - b);
+    const lo = Math.floor(vis.length * 0.02), hi = Math.ceil(vis.length * 0.98) - 1;
+    minX = xs[lo]; maxX = xs[hi]; minY = ys[lo]; maxY = ys[hi];
+  } else {
+    for (const n of vis) {
+      minX = Math.min(minX, n.x - n.r); minY = Math.min(minY, n.y - n.r);
+      maxX = Math.max(maxX, n.x + n.r); maxY = Math.max(maxY, n.y + n.r);
+    }
   }
   const pad = 100;
   const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
   const s = Math.min((canvas.clientWidth - pad) / w, (canvas.clientHeight - pad) / h);
   // Allow zooming IN (up to 4×) so a small graph fills a large window, but never
   // so far that single nodes look huge.
-  cam.scale = Math.max(0.05, Math.min(s, 4));
+  cam.scale = Math.max(MIN_SCALE, Math.min(s, 4));
   cam.x = (minX + maxX) / 2; cam.y = (minY + maxY) / 2;
 }
 
@@ -224,11 +236,95 @@ const SPRING_K = 0.02;
 const GRAVITY = 0.012;
 const DAMPING = 0.86;
 
+// Up to EXACT_MAX nodes repulsion is computed pair by pair (O(n^2)), exactly
+// as always; above it, by Barnes-Hut (O(n log n)): a quadtree is rebuilt
+// every tick and a cell far enough away (size/distance < THETA) acts as one
+// body at its centre of mass. That is what lets a memory graph of several
+// thousand notes lay out and drag smoothly.
+const EXACT_MAX = 1000;
+const BATCH_EDGES = 2000; // above this, ordinary edges are drawn in batches
+const THETA2 = 0.81; // THETA = 0.9
+
+function buildQuadtree(list) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of list) {
+    if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+  }
+  const size = Math.max(maxX - minX, maxY - minY, 1) + 1;
+  const root = { x0: minX - 0.5, y0: minY - 0.5, size, mass: 0, cx: 0, cy: 0, body: null, kids: null };
+  for (const n of list) quadInsert(root, n, 0);
+  return root;
+}
+
+function quadInsert(cell, n, depth) {
+  // running centre of mass
+  cell.cx = (cell.cx * cell.mass + n.x) / (cell.mass + 1);
+  cell.cy = (cell.cy * cell.mass + n.y) / (cell.mass + 1);
+  cell.mass += 1;
+  if (!cell.kids) {
+    if (!cell.body) { cell.body = n; return; }
+    if (depth > 40) { (cell.extra || (cell.extra = [])).push(n); return; } // coincident points
+    const old = cell.body; cell.body = null;
+    cell.kids = [null, null, null, null];
+    quadPlace(cell, old, depth);
+  }
+  quadPlace(cell, n, depth);
+}
+
+function quadPlace(cell, n, depth) {
+  const h = cell.size / 2;
+  const right = n.x >= cell.x0 + h ? 1 : 0, down = n.y >= cell.y0 + h ? 1 : 0;
+  const k = right + 2 * down;
+  if (!cell.kids[k]) cell.kids[k] = { x0: cell.x0 + right * h, y0: cell.y0 + down * h, size: h, mass: 0, cx: 0, cy: 0, body: null, kids: null };
+  quadInsert(cell.kids[k], n, depth + 1);
+}
+
+let list_len = 0;
+// repulsionFor keeps the total push a node feels about what EXACT_MAX nodes
+// give: summed over thousands of nodes, the base strength flings every
+// weakly linked node to a far ring and leaves a dense core.
+function repulsionFor(n) { return n > EXACT_MAX ? REPULSION * EXACT_MAX / n : REPULSION; }
+
+function repelFrom(a, bx, by, mass) {
+  let dx = a.x - bx, dy = a.y - by;
+  let d2 = dx * dx + dy * dy;
+  if (d2 < 0.01) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = dx * dx + dy * dy + 0.01; }
+  const f = repulsionFor(list_len) * mass / d2;
+  const d = Math.sqrt(d2);
+  a.fx += dx / d * f; a.fy += dy / d * f;
+}
+
+function repelBarnesHut(list) {
+  list_len = list.length;
+  const root = buildQuadtree(list);
+  const stack = [];
+  for (const a of list) {
+    stack.length = 0; stack.push(root);
+    while (stack.length) {
+      const c = stack.pop();
+      if (c.mass === 0) continue;
+      if (!c.kids) {
+        if (c.body && c.body !== a) repelFrom(a, c.body.x, c.body.y, 1);
+        if (c.extra) for (const b of c.extra) if (b !== a) repelFrom(a, b.x, b.y, 1);
+        continue;
+      }
+      const dx = a.x - c.cx, dy = a.y - c.cy;
+      const d2 = dx * dx + dy * dy;
+      if (c.size * c.size < THETA2 * d2) { repelFrom(a, c.cx, c.cy, c.mass); continue; }
+      for (const k of c.kids) if (k) stack.push(k);
+    }
+  }
+}
+
 function step() {
   if (alpha < 0.002) return;
   const N = nodes.length;
   for (const n of nodes) { n.fx = 0; n.fy = 0; }
-  // pairwise repulsion (O(n^2) — fine for the bounded graphs we render)
+  if (N > EXACT_MAX) {
+    repelBarnesHut(nodes.filter(visible));
+  } else
+  // pairwise repulsion (O(n^2) — exact, for graphs up to EXACT_MAX nodes)
   for (let i = 0; i < N; i++) {
     const a = nodes[i];
     if (!visible(a)) continue;
@@ -245,15 +341,21 @@ function step() {
       b.fx -= ux * f; b.fy -= uy * f;
     }
   }
-  // springs along edges
+  // springs along edges. Normalized by degree, as d3-force does: the pull
+  // is divided by the smaller degree of the two ends and split by degree, so
+  // a hub with thousands of links (a project, a day) moves a little and its
+  // leaves move to it. Without it the hub's summed pull overshoots on every
+  // tick and the layout diverges (a 900-leaf star flew to 1e68).
   for (const e of edges) {
     if (!visible(e.a) || !visible(e.b)) continue;
     const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-    const f = SPRING_K * (d - SPRING_LEN) * Math.min(e.w, 4);
+    const da = Math.max(1, e.a.deg), db = Math.max(1, e.b.deg);
+    const f = SPRING_K * (d - SPRING_LEN) * Math.min(e.w, 4) / Math.min(da, db);
     const ux = dx / d, uy = dy / d;
-    e.a.fx += ux * f; e.a.fy += uy * f;
-    e.b.fx -= ux * f; e.b.fy -= uy * f;
+    const toA = 2 * db / (da + db), toB = 2 * da / (da + db); // equal degrees: 1 and 1, as before
+    e.a.fx += ux * f * toA; e.a.fy += uy * f * toA;
+    e.b.fx -= ux * f * toB; e.b.fy -= uy * f * toB;
   }
   // gravity toward origin + integrate
   for (const n of nodes) {
@@ -290,18 +392,38 @@ function draw() {
   const searching = query.length > 0;
   const focus = selected || hoverNode; // sticky selection wins, else hover
 
-  // edges
+  // edges — off-screen ones are skipped; on big graphs the ordinary edges
+  // are batched into a few paths (one per width and dim state) instead of
+  // one stroke each, and only highlighted edges are drawn one by one.
   ctx.lineWidth = 1;
+  const batch = edges.length > BATCH_EDGES ? new Map() : null;
   for (const e of edges) {
     if (!visible(e.a) || !visible(e.b)) continue;
     const hot = (focus && (e.a === focus || e.b === focus)) || e === selectedEdge;
     const dim = (searching && !(matches(e.a) && matches(e.b)) && !hot) || (focus && !hot);
     const [ax, ay] = worldToScreen(e.a.x, e.a.y);
     const [bx, by] = worldToScreen(e.b.x, e.b.y);
+    if ((ax < 0 && bx < 0) || (ay < 0 && by < 0) || (ax > W && bx > W) || (ay > H && by > H)) continue;
+    if (batch && !hot) {
+      const width = Math.round(Math.min(0.6 + e.w * 0.5, 3) * 2) / 2;
+      const key = (dim ? "d" : "n") + width;
+      let b = batch.get(key);
+      if (!b) { b = { dim, width, path: new Path2D() }; batch.set(key, b); }
+      b.path.moveTo(ax, ay); b.path.lineTo(bx, by);
+      continue;
+    }
     ctx.strokeStyle = hot ? edgeHi : edgeColor;
     ctx.globalAlpha = dim ? 0.08 : (hot ? 0.9 : 0.5);
     ctx.lineWidth = Math.min(0.6 + e.w * 0.5, 3) * (hot ? 1.6 : 1);
     ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+  }
+  if (batch) {
+    for (const b of batch.values()) {
+      ctx.strokeStyle = edgeColor;
+      ctx.globalAlpha = b.dim ? 0.08 : 0.5;
+      ctx.lineWidth = b.width;
+      ctx.stroke(b.path);
+    }
   }
   ctx.globalAlpha = 1;
 
@@ -311,6 +433,7 @@ function draw() {
     if (!visible(n)) continue;
     const [sx, sy] = worldToScreen(n.x, n.y);
     const r = Math.max(2, n.r * cam.scale);
+    if (sx < -r - 80 || sy < -r - 20 || sx > W + r + 80 || sy > H + r + 20) continue; // off-screen (label margin)
     const isHover = n === focus;
     const isNeighbor = focus && isNeighborOf(n, focus);
     const dim = (searching && !matches(n)) || (focus && !isHover && !isNeighbor);
@@ -505,7 +628,7 @@ canvas.addEventListener("pointermove", (ev) => {
   if (pinch && pointers.size >= 2) {
     const d = pointerDist();
     if (d > 0 && pinch.dist > 0) {
-      cam.scale = Math.max(0.05, Math.min(cam.scale * (d / pinch.dist), 6));
+      cam.scale = Math.max(MIN_SCALE, Math.min(cam.scale * (d / pinch.dist), 6));
       pinch.dist = d;
     }
     const [mx, my] = pointerMid();
@@ -571,7 +694,7 @@ canvas.addEventListener("wheel", (ev) => {
   userInteracted = true;
   const [wx, wy] = screenToWorld(ev.clientX, ev.clientY);
   const factor = Math.exp(-ev.deltaY * 0.0015);
-  cam.scale = Math.max(0.05, Math.min(cam.scale * factor, 6));
+  cam.scale = Math.max(MIN_SCALE, Math.min(cam.scale * factor, 6));
   const [nx, ny] = screenToWorld(ev.clientX, ev.clientY);
   cam.x += wx - nx; cam.y += wy - ny;
 }, { passive: false });
