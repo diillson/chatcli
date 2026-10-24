@@ -17,6 +17,10 @@ type DailyNoteStore struct {
 	memoryDir string
 	logger    *zap.Logger
 	writeMu   sync.Mutex
+
+	// changeNotifier marks the knowledge graph stale on every append and
+	// cleanup — daily notes are notes of the vault model too.
+	changeNotifier
 }
 
 // NewDailyNoteStore creates a new daily note store.
@@ -54,6 +58,7 @@ func (d *DailyNoteStore) WriteDailyNote(entry string) error {
 	if err := atomicWriteFile(path, next, 0o600); err != nil {
 		return fmt.Errorf("writing daily note: %w", err)
 	}
+	d.notifyChanged()
 	return nil
 }
 
@@ -125,6 +130,9 @@ func (d *DailyNoteStore) Cleanup(retentionDays int) (int, error) {
 
 	// Cleanup empty month directories
 	d.cleanEmptyDirs()
+	if deleted > 0 {
+		d.notifyChanged()
+	}
 
 	return deleted, err
 }

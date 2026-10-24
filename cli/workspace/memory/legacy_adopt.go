@@ -47,7 +47,7 @@ const (
 
 // legacyStoreFiles are the files the memory layers persist at the top of
 // the memory directory (facts.go, episodes.go, profile.go, topics.go,
-// projects.go, patterns.go, graph_cache.go, vector_store.go, compactor.go,
+// projects.go, links.go, patterns.go, graph_cache.go, vector_store.go, compactor.go,
 // migration.go). Keep in sync when a store adds a file.
 var legacyStoreFiles = []string{
 	"MEMORY.md",
@@ -57,6 +57,7 @@ var legacyStoreFiles = []string{
 	"user_profile.json",
 	"topics.json",
 	"projects.json",
+	"links.json",
 	"usage_stats.json",
 	"graph.json",
 	"vector_index.json",

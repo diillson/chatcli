@@ -1,0 +1,4 @@
+{
+  "memory.export.done": "Exportados %d registros para %s (%d fatos, %d episódios, %d tópicos, %d projetos, %d links) · %s",
+  "memory.import.done": "Mesclados %d registros: %d fatos adicionados (%d já conhecidos), %d episódios (%d já conhecidos), %d tópicos, %d projetos, %d links"
+}

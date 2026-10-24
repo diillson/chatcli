@@ -12,6 +12,9 @@
  * Deliberate NON-callers (rebuild-storm guards, keep in sync with the tap
  * list in graph_cache.go): FactIndex.MarkAccessed, bare persistLocked calls,
  * ProjectTracker.Touch, UserProfileStore.RecordCommand.
+ *
+ * Taps: facts, topics, projects, profile, episodes, links, daily notes
+ * (append + cleanup) and rollups (digest written or retired).
  */
 package memory
 

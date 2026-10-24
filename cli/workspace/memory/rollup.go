@@ -40,6 +40,47 @@ type RollupStore struct {
 	memoryDir string
 	logger    *zap.Logger
 	episodes  *EpisodeStore // optional; nil → daily-notes-only sources
+
+	// changeNotifier marks the knowledge graph stale when a digest is
+	// written or retired — digests are notes of the vault model.
+	changeNotifier
+}
+
+// Digest is one weekly or monthly rollup as the knowledge graph sees it.
+type Digest struct {
+	// Period is "weekly" or "monthly".
+	Period string
+	// Label is the period id: "2026-W27" or "2026-06".
+	Label string
+	// Path is the digest file.
+	Path string
+	// Content is the digest text (opened when sealed).
+	Content string
+}
+
+// Digests returns every weekly and monthly digest, oldest first within
+// each period. Unreadable (e.g. sealed without the key) files are skipped.
+func (rs *RollupStore) Digests() []Digest {
+	var out []Digest
+	for _, period := range []string{"weekly", "monthly"} {
+		for _, path := range rs.sortedFiles(period) {
+			data, err := readStoreFile(path)
+			if err != nil {
+				continue
+			}
+			content := strings.TrimSpace(string(data))
+			if content == "" {
+				continue
+			}
+			out = append(out, Digest{
+				Period:  period,
+				Label:   strings.TrimSuffix(filepath.Base(path), ".md"),
+				Path:    path,
+				Content: content,
+			})
+		}
+	}
+	return out
 }
 
 // NewRollupStore creates a rollup store rooted at the memory directory.
@@ -480,7 +521,11 @@ func (rs *RollupStore) writeDigest(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	return atomicWriteFile(path, []byte(content), 0o600)
+	if err := atomicWriteFile(path, []byte(content), 0o600); err != nil {
+		return err
+	}
+	rs.notifyChanged()
+	return nil
 }
 
 // enforceWeeklyRetention deletes the oldest weeklies beyond the cap; their
@@ -492,6 +537,7 @@ func (rs *RollupStore) enforceWeeklyRetention() {
 			rs.logger.Warn("weekly retention delete failed", zap.String("file", files[0]), zap.Error(err))
 			return
 		}
+		rs.notifyChanged()
 		files = files[1:]
 	}
 }

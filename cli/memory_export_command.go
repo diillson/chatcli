@@ -51,7 +51,7 @@ func (cli *ChatCLI) exportMemory(path string) {
 	if rep.Sealed {
 		sealed = i18n.T("memory.export.sealed")
 	}
-	fmt.Println(colorize("  "+i18n.T("memory.export.done", rep.Total(), path, rep.Facts, rep.Episodes, rep.Topics, rep.Projects, sealed), ColorGreen))
+	fmt.Println(colorize("  "+i18n.T("memory.export.done", rep.Total(), path, rep.Facts, rep.Episodes, rep.Topics, rep.Projects, rep.Links, sealed), ColorGreen))
 }
 
 // importMemory is /memory import <path>: merges an export into the stores.
@@ -73,7 +73,7 @@ func (cli *ChatCLI) importMemory(path string) {
 		fmt.Println(colorize("  "+i18n.T("memory.import.error", err), ColorRed))
 		return
 	}
-	fmt.Println(colorize("  "+i18n.T("memory.import.done", rep.Total(), rep.Facts, rep.FactsSkipped, rep.Episodes, rep.EpisodesSkipped, rep.Topics, rep.Projects), ColorGreen))
+	fmt.Println(colorize("  "+i18n.T("memory.import.done", rep.Total(), rep.Facts, rep.FactsSkipped, rep.Episodes, rep.EpisodesSkipped, rep.Topics, rep.Projects, rep.Links), ColorGreen))
 }
 
 // recallMemory is /memory recall <query>: what auto-recall would inject

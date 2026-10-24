@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -36,6 +37,9 @@ type Manager struct {
 	Daily    *DailyNoteStore
 	Rollups  *RollupStore
 	Episodes *EpisodeStore
+	// Links holds the explicit note links (links.json) — the only graph
+	// edges that are user data rather than derivation.
+	Links *LinkStore
 
 	compactor *Compactor
 	retriever *RelevanceRetriever
@@ -52,6 +56,16 @@ type Manager struct {
 	// launch overlapping backfills embedding the same facts — double the
 	// embedding bill for zero benefit.
 	backfillInFlight atomic.Bool
+
+	// linkExists answers whether a link endpoint (graph node id) still names
+	// something in the source stores — wired by the CLI layer, which owns
+	// the session/context/skill stores. nil disables link GC entirely.
+	linkExists atomic.Pointer[func() func(id string) bool]
+
+	// compactMu serializes RunCompaction: /memory compact and the background
+	// worker can both trigger one, and two consolidations overlapping would
+	// interleave fact rewrites and the link remap that follows them.
+	compactMu sync.Mutex
 
 	// graph is the persisted knowledge-graph cache (graph_cache.go). Always
 	// constructed; inert until the CLI layer wires a builder through
@@ -82,6 +96,7 @@ func NewManager(memoryDir string, config Config, logger *zap.Logger) *Manager {
 	m.Daily = NewDailyNoteStore(memoryDir, logger)
 	m.Rollups = NewRollupStore(memoryDir, logger)
 	m.Episodes = NewEpisodeStore(memoryDir, config.MaxEpisodesCount, logger)
+	m.Links = NewLinkStore(memoryDir, logger)
 
 	m.compactor = NewCompactor(m.Facts, m.Daily, config, memoryDir, logger)
 	m.retriever = NewRelevanceRetriever(m.Facts, m.Profile, m.Topics, m.Projects, m.Patterns, m.Daily, config)
@@ -101,6 +116,9 @@ func NewManager(memoryDir string, config Config, logger *zap.Logger) *Manager {
 	m.Projects.SetOnChanged(m.graph.MarkDirty)
 	m.Profile.SetOnChanged(m.graph.MarkDirty)
 	m.Episodes.SetOnChanged(m.graph.MarkDirty)
+	m.Links.SetOnChanged(m.graph.MarkDirty)
+	m.Daily.SetOnChanged(m.graph.MarkDirty)
+	m.Rollups.SetOnChanged(m.graph.MarkDirty)
 	m.retriever.SetGraph(m.graph)
 
 	// Auto-migrate if needed
@@ -406,6 +424,18 @@ func (m *Manager) WaitGraphPersist() {
 // created).
 func (m *Manager) MarkGraphDirty() {
 	m.graph.MarkDirty()
+}
+
+// PeekKnowledgeGraph returns the cached graph snapshot without rebuilding
+// (nil when none was built yet). Never pays a derivation.
+func (m *Manager) PeekKnowledgeGraph() *knowledge.Graph {
+	return m.graph.Peek()
+}
+
+// OnGraphDirty registers a cheap callback fired whenever the graph becomes
+// stale (see GraphCache.SetOnDirty) — the vault syncer's trigger.
+func (m *Manager) OnGraphDirty(fn func()) {
+	m.graph.SetOnDirty(fn)
 }
 
 // GraphStats reports the cached graph's size without triggering a build.
@@ -728,10 +758,56 @@ func (m *Manager) RecordInteraction(event InteractionEvent) {
 
 // RunCompaction runs memory compaction (LLM-assisted or score-based).
 func (m *Manager) RunCompaction(ctx context.Context, sendPrompt func(ctx context.Context, prompt string) (string, error)) error {
+	m.compactMu.Lock()
+	defer m.compactMu.Unlock()
+	var err error
 	if sendPrompt != nil {
-		return m.compactor.RunWithLLM(ctx, sendPrompt)
+		err = m.compactor.RunWithLLM(ctx, sendPrompt)
+		// LLM consolidation rewrites facts (new content, new content-hash
+		// id); explicit links follow each rewritten fact to the fact the
+		// consolidation created for it. Score-based compaction only
+		// archives — nothing to follow.
+		if m.Links != nil {
+			if n := m.Links.Remap(m.compactor.LastRemap()); n > 0 {
+				m.logger.Debug("memory links: followed compacted facts", zap.Int("moved", n))
+			}
+		}
+	} else {
+		err = m.compactor.RunScoreBased()
 	}
-	return m.compactor.RunScoreBased()
+	m.GCLinks()
+	return err
+}
+
+// SetLinkExistence wires the endpoint check link GC uses (see linkExists):
+// a factory called once per GC pass, so the check can index the stores
+// once instead of once per link. Pass nil to disable GC.
+func (m *Manager) SetLinkExistence(factory func() func(id string) bool) {
+	if factory == nil {
+		m.linkExists.Store(nil)
+		return
+	}
+	m.linkExists.Store(&factory)
+}
+
+// GCLinks maintains links.json (see LinkStore.GC) against the SOURCE
+// STORES, through the existence check the CLI layer wires — never against
+// the graph snapshot, which caps sessions, episodes and documents and
+// would make a link to a live but older note look dangling. A no-op until
+// that check is wired: guessing would delete user data.
+func (m *Manager) GCLinks() int {
+	if m.Links == nil {
+		return 0
+	}
+	factory := m.linkExists.Load()
+	if factory == nil {
+		return 0
+	}
+	exists := (*factory)()
+	if exists == nil {
+		return 0
+	}
+	return m.Links.GC(exists)
 }
 
 // NeedsCompaction checks if compaction should run.
