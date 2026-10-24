@@ -1,0 +1,23 @@
+{
+  "sec.cmd.suggest_reveal": "Lê um arquivo cifrado em texto aberto sem decifrá-lo no disco",
+  "sec.cmd.suggest_reveal_file": "arquivo cifrado do store",
+  "sec.cmd.suggest_reveal_out": "grava uma cópia decifrada neste caminho em vez de mostrar",
+  "sec.cmd.suggest_reveal_force": "sobrescreve o arquivo do --out se ele existir",
+  "sec.reveal.terminal_only": "o reveal só roda num terminal interativo: aqui (ACP, server ou web UI) o texto aberto sairia desta máquina.",
+  "sec.reveal.out_missing": "--out precisa de um caminho",
+  "sec.reveal.extra_arg": "argumento inesperado %q (uso: /config security reveal [<arquivo>] [--out <caminho>] [--force])",
+  "sec.reveal.none": "Nenhum arquivo cifrado em %s.",
+  "sec.reveal.list_header": "%d arquivos cifrados em %s:",
+  "sec.reveal.usage_hint": "Abra um com /config security reveal <arquivo> (Tab completa o nome), ou grave uma cópia com --out <caminho>. O original continua cifrado.",
+  "sec.reveal.not_found": "%q não é um arquivo cifrado do store.",
+  "sec.reveal.list_hint": "Rode /config security reveal sem arquivo para listá-los.",
+  "sec.reveal.open_failed": "Não foi possível abrir %s: %v",
+  "sec.reveal.binary": "%s é binário (%s); grave-o num arquivo com --out <caminho>.",
+  "sec.reveal.header": "── %s (aberto em memória; o arquivo no disco continua cifrado) ──",
+  "sec.reveal.truncated": "Mostrando os primeiros %s de %s; grave o arquivo inteiro com /config security reveal %s --out <caminho>.",
+  "sec.reveal.out_in_root": "--out precisa ficar fora do state root (%s): uma cópia em texto aberto não pode ficar entre os stores cifrados.",
+  "sec.reveal.out_exists": "%s já existe; use --force para sobrescrever.",
+  "sec.reveal.write_failed": "Não foi possível gravar %s: %v",
+  "sec.reveal.written": "%s aberto → %s (%s, permissões 0600).",
+  "sec.reveal.written_warn": "Esta cópia está em texto aberto: apague quando terminar."
+}

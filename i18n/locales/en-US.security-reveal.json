@@ -1,0 +1,23 @@
+{
+  "sec.cmd.suggest_reveal": "Read a sealed file in plaintext without unsealing it on disk",
+  "sec.cmd.suggest_reveal_file": "sealed store file",
+  "sec.cmd.suggest_reveal_out": "write an opened copy to this path instead of printing",
+  "sec.cmd.suggest_reveal_force": "overwrite the --out file if it exists",
+  "sec.reveal.terminal_only": "reveal runs only in an interactive terminal: here (ACP, server or web UI) the plaintext would leave this machine.",
+  "sec.reveal.out_missing": "--out needs a path",
+  "sec.reveal.extra_arg": "unexpected argument %q (usage: /config security reveal [<file>] [--out <path>] [--force])",
+  "sec.reveal.none": "No sealed files under %s.",
+  "sec.reveal.list_header": "%d sealed files under %s:",
+  "sec.reveal.usage_hint": "Open one with /config security reveal <file> (Tab completes the name), or write a copy with --out <path>. The original stays sealed.",
+  "sec.reveal.not_found": "%q is not a sealed store file.",
+  "sec.reveal.list_hint": "Run /config security reveal with no file to list them.",
+  "sec.reveal.open_failed": "Could not open %s: %v",
+  "sec.reveal.binary": "%s is binary (%s); write it to a file with --out <path>.",
+  "sec.reveal.header": "── %s (opened in memory; the file on disk stays sealed) ──",
+  "sec.reveal.truncated": "Showing the first %s of %s; write the whole file with /config security reveal %s --out <path>.",
+  "sec.reveal.out_in_root": "--out must be outside the state root (%s): a plaintext copy must not sit among the sealed stores.",
+  "sec.reveal.out_exists": "%s already exists; add --force to overwrite it.",
+  "sec.reveal.write_failed": "Could not write %s: %v",
+  "sec.reveal.written": "%s opened → %s (%s, permissions 0600).",
+  "sec.reveal.written_warn": "This copy is plaintext: delete it when you are done."
+}

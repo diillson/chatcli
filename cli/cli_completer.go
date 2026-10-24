@@ -2019,6 +2019,7 @@ func (cli *ChatCLI) getConfigSecuritySuggestions(d prompt.Document) []prompt.Sug
 			{Text: "forget", Description: i18n.T("sec.cmd.rules_word")},
 			{Text: "reload", Description: i18n.T("sec.cmd.reloaded")},
 			{Text: "reseal", Description: i18n.T("sec.cmd.suggest_reseal")},
+			{Text: "reveal", Description: i18n.T("sec.cmd.suggest_reveal")},
 			{Text: "recovery-key", Description: i18n.T("sec.cmd.suggest_recovery_key")},
 			{Text: "use-keychain", Description: i18n.T("sec.cmd.suggest_use_keychain")},
 			{Text: "verify-audit", Description: i18n.T("sec.cmd.suggest_verify_audit")},
@@ -2034,7 +2035,35 @@ func (cli *ChatCLI) getConfigSecuritySuggestions(d prompt.Document) []prompt.Sug
 	if sub == "forget" || sub == "remove" || sub == "rm" {
 		return cli.getConfigSecurityPatternSuggestions(word)
 	}
+	if sub == "reveal" || sub == "show" || sub == "decrypt" {
+		return cli.getConfigSecurityRevealSuggestions(args, line, word)
+	}
 	return []prompt.Suggest{}
+}
+
+// getConfigSecurityRevealSuggestions offers the sealed store files (relative
+// to the state root) for /config security reveal, then its flags.
+func (cli *ChatCLI) getConfigSecurityRevealSuggestions(args []string, line, word string) []prompt.Suggest {
+	typing := !strings.HasSuffix(line, " ")
+	pos := len(args) // index of the word being completed
+	if typing {
+		pos--
+	}
+	if pos > 0 && (args[pos-1] == "--out" || args[pos-1] == "-o") {
+		return []prompt.Suggest{} // a free path
+	}
+	if pos == 3 {
+		var out []prompt.Suggest
+		for _, f := range cli.cachedRevealCandidates() {
+			out = append(out, prompt.Suggest{Text: f.Rel, Description: i18n.T("sec.cmd.suggest_reveal_file")})
+		}
+		return prompt.FilterContains(out, word, true)
+	}
+	flags := []prompt.Suggest{
+		{Text: "--out", Description: i18n.T("sec.cmd.suggest_reveal_out")},
+		{Text: "--force", Description: i18n.T("sec.cmd.suggest_reveal_force")},
+	}
+	return prompt.FilterHasPrefix(flags, word, true)
 }
 
 // getConfigSecurityPatternSuggestions lists every rule pattern in the
