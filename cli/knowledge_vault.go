@@ -270,6 +270,17 @@ func (s *vaultSyncer) shutdown() {
 	}
 }
 
+// knowledgeGraph is the bound-store twin of ChatCLI.knowledgeGraph: the
+// cached snapshot when the persisted graph is live, else a fresh build.
+func (src *graphSources) knowledgeGraph() *knowledge.Graph {
+	if memoryGraphEnabled() && src.memoryStore != nil {
+		if g := src.memoryStore.Manager().KnowledgeGraph(); g != nil {
+			return g
+		}
+	}
+	return src.build()
+}
+
 // shutdownVaultSyncers stops the base syncer and every resident tenant's.
 func (cli *ChatCLI) shutdownVaultSyncers() {
 	if cli.vaultSync != nil {

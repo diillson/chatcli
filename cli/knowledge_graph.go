@@ -192,17 +192,6 @@ func (src *graphSources) build() *knowledge.Graph {
 	return g
 }
 
-// knowledgeGraph is the bound-store twin of ChatCLI.knowledgeGraph: the
-// cached snapshot when the persisted graph is live, else a fresh build.
-func (src *graphSources) knowledgeGraph() *knowledge.Graph {
-	if memoryGraphEnabled() && src.memoryStore != nil {
-		if g := src.memoryStore.Manager().KnowledgeGraph(); g != nil {
-			return g
-		}
-	}
-	return src.build()
-}
-
 // graphMentionOptions: prose in facts, topics, episodes, projects and cards
 // autolinks to the notes people name — projects, topics, skills and
 // contexts. Documents and tags are not mention targets (file names and tag
