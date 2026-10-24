@@ -21,6 +21,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -55,9 +56,14 @@ const refusalNudge = "[system] Your previous reply was stopped by the provider's
 // resendTurnAfter reports whether the turn that failed with err should be
 // sent again: after an expired credential was refreshed, or after a
 // refusal, with a nudge appended to both the outgoing turn and the run's
-// history so the resend and every later turn carry it.
-func (a *AgentMode) resendTurnAfter(err error, turnHistory *[]models.Message) bool {
+// history so the resend and every later turn carry it; or after the
+// provider refused the turn's images, which are then described as text
+// (vision_rejection.go).
+func (a *AgentMode) resendTurnAfter(ctx context.Context, err error, turnHistory *[]models.Message) bool {
 	if a.cli.refreshClientOnAuthError(err) {
+		return true
+	}
+	if provider, model := a.effectiveRoute(); a.cli.describeRejectedImages(ctx, err, provider, model, turnHistory) {
 		return true
 	}
 	return a.nudgeAfterRefusal(err, turnHistory)

@@ -182,6 +182,17 @@ func (cli *ChatCLI) runChatTurnSerialized(
 		}
 		reply, usage, err = send()
 	}
+	// The provider refused the images the gate let through natively: the
+	// route is remembered as blind and the turn is rebuilt with their
+	// description instead (vision_rejection.go).
+	if err != nil && len(images) > 0 {
+		if desc, ok := cli.describeImagesRejectedBy(ctx, err, resProvider, resModel, images); ok {
+			additionalContext += desc
+			images = nil
+			tempHistory = cli.buildChatTempHistoryWithContext(assembly.parts, assembly.turnContext, input, additionalContext, images, docs...)
+			reply, usage, err = send()
+		}
+	}
 	// Overflow recovery (bounded): the unattended surfaces used to fail
 	// the turn outright where the REPL agent loop recovered.
 	rec := cli.newOverflowRecovery("rpc", nil)

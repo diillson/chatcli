@@ -2744,7 +2744,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		if canUseNativeTools && len(nativeToolDefs) > 0 {
 			a.cli.notePrefixShape(turnHistory, nativeToolDefs)
 			llmResp, err = toolAwareClient.SendPromptWithTools(turnCtx, "", turnHistory, nativeToolDefs, currentMaxTokens)
-			if a.resendTurnAfter(err, &turnHistory) {
+			if a.resendTurnAfter(turnCtx, err, &turnHistory) {
 				// The refresh rebuilt the session client; re-resolve the
 				// turn client so the retry runs on a fresh handle for the
 				// provider that actually served this turn (route override
@@ -2763,7 +2763,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		} else {
 			a.cli.notePrefixShape(turnHistory, nil)
 			aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
-			if a.resendTurnAfter(err, &turnHistory) {
+			if a.resendTurnAfter(turnCtx, err, &turnHistory) {
 				turnClient, turnCtx = a.clientAndCtxForTurn(ctx)
 				aiResponse, err = turnClient.SendPrompt(turnCtx, "", turnHistory, currentMaxTokens)
 			}
