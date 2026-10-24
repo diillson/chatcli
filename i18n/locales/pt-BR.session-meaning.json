@@ -1,0 +1,6 @@
+{
+  "session.tool.match_header_many": "Resultados para %d formulações (%s):",
+  "session.tool.related": "relacionada pelo significado",
+  "session.tool.related_similarity": "relacionada pelo significado (similaridade %.2f)",
+  "session.tool.found_by": "encontrada por: %s"
+}

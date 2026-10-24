@@ -70,6 +70,14 @@ type SessionWindowSearcher interface {
 	SearchWindow(ctx context.Context, query string, limit int, from, to, asOf string) (string, error)
 }
 
+// SessionMultiSearcher is an OPTIONAL capability behind search's queries
+// flag: one search over several phrasings of the same question, fused into
+// one ranking, with the window and as_of semantics of SearchWindow (the
+// first phrasing may carry the time expression).
+type SessionMultiSearcher interface {
+	SearchMany(ctx context.Context, queries []string, limit int, from, to, asOf string) (string, error)
+}
+
 // SessionWriter is an OPTIONAL capability a SessionAdapter may implement to
 // back the NON-destructive write subcommands (save/fork/attach/detach) —
 // same optional-interface pattern as SessionReader, so read-only adapters
@@ -122,7 +130,7 @@ func (*BuiltinSessionPlugin) Name() string { return "@session" }
 
 // Description surfaces the tool.
 func (*BuiltinSessionPlugin) Description() string {
-	return "Search, read and manage saved conversations: recall what was discussed earlier (each search hit shows its save date and age; filter by date with from/to and count relative dates from as_of), list sessions, save or fork the current conversation under a name, and attach/detach the live session binding. Use when the user refers to a prior conversation ('what did we decide about X', 'continue where we left off') or asks to keep working under a named session."
+	return "Search, read and manage saved conversations: recall what was discussed earlier (each search hit shows its save date and age; filter by date with from/to and count relative dates from as_of; pass queries with several phrasings to search them all in one call, since the user may have said it in other words), list sessions, save or fork the current conversation under a name, and attach/detach the live session binding. Use when the user refers to a prior conversation ('what did we decide about X', 'continue where we left off') or asks to keep working under a named session."
 }
 
 // Usage explains the canonical invocation.
@@ -130,9 +138,11 @@ func (*BuiltinSessionPlugin) Usage() string {
 	return `<tool_call name="@session" args='{"cmd":"search","args":{"query":"rate limiter design"}}' />
 
 Subcommands (cmd + args):
-  search {query, limit?, from?, to?, as_of?}
+  search {query, queries?, limit?, from?, to?, as_of?}
                            search saved sessions; returns matching sessions + snippets,
-                           each with its save date and age. from/to bound the save date
+                           each with its save date and age. queries searches several
+                           phrasings in ONE call (the user may have used other words;
+                           always for counts and lists). from/to bound the save date
                            (ISO date or "3 weeks ago"); as_of is the date relative
                            expressions are counted from, for this call only
   get {name, offset?, limit?, query?, message?}   read one saved session page by page;
@@ -156,7 +166,7 @@ that matter. To keep working under a name: save (new) or attach (existing).`
 }
 
 // Version is semver.
-func (*BuiltinSessionPlugin) Version() string { return "1.5.0" }
+func (*BuiltinSessionPlugin) Version() string { return "1.6.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSessionPlugin) Path() string { return "" }
@@ -170,7 +180,8 @@ func (*BuiltinSessionPlugin) Schema() string {
 				"name":        "search",
 				"description": "Search saved conversations for a query; returns matching sessions with snippets, each with its save date (with weekday) and its age in calendar days relative to the current date. When a query has several terms, sessions holding only some of them follow the full matches, labeled partial: a later update or a second item is often worded differently. Narrow by date with from/to, and pass as_of to count relative expressions (\"2 weeks ago\", \"last month\") from a date other than today — for this call only; nothing else changes. A time expression inside query sets the window when from/to are absent.",
 				"flags": []map[string]interface{}{
-					{"name": "query", "type": "string", "required": false, "description": "Free-text search across saved sessions. Required unless from or to is given (then the window's sessions are listed newest first)."},
+					{"name": "query", "type": "string", "required": false, "description": "Free-text search across saved sessions. Required unless queries, from or to is given (with only a window, its sessions are listed newest first)."},
+					{"name": "queries", "type": "array", "required": false, "description": "Several phrasings of the same question, searched in ONE call and fused into one ranking; each hit says which phrasings found it. Use it whenever the user may have described the thing in other words, and always for counts, lists and 'which/how many' questions: give the words the user would have used (\"projects I led\", \"team lead\", \"presented my research\"). Up to 6; query, when given, is the first."},
 					{"name": "limit", "type": "number", "required": false, "description": "Max snippets per session (default 3)."},
 					{"name": "from", "type": "string", "required": false, "description": "Earliest save date: ISO date (2023-05-01, 2023-05) or natural expression (\"3 weeks ago\", \"abril\")."},
 					{"name": "to", "type": "string", "required": false, "description": "Latest save date, same forms as from; a day or month includes all of it."},
@@ -178,6 +189,7 @@ func (*BuiltinSessionPlugin) Schema() string {
 				},
 				"examples": []string{
 					`{"cmd":"search","args":{"query":"auth refactor"}}`,
+					`{"cmd":"search","args":{"queries":["projects I led","team lead","presented my research","managed the project"]}}`,
 					`{"cmd":"search","args":{"query":"airbnb booking","from":"2023-01","to":"2023-03"}}`,
 					`{"cmd":"search","args":{"query":"ibotta","to":"3 weeks ago","as_of":"2023-05-30"}}`,
 				},
@@ -271,12 +283,21 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 			AsOf  string `json:"as_of"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
+		phrasings := sessionSearchPhrasings(inner, in.Query)
 		windowed := strings.TrimSpace(in.From) != "" || strings.TrimSpace(in.To) != ""
-		if strings.TrimSpace(in.Query) == "" && !windowed {
-			return "", errors.New(`@session search: "query" is required (or give from/to to list a date window)`)
+		if len(phrasings) == 0 && !windowed {
+			return "", errors.New(`@session search: "query" or "queries" is required (or give from/to to list a date window)`)
 		}
 		if in.Limit <= 0 {
 			in.Limit = 3
+		}
+		if len(phrasings) > 1 {
+			if ms, ok := adapter.(SessionMultiSearcher); ok {
+				return ms.SearchMany(ctx, phrasings, in.Limit, in.From, in.To, in.AsOf)
+			}
+		}
+		if len(phrasings) > 0 {
+			in.Query = phrasings[0]
 		}
 		if ws, ok := adapter.(SessionWindowSearcher); ok {
 			return ws.SearchWindow(ctx, in.Query, in.Limit, in.From, in.To, in.AsOf)
@@ -426,6 +447,51 @@ func canonicalSessionCmd(s string) string {
 		return "detach"
 	}
 	return ""
+}
+
+// sessionSearchPhrasings collects the phrasings of a search: query first,
+// then the queries list. Lenient on purpose: models send the list under
+// several names (queries, alternatives, phrasings, paraphrases, also) and
+// sometimes as one string separated by "|" or newlines.
+func sessionSearchPhrasings(inner, query string) []string {
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(inner), &raw)
+	var out []string
+	add := func(s string) {
+		for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '|' || r == '\n' }) {
+			if p := strings.TrimSpace(part); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	add(query)
+	for _, key := range []string{"queries", "alternatives", "phrasings", "paraphrases", "also"} {
+		v, ok := raw[key]
+		if !ok {
+			continue
+		}
+		var list []string
+		if json.Unmarshal(v, &list) == nil {
+			for _, s := range list {
+				add(s)
+			}
+			continue
+		}
+		var one string
+		if json.Unmarshal(v, &one) == nil {
+			add(one)
+		}
+	}
+	seen := make(map[string]bool, len(out))
+	uniq := out[:0]
+	for _, p := range out {
+		k := strings.ToLower(p)
+		if !seen[k] {
+			seen[k] = true
+			uniq = append(uniq, p)
+		}
+	}
+	return uniq
 }
 
 // firstNonBlank returns the first argument that is not blank, or "".

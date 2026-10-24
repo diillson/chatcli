@@ -1,0 +1,6 @@
+{
+  "session.tool.match_header_many": "Matches for %d phrasings (%s):",
+  "session.tool.related": "related by meaning",
+  "session.tool.related_similarity": "related by meaning (similarity %.2f)",
+  "session.tool.found_by": "found by: %s"
+}
