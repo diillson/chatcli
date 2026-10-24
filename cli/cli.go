@@ -929,15 +929,12 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		logger.Debug("Project directory set for persona", zap.String("dir", projectDir))
 	}
 
-	if cli.memoryStore != nil {
-		// The graph binds the store set it derives from (graphSources), so
-		// it is wired only once every source exists, skills included:
-		// wiring it earlier would freeze a graph with no skill notes.
-		//
-		// Persisted knowledge-graph cache: adopt graph.json when current,
-		// rebuild on store mutations (see wireMemoryGraph).
-		cli.wireMemoryGraph()
-	}
+	// The graph binds the store set it derives from (graphSources), so it
+	// is wired only once every source exists, skills included: wiring it
+	// earlier would freeze a graph with no skill notes. Persisted
+	// knowledge-graph cache: adopt graph.json when current, rebuild on store
+	// mutations (see wireMemoryGraph; a no-op when memory is off).
+	cli.wireMemoryGraph()
 
 	// Initialize skill registry handler
 	cli.skillHandler = NewSkillHandler(logger, cli.personaHandler.GetManager())
