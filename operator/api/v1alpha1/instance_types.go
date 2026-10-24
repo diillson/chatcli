@@ -417,6 +417,13 @@ type MemoryFeatureSpec struct {
 	// +kubebuilder:validation:Enum=index;pull;off
 	// +optional
 	Mode string `json:"mode,omitempty"`
+	// Vault keeps the Obsidian-style vault of the memory graph — one
+	// Markdown note per fact, topic, project, episode, journal note,
+	// context document… linked with [[wikilinks]] — in sync next to the
+	// memory directory (CHATCLI_MEMORY_VAULT). The vault is plaintext even
+	// with encryption at rest; unset keeps the server default (on).
+	// +optional
+	Vault *bool `json:"vault,omitempty"`
 }
 
 // BudgetSpec bounds spend.

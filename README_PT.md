@@ -166,7 +166,7 @@ PDFs e imagens chegam a todos os modelos, de forma nativa onde o modelo lê e co
 <td valign="top">
 
 ### 🗂️ Memória e contexto
-Memória de longo prazo com perfil e fatos, base de conhecimento com busca BM25 sem API key, compressão reversível em que nada se perde (o `@recall` pagina originais longos) e sessões que continuam entre superfícies. [Contexto →](https://chatcli.edilsonfreitas.com/pt/context/bootstrap-memory)
+Memória de longo prazo com perfil e fatos, base de conhecimento com busca BM25 sem API key, compressão reversível em que nada se perde (o `@recall` pagina originais longos) e sessões que continuam entre superfícies. Tudo o que ele lembra — fatos, tópicos, projetos, episódios, notas do diário, sessões, skills e cada documento de cada contexto — é um único grafo de notas ligadas, mantido em sincronia como um vault do Obsidian que você pode abrir. [Contexto →](https://chatcli.edilsonfreitas.com/pt/context/bootstrap-memory) · [Grafo de conhecimento →](https://chatcli.edilsonfreitas.com/pt/context/knowledge-graph)
 
 Medido, não prometido: no [LongMemEval-S](https://chatcli.edilsonfreitas.com/pt/context/longmemeval) (500 perguntas sobre cerca de 115 mil tokens de conversas passadas cada), o chatcli acertou **93,5%** das 260 perguntas que não foram lidas durante o ajuste, e 94,6% das 500 (90,8% antes da última rodada de mudanças), pela própria busca nas sessões salvas. [Método, dados e todas as respostas →](evals/longmemeval)
 
@@ -232,7 +232,7 @@ O ChatCLI executa comandos e guarda credenciais, então segurança é o padrão,
 - **Tools sob política**: toda ação do agente é permitida, perguntada ou negada por uma política que você controla; superfícies sem ninguém para aprovar recusam em vez de aprovar.
 - **Confiança de workspace**: o `.env`, os hooks e a política de um projeto só carregam depois do `chatcli trust`.
 - **Integrações que falham fechado**: os canais de chat não sobem sem allowlist de remetentes; webhooks assinados são verificados com HMAC.
-- **Criptografia em repouso por padrão**: conversas, memória, contextos, anexos e credenciais são cifrados com AES-256-GCM, com a chave no keychain do sistema (macOS, Linux, Windows) ou, no Kubernetes, num Secret; o OAuth usa PKCE. Guarde uma chave de recuperação com `/config security recovery-key`: sem ela, um keychain perdido significa dados que não abrem mais.
+- **Criptografia em repouso por padrão**: conversas, memória, contextos, anexos e credenciais são cifrados com AES-256-GCM, com a chave no keychain do sistema (macOS, Linux, Windows) ou, no Kubernetes, num Secret; o OAuth usa PKCE. Guarde uma chave de recuperação com `/config security recovery-key`: sem ela, um keychain perdido significa dados que não abrem mais. A única exceção em texto claro é o vault da memória (`~/.chatcli/vault`), que existe para ser aberto num editor; lá os campos sensíveis do perfil e segredos saem mascarados e `CHATCLI_MEMORY_VAULT=false` o desliga.
 - **Sem telemetria**: seus dados vão só para os providers e ferramentas que você configura; métricas só saem da máquina se você apontar o OTLP para o seu próprio coletor.
 - **Cadeia de suprimentos assinada**: checksums das releases assinados com Ed25519 e verificados pelo `chatcli update`, imagens assinadas com Cosign, SBOM, e Trivy, CodeQL, gosec e govulncheck em toda mudança.
 

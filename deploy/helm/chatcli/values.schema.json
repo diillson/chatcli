@@ -1094,6 +1094,21 @@
         "subPath": {
           "type": "string",
           "description": "Directory inside the sessions PVC that holds memory when persistence is enabled (default 'memory'); the server copies memory written at the PVC root by charts up to 1.211.2 into it once, on its first start (CHATCLI_MEMORY_LEGACY_DIR). Empty = the PVC root, shared with the session files (the old layout)."
+        },
+        "vault": {
+          "type": "object",
+          "description": "Obsidian-style vault of the memory graph (Markdown notes linked with [[wikilinks]]), kept in sync by the server. Plaintext even with encryption at rest; sensitive profile fields and secrets are masked.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Generate the vault (CHATCLI_MEMORY_VAULT, default true)."
+            },
+            "dir": {
+              "type": "string",
+              "description": "Vault directory (CHATCLI_MEMORY_VAULT_DIR). Empty = ~/.chatcli/vault, which is not on the sessions PVC; point it at a persistent volume to keep the vault across restarts."
+            }
+          }
         }
       }
     },

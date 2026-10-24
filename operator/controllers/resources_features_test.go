@@ -22,7 +22,7 @@ func TestBuildPodSpec_RendersFeaturesAsServerVariables(t *testing.T) {
 	inst := newInstance("feat", "default")
 	on, off := true, false
 	inst.Spec.Features = &platformv1alpha1.FeaturesSpec{
-		Memory:             &platformv1alpha1.MemoryFeatureSpec{Enabled: true, Mode: "pull"},
+		Memory:             &platformv1alpha1.MemoryFeatureSpec{Enabled: true, Mode: "pull", Vault: &off},
 		Knowledge:          &off,
 		Budget:             &platformv1alpha1.BudgetSpec{SessionUSD: "5", DailyUSD: "50", HardStop: true},
 		Hub:                &on,
@@ -36,6 +36,7 @@ func TestBuildPodSpec_RendersFeaturesAsServerVariables(t *testing.T) {
 	want := map[string]string{
 		"CHATCLI_MEMORY_ENABLED":       "true",
 		"CHATCLI_MEMORY_MODE":          "pull",
+		"CHATCLI_MEMORY_VAULT":         "false",
 		"CHATCLI_CHAT_KNOWLEDGE":       "false",
 		"CHATCLI_SESSION_BUDGET_USD":   "5",
 		"CHATCLI_DAILY_BUDGET_USD":     "50",

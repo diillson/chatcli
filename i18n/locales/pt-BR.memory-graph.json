@@ -21,6 +21,5 @@
   "mem.cmd.suggest.link": "Linkar duas notas: <origem> -> <destino> [--rel r] [--note motivo]",
   "mem.cmd.suggest.unlink": "Remover um link que você criou: <origem> -> <destino>",
   "plugins.memory.describe.link": "Linkando %s → %s",
-  "plugins.memory.describe.unlink": "Removendo link %s ↔ %s",
-  "memory.usage": "Uso: /memory [today|yesterday|week|longterm|list|load <data>|profile|profile set <k>=<v>|remember [cat] <fato>|forget <trecho>|facts|topics|projects|stats|timeline [q]|compact|export [caminho]|import <caminho>|recall <consulta>|why|links <nota>|link <a> -> <b>|unlink <a> -> <b>|<YYYY-MM-DD>]"
+  "plugins.memory.describe.unlink": "Removendo link %s ↔ %s"
 }

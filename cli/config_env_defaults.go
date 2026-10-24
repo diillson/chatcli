@@ -216,6 +216,8 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_MEMORY_MODE":       {Value: "index", Source: "memory_mode.go"},
 	"CHATCLI_MEMORY_LEGACY_DIR": {Value: "", Source: "workspace/memory/legacy_adopt.go: one-time copy of memory files from an older shared directory into ~/.chatcli/memory at startup; set by the Helm chart"},
 	"CHATCLI_MEMORY_GRAPH":      {Value: "true", IsBool: true, Source: "knowledge_graph.memoryGraphEnabled — persisted graph cache (graph.json) + recall neighborhood expansion; off = legacy derive-per-call"},
+	"CHATCLI_MEMORY_VAULT":      {Value: "true", IsBool: true, Source: "knowledge_vault.vaultEnabled — Obsidian vault of the memory graph kept in sync in the background (plaintext; sensitive profile fields and secrets masked); off = not generated"},
+	"CHATCLI_MEMORY_VAULT_DIR":  {Value: "(~/.chatcli/vault)", Source: "knowledge_vault.vaultDir — vault location; default \"vault\" next to the memory directory"},
 	"CHATCLI_BOOTSTRAP_ENABLED": {Value: "true", IsBool: true, Source: "bootstrap.go"},
 
 	// ─── Gateway: voice transcription ────────────────────────────

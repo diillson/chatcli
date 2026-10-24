@@ -1047,6 +1047,9 @@ func featureEnv(f *platformv1alpha1.FeaturesSpec) []corev1.EnvVar {
 		if f.Memory.Mode != "" {
 			add("CHATCLI_MEMORY_MODE", f.Memory.Mode)
 		}
+		if f.Memory.Vault != nil {
+			add("CHATCLI_MEMORY_VAULT", strconv.FormatBool(*f.Memory.Vault))
+		}
 	}
 	if f.Knowledge != nil {
 		add("CHATCLI_CHAT_KNOWLEDGE", strconv.FormatBool(*f.Knowledge))
