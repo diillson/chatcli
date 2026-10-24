@@ -794,9 +794,6 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 		// Wire the @memory tool to this session's store so the agent can
 		// persist facts deterministically.
 		plugins.SetMemoryAdapter(&memoryPluginAdapter{cli: cli})
-		// Persisted knowledge-graph cache: adopt graph.json when current,
-		// rebuild on store mutations (see wireMemoryGraph).
-		cli.wireMemoryGraph()
 	}
 
 	// Build the content-aware compression layer (CCR store under ~/.chatcli/ccr)
@@ -930,6 +927,16 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	if projectDir := detectProjectDir(); projectDir != "" {
 		cli.personaHandler.GetManager().SetProjectDir(projectDir)
 		logger.Debug("Project directory set for persona", zap.String("dir", projectDir))
+	}
+
+	if cli.memoryStore != nil {
+		// The graph binds the store set it derives from (graphSources), so
+		// it is wired only once every source exists, skills included:
+		// wiring it earlier would freeze a graph with no skill notes.
+		//
+		// Persisted knowledge-graph cache: adopt graph.json when current,
+		// rebuild on store mutations (see wireMemoryGraph).
+		cli.wireMemoryGraph()
 	}
 
 	// Initialize skill registry handler

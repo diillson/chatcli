@@ -191,6 +191,14 @@ func (s *Storage) DeleteContext(contextID string) error {
 	return nil
 }
 
+// ContextFileExists reports whether a context's file is on disk, loaded
+// or not — a context that failed to load (or was quarantined) is absent
+// from the manager but must not be taken for deleted.
+func (s *Storage) ContextFileExists(contextID string) bool {
+	_, err := os.Stat(s.getContextPath(contextID))
+	return err == nil
+}
+
 // GetStoragePath retorna o caminho base de armazenamento
 func (s *Storage) GetStoragePath() string {
 	return s.basePath
