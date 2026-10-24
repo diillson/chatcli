@@ -193,6 +193,17 @@ const (
 	// expansion — "card off, expansion on" is a valid lean-prompt setup.
 	MemoryGraphEnv = "CHATCLI_MEMORY_GRAPH"
 
+	// Memory vault: project the knowledge graph as an Obsidian vault — one
+	// Markdown note per fact, topic, project, profile, episode, session,
+	// skill, board card, context and context document, linked with
+	// [[wikilinks]] — kept in sync in the background. On by default; a
+	// falsey value stops generating it (an existing vault is left alone).
+	// MemoryVaultDirEnv relocates it (default: "vault" next to the memory
+	// directory, ~/.chatcli/vault). The vault is PLAINTEXT even when
+	// encryption at rest is on; sensitive profile fields and secrets are masked.
+	MemoryVaultEnv    = "CHATCLI_MEMORY_VAULT"
+	MemoryVaultDirEnv = "CHATCLI_MEMORY_VAULT_DIR"
+
 	// UI / theme configuration. ThemeEnv selects the color theme applied
 	// across chat, coder and agent surfaces (cards, borders, markdown,
 	// spinners). DefaultTheme is the value used when ThemeEnv is unset.

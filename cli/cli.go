@@ -209,7 +209,10 @@ type ChatCLI struct {
 	// taskGraphAdapter backs the @taskgraph builtin and /taskgraph; kept on
 	// the struct so cleanup can cancel an in-flight graph run.
 	taskGraphAdapter *taskGraphAdapter
-	unattended       bool // when true, the agent runs without any interactive confirmation (gateway daemon)
+	// vaultSync keeps the Obsidian vault projection of the knowledge graph
+	// in sync in the background (knowledge_vault.go); nil when disabled.
+	vaultSync  *vaultSyncer
+	unattended bool // when true, the agent runs without any interactive confirmation (gateway daemon)
 	// cacheKeepAlive schedules the prompt-cache refreshes (cache_keepalive.go).
 	cacheKeepAlive promptCacheKeepAlive
 	// lastPrefixShape is the previous main-lane request's fingerprint, for
@@ -935,6 +938,9 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 	// knowledge-graph cache: adopt graph.json when current, rebuild on store
 	// mutations (see wireMemoryGraph; a no-op when memory is off).
 	cli.wireMemoryGraph()
+	// Obsidian vault projection, synced in the background on changes
+	// (bound the same way; a no-op when memory or the vault is off).
+	cli.wireVault()
 
 	// Initialize skill registry handler
 	cli.skillHandler = NewSkillHandler(logger, cli.personaHandler.GetManager())
@@ -2229,6 +2235,7 @@ func (cli *ChatCLI) cleanup(ctx context.Context) {
 	}
 	cli.shutdownDash(ctx)
 	cli.shutdownWeb(ctx)
+	cli.shutdownVaultSyncers()
 
 	// Tear down the session scratch workspace. Respects
 	// CHATCLI_AGENT_KEEP_TMPDIR=true for debugging (files are left behind).

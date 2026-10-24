@@ -623,6 +623,18 @@ memory:
   # moving or overwriting anything (README, "Memory on the sessions PVC").
   # subPath: "" keeps the old shared layout instead.
   subPath: memory
+  # The server keeps an Obsidian-style vault of its memory graph — one
+  # Markdown note per fact, topic, project, episode, journal note and
+  # context document, linked with [[wikilinks]] — in sync next to the
+  # memory directory (CHATCLI_MEMORY_VAULT / CHATCLI_MEMORY_VAULT_DIR).
+  # The vault is PLAINTEXT even with encryption at rest; sensitive profile
+  # fields and secrets are masked. By default it lands in ~/.chatcli/vault, which is
+  # not on the sessions PVC (an emptyDir or the container filesystem), so
+  # it is rebuilt on every start; point `dir` at a persistent volume
+  # (extraVolumes) to keep it. `enabled: false` stops generating it.
+  vault:
+    enabled: true
+    dir: ""
 
 # Shell safety is configured through the agent's own variables, set under
 # `env` or `secrets` above. Nothing reads a CHATCLI_SAFETY_ENABLED switch:

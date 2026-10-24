@@ -89,7 +89,10 @@ type tenantStores struct {
 	lastAgentReply       string
 
 	graphWired bool
-	lastUsed   time.Time
+	// vaultSync is this tenant's vault syncer (nil when the vault is off),
+	// bound to the tenant's own stores and root.
+	vaultSync *vaultSyncer
+	lastUsed  time.Time
 }
 
 // tenantPool keeps the resident store sets and the base (single-user) set.
@@ -231,6 +234,11 @@ func (cli *ChatCLI) applyStores(ts *tenantStores) {
 	}
 	if ts.memoryStore != nil && !ts.graphWired {
 		cli.wireMemoryGraph()
+		if vaultEnabled() && ts.principal != "" {
+			// Bound to this tenant's stores and its own root: never the
+			// shared CHATCLI_MEMORY_VAULT_DIR, which would mix tenants.
+			ts.vaultSync = cli.startVaultSyncer(storeVaultDir(ts.memoryStore))
+		}
 		ts.graphWired = true
 	}
 }
@@ -374,6 +382,9 @@ func (cli *ChatCLI) evictTenantsLocked() {
 		}
 		if oldest.memWorker != nil {
 			oldest.memWorker.stop()
+		}
+		if oldest.vaultSync != nil {
+			oldest.vaultSync.shutdown()
 		}
 		if oldest.contextHandler != nil {
 			oldest.contextHandler.Close()

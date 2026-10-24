@@ -1,0 +1,21 @@
+{
+  "memory.vault.syncing": "Sincronizando o vault da memória em %s…",
+  "memory.vault.dir": "Vault da memória: %s",
+  "memory.vault.disabled": "A geração automática está desligada (CHATCLI_MEMORY_VAULT); /memory vault sync ainda grava sob demanda.",
+  "memory.vault.never": "Ainda não sincronizado nesta sessão (sincroniza alguns segundos após mudanças na memória).",
+  "memory.vault.report": "Sincronizado %s: %d gravadas, %d sem mudança, %d removidas, %d preservadas · %s",
+  "memory.vault.kept_hint": "Preservadas (editadas por você, ou não gravadas pelo chatcli) — /memory vault sync --force regenera as notas do próprio chatcli:",
+  "memory.vault.more": "… e mais %d",
+  "memory.vault.error": "A sincronização do vault reportou um erro: %s",
+  "memory.vault.usage": "Uso: /memory vault [status|sync [--force]|path]",
+  "mem.cmd.suggest.vault": "Vault Obsidian do grafo da memória (status, sync, path)",
+  "mem.cmd.suggest.vault_status": "Onde está o vault e como foi a última sincronização",
+  "mem.cmd.suggest.vault_sync": "Sincronizar o vault agora",
+  "mem.cmd.suggest.vault_path": "Mostrar o diretório do vault (abra no Obsidian)",
+  "mem.cmd.suggest.vault_force": "Regenerar também as notas que você editou à mão",
+  "memory.usage": "Uso: /memory [today|yesterday|week|longterm|list|load <data>|profile|profile set <k>=<v>|remember [cat] <fato>|forget <trecho>|facts|topics|projects|stats|timeline [q]|compact|export [caminho]|import <caminho>|recall <consulta>|why|links <nota>|link <a> -> <b>|unlink <a> -> <b>|vault [status|sync|path]|<YYYY-MM-DD>]",
+  "cfg.kv.memory.vault_last": "Última sincronização do vault",
+  "cfg.kv.memory.vault_last_val": "%s · %d gravadas, %d sem mudança, %d preservadas",
+  "cfg.kv.memory.vault_never": "ainda não sincronizado",
+  "cfg.kv.memory.links": "Links explícitos"
+}

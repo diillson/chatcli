@@ -79,6 +79,14 @@ data:
   {{- end }}
   {{- if .Values.memory.enabled }}
   CHATCLI_MEMORY_ENABLED: "true"
+  {{- with .Values.memory.vault }}
+  {{- if hasKey . "enabled" }}
+  CHATCLI_MEMORY_VAULT: {{ .enabled | toString | quote }}
+  {{- end }}
+  {{- if .dir }}
+  CHATCLI_MEMORY_VAULT_DIR: {{ .dir | quote }}
+  {{- end }}
+  {{- end }}
   {{- end }}
   {{- if .Values.pipeline.enabled }}
   CHATCLI_SERVER_PIPELINE: "true"

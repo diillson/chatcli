@@ -1,0 +1,21 @@
+{
+  "memory.vault.syncing": "Syncing the memory vault at %s…",
+  "memory.vault.dir": "Memory vault: %s",
+  "memory.vault.disabled": "Automatic generation is off (CHATCLI_MEMORY_VAULT); /memory vault sync still writes it on demand.",
+  "memory.vault.never": "Not synced yet in this session (it syncs a few seconds after memory changes).",
+  "memory.vault.report": "Synced %s: %d written, %d unchanged, %d removed, %d kept · %s",
+  "memory.vault.kept_hint": "Kept (edited by you, or not written by chatcli) — /memory vault sync --force regenerates chatcli's own notes:",
+  "memory.vault.more": "… and %d more",
+  "memory.vault.error": "Vault sync reported an error: %s",
+  "memory.vault.usage": "Usage: /memory vault [status|sync [--force]|path]",
+  "mem.cmd.suggest.vault": "Obsidian vault of the memory graph (status, sync, path)",
+  "mem.cmd.suggest.vault_status": "Where the vault is and how the last sync went",
+  "mem.cmd.suggest.vault_sync": "Sync the vault now",
+  "mem.cmd.suggest.vault_path": "Print the vault directory (open it in Obsidian)",
+  "mem.cmd.suggest.vault_force": "Also regenerate notes you edited by hand",
+  "memory.usage": "Usage: /memory [today|yesterday|week|longterm|list|load <date>|profile|profile set <k>=<v>|remember [cat] <fact>|forget <substr>|facts|topics|projects|stats|timeline [q]|compact|export [path]|import <path>|recall <query>|why|links <note>|link <a> -> <b>|unlink <a> -> <b>|vault [status|sync|path]|<YYYY-MM-DD>]",
+  "cfg.kv.memory.vault_last": "Vault last sync",
+  "cfg.kv.memory.vault_last_val": "%s · %d written, %d unchanged, %d kept",
+  "cfg.kv.memory.vault_never": "not synced yet",
+  "cfg.kv.memory.links": "Explicit links"
+}

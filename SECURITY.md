@@ -127,6 +127,7 @@ ChatCLI has no backend of its own. Your prompts, the files it reads and the answ
 - **Not sealed yet:**
   - the conversation hub database (SQLite) and the scheduler and reflexion queues: keep them on an encrypted volume;
   - the audit trail, which is sealed only under a key from `CHATCLI_ENCRYPTION_KEY`, because operators ship it to log pipelines.
+- **Plaintext by design: the memory vault.** ChatCLI keeps an Obsidian-style vault of the memory graph (one Markdown note per fact, topic, project, episode, journal note and context document) in `~/.chatcli/vault`, so it can be opened in an editor. It is written in plaintext (files `0600`, directories `0700`) whatever the at-rest setting; profile fields flagged sensitive, or whose key marks them as private, are masked (a private name becomes `user`), secrets inside documents and journal notes are masked by the same redactor the model path uses, and session transcripts never enter it. `CHATCLI_MEMORY_VAULT=false` stops generating it (an existing vault is left in place for you to delete).
 - **Turning it off.** `CHATCLI_ENCRYPTION_KEY=off` stops sealing new writes and still opens what is sealed. `/config security reseal` then writes the stores back in plaintext.
 
 [Encryption at Rest](https://chatcli.edilsonfreitas.com/security/encryption-at-rest) has the full details: migration from older versions, key rotation and backing up the key in Kubernetes.

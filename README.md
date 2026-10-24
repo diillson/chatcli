@@ -166,7 +166,7 @@ PDFs and images reach every model, natively where it can read them and as text w
 <td valign="top">
 
 ### 🗂️ Memory and context
-Long-term memory with a profile and facts, a knowledge base with keyless BM25 retrieval, reversible compression where nothing is lost (`@recall` pages long originals), and sessions that continue across surfaces. [Context →](https://chatcli.edilsonfreitas.com/context/bootstrap-memory)
+Long-term memory with a profile and facts, a knowledge base with keyless BM25 retrieval, reversible compression where nothing is lost (`@recall` pages long originals), and sessions that continue across surfaces. Everything it remembers — facts, topics, projects, episodes, journal notes, sessions, skills and every document of every context — is one linked graph of notes, kept in sync as an Obsidian vault you can open. [Context →](https://chatcli.edilsonfreitas.com/context/bootstrap-memory) · [Knowledge graph →](https://chatcli.edilsonfreitas.com/context/knowledge-graph)
 
 Measured, not claimed: on [LongMemEval-S](https://chatcli.edilsonfreitas.com/context/longmemeval) (500 questions over about 115k tokens of past conversations each), chatcli answered **93.5%** of the 260 questions that were not read while tuning it, and 94.6% of all 500 (90.8% before the latest round of changes), through its own session recall. [Method, data and every answer →](evals/longmemeval)
 
@@ -232,7 +232,7 @@ ChatCLI runs commands and holds credentials, so security is the default, not an 
 - **Policy-gated tools**: every agent action is allowed, asked or denied by a policy you control; unattended surfaces refuse instead of approving.
 - **Workspace trust**: a project's `.env`, hooks and policy load only after `chatcli trust`.
 - **Fail-closed integrations**: chat channels refuse to start without a sender allowlist; signed webhooks are verified with HMAC.
-- **Encrypted at rest by default**: conversations, memory, contexts, attachments and credentials are sealed with AES-256-GCM, with the key in the OS keychain (macOS, Linux, Windows) or, in Kubernetes, in a Secret; OAuth uses PKCE. Save a recovery key with `/config security recovery-key`: without it, a lost keychain means the data cannot be opened.
+- **Encrypted at rest by default**: conversations, memory, contexts, attachments and credentials are sealed with AES-256-GCM, with the key in the OS keychain (macOS, Linux, Windows) or, in Kubernetes, in a Secret; OAuth uses PKCE. Save a recovery key with `/config security recovery-key`: without it, a lost keychain means the data cannot be opened. The one plaintext exception is the memory vault (`~/.chatcli/vault`), which exists to be opened in an editor; sensitive profile fields and secrets are masked there and `CHATCLI_MEMORY_VAULT=false` turns it off.
 - **No telemetry**: your data goes only to the providers and tools you configure; metrics leave the machine only if you point OTLP at your own collector.
 - **Signed supply chain**: Ed25519-signed release checksums verified by `chatcli update`, Cosign-signed images, an SBOM, and Trivy, CodeQL, gosec and govulncheck on every change.
 

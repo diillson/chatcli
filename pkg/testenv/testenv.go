@@ -34,7 +34,7 @@ const KeychainBackendEnv = "CHATCLI_KEYCHAIN_BACKEND"
 
 // relocationEnvs move ChatCLI's stores away from the home directory; an
 // isolated process must not inherit them.
-var relocationEnvs = []string{stateroot.Env, "CHATCLI_AUTH_DIR"}
+var relocationEnvs = []string{stateroot.Env, "CHATCLI_AUTH_DIR", "CHATCLI_MEMORY_VAULT_DIR"}
 
 // Isolate redirects the process home directory to a fresh temporary
 // directory and selects the file keychain backend. It returns the

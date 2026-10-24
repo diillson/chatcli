@@ -529,3 +529,23 @@ func backfillSensitiveMeta(p *UserProfile) bool {
 	}
 	return changed
 }
+
+// FieldSensitive reports whether a profile field must be kept out of any
+// artifact that leaves the prompt (code, docs, the plaintext vault): the
+// field was flagged sensitive (sensitive_mark, or auto-flagged on write),
+// or its key name alone marks it as private (finance, documents, contact,
+// health, family…). field is the profile key ("location"), a preference
+// key ("pref:salario" or "salario") or an environment key ("env:os").
+func (p UserProfile) FieldSensitive(field string) bool {
+	key := strings.ToLower(strings.TrimSpace(field))
+	bare := key
+	for _, prefix := range []string{"pref:", "env:", "env_"} {
+		bare = strings.TrimPrefix(bare, prefix)
+	}
+	for _, k := range []string{key, bare, "pref:" + bare, "env:" + bare, "env_" + bare} {
+		if p.FieldMeta[k].Sensitive {
+			return true
+		}
+	}
+	return containsAny(bare, sensitiveKeyMarkers...)
+}

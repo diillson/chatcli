@@ -124,6 +124,7 @@ func (cli *ChatCLI) dispatchMemoryPrefixCommand(ctx context.Context, args string
 		{"links", cli.memoryLinksCommand},
 		{"link", func(rest string) { cli.memoryLinkCommand(rest, false) }},
 		{"unlink", func(rest string) { cli.memoryLinkCommand(rest, true) }},
+		{"vault", cli.memoryVaultCommand},
 	}
 	for _, c := range commands {
 		if args == c.name || strings.HasPrefix(args, c.name+" ") {
@@ -793,6 +794,7 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "links", Description: i18n.T("mem.cmd.suggest.links")},
 			{Text: "link", Description: i18n.T("mem.cmd.suggest.link")},
 			{Text: "unlink", Description: i18n.T("mem.cmd.suggest.unlink")},
+			{Text: "vault", Description: i18n.T("mem.cmd.suggest.vault")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -845,6 +847,21 @@ func (cli *ChatCLI) getMemoryArgSuggestions(d prompt.Document, args []string, li
 			return nil
 		}
 		return prompt.FilterHasPrefix(memoryCategorySuggestions(true), word, true)
+
+	case "vault":
+		if !atArg(args, line, 2) {
+			if len(args) >= 3 && args[2] == "sync" && atArg(args, line, 3) {
+				return prompt.FilterHasPrefix([]prompt.Suggest{
+					{Text: "--force", Description: i18n.T("mem.cmd.suggest.vault_force")},
+				}, word, true)
+			}
+			return nil
+		}
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "status", Description: i18n.T("mem.cmd.suggest.vault_status")},
+			{Text: "sync", Description: i18n.T("mem.cmd.suggest.vault_sync")},
+			{Text: "path", Description: i18n.T("mem.cmd.suggest.vault_path")},
+		}, word, true)
 
 	case "links", "link", "unlink":
 		if !atArg(args, line, 2) {

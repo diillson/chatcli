@@ -95,6 +95,32 @@ func (cli *ChatCLI) showConfigMemory() {
 		if nodes, edges, ok := cli.memoryStore.Manager().GraphStats(); ok {
 			kv(p, i18n.T("cfg.kv.memory.graph_size"), i18n.T("cfg.kv.memory.graph_size_val", nodes, edges))
 		}
+		if links := cli.memoryStore.Manager().Links; links != nil {
+			kv(p, i18n.T("cfg.kv.memory.links"), fmt.Sprintf("%d", links.Count()))
+		}
+	}
+
+	// Obsidian vault projection of the graph (knowledge_vault.go).
+	vaultVal := i18n.T("cfg.val.disabled")
+	if vaultEnabled() {
+		vaultVal = i18n.T("cfg.val.enabled")
+	}
+	if os.Getenv(config.MemoryVaultEnv) == "" {
+		vaultVal = defaultMarker + vaultVal
+	}
+	kv(p, config.MemoryVaultEnv, vaultVal)
+	vaultDir := cli.vaultDir()
+	if os.Getenv(config.MemoryVaultDirEnv) == "" {
+		vaultDir = defaultMarker + vaultDir
+	}
+	kv(p, config.MemoryVaultDirEnv, vaultDir)
+	if vs := cli.currentVaultSyncer(); vs != nil {
+		if rep, at, _ := vs.status(); !at.IsZero() {
+			kv(p, i18n.T("cfg.kv.memory.vault_last"), i18n.T("cfg.kv.memory.vault_last_val",
+				at.Format("2006-01-02 15:04:05"), rep.Written, rep.Unchanged, len(rep.Kept)))
+		} else {
+			kv(p, i18n.T("cfg.kv.memory.vault_last"), i18n.T("cfg.kv.memory.vault_never"))
+		}
 	}
 
 	sectionEnd(ColorBlue)

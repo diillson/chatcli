@@ -332,10 +332,10 @@ func hasLink(ls []knowledge.Link, other string, rel knowledge.Rel) bool {
 	return false
 }
 
-// The CACHED graph (the default path) must carry skills —
+// N1: the CACHED graph (the default path) and the vault must carry skills —
 // the graph binds its stores at wiring time, so wiring before the persona
 // handler exists would freeze a graph without them.
-func TestVaultGraph_CachedGraphCarriesSkills(t *testing.T) {
+func TestVaultGraph_CachedGraphAndVaultCarrySkills(t *testing.T) {
 	t.Setenv("CHATCLI_MEMORY_GRAPH", "")
 	cli := richGraphFixture(t)
 	cli.wireMemoryGraph()
@@ -350,6 +350,16 @@ func TestVaultGraph_CachedGraphCarriesSkills(t *testing.T) {
 	if !hasLink(g.Outlinks("skill:rotate-certs"), "topic:telemetry security", knowledge.RelTriggeredBy) {
 		t.Fatalf("skill→topic edge missing: %+v", g.Outlinks("skill:rotate-certs"))
 	}
+	notes := cli.graphSources().buildVaultNotes(g)
+	found := false
+	for _, n := range notes {
+		if strings.HasPrefix(n.Path, "Skills/") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("vault has no Skills/ notes")
+	}
 }
 
 // NewChatCLI must wire the graph after every source exists: guard the
@@ -362,10 +372,11 @@ func TestNewChatCLI_WiresGraphAfterPersona(t *testing.T) {
 	body := string(src)
 	persona := strings.Index(body, "cli.personaHandler = NewPersonaHandler(logger)")
 	wire := strings.Index(body, "cli.wireMemoryGraph()")
-	if persona < 0 || wire < 0 {
+	vault := strings.Index(body, "cli.wireVault()")
+	if persona < 0 || wire < 0 || vault < 0 {
 		t.Fatal("constructor landmarks moved; update this guard")
 	}
-	if wire < persona {
+	if wire < persona || vault < persona {
 		t.Fatal("the graph/vault are wired before the persona handler exists: skills would vanish from the cached graph")
 	}
 }

@@ -9,6 +9,7 @@
  *   /memory link <from> -> <to> [--rel <rel>] [--note <text>]
  *   /memory unlink <from> -> <to> [--rel <rel>]
  *   /memory links <note>
+ *   /memory vault [status|sync [--force]|path]
  *
  * Note references are the same everywhere (@memory link, wikilinks): a node
  * id, a fact id or prefix, a title or alias, or [[a wikilink]].
@@ -19,10 +20,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	prompt "github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/knowledge"
+	"github.com/diillson/chatcli/pkg/vault"
 )
 
 // linkArgs is a parsed /memory link|unlink argument line.
@@ -140,6 +143,64 @@ func (cli *ChatCLI) memoryLinksCommand(ref string) {
 		fmt.Println("  " + line)
 	}
 	fmt.Println()
+}
+
+func (cli *ChatCLI) memoryVaultCommand(args string) {
+	f := strings.Fields(args)
+	sub := "status"
+	if len(f) > 0 {
+		sub = strings.ToLower(f[0])
+	}
+	dir := cli.vaultDir()
+	current := cli.currentVaultSyncer()
+	switch sub {
+	case "path":
+		fmt.Println("  " + dir)
+	case "sync":
+		force := len(f) > 1 && (f[1] == "--force" || f[1] == "-f")
+		s := current
+		if s == nil {
+			// Generation is off: an explicit sync still works, once.
+			s = newVaultSyncer(cli.graphSources(), dir, cli.logger)
+		}
+		fmt.Println(colorize("  "+i18n.T("memory.vault.syncing", dir), ColorGray))
+		rep, err := s.run(force)
+		printVaultReport(rep, err, time.Now())
+	case "status":
+		fmt.Println(colorize("  "+i18n.T("memory.vault.dir", dir), ColorCyan))
+		if !vaultEnabled() {
+			fmt.Println(colorize("  "+i18n.T("memory.vault.disabled"), ColorYellow))
+		}
+		if current == nil {
+			return
+		}
+		rep, at, err := current.status()
+		if at.IsZero() {
+			fmt.Println(colorize("  "+i18n.T("memory.vault.never"), ColorGray))
+			return
+		}
+		printVaultReport(rep, err, at)
+	default:
+		fmt.Println(colorize("  "+i18n.T("memory.vault.usage"), ColorGray))
+	}
+}
+
+func printVaultReport(rep vault.Report, err error, at time.Time) {
+	fmt.Println(colorize("  "+i18n.T("memory.vault.report", at.Format("2006-01-02 15:04:05"),
+		rep.Written, rep.Unchanged, rep.Removed, len(rep.Kept), rep.Duration.Round(time.Millisecond).String()), ColorGreen))
+	if len(rep.Kept) > 0 {
+		fmt.Println(colorize("  "+i18n.T("memory.vault.kept_hint"), ColorGray))
+		for i, k := range rep.Kept {
+			if i >= 10 {
+				fmt.Println(colorize("    "+i18n.T("memory.vault.more", len(rep.Kept)-10), ColorGray))
+				break
+			}
+			fmt.Println(colorize("    - "+k, ColorGray))
+		}
+	}
+	if err != nil {
+		fmt.Println(colorize("  "+i18n.T("memory.vault.error", err.Error()), ColorYellow))
+	}
 }
 
 // graphHubSuggestions offers the graph's hub notes as completions for the

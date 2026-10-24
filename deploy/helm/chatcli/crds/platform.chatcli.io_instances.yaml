@@ -470,6 +470,14 @@ spec:
                         - pull
                         - "off"
                         type: string
+                      vault:
+                        description: |-
+                          Vault keeps the Obsidian-style vault of the memory graph — one
+                          Markdown note per fact, topic, project, episode, journal note,
+                          context document… linked with [[wikilinks]] — in sync next to the
+                          memory directory (CHATCLI_MEMORY_VAULT). The vault is plaintext even
+                          with encryption at rest; unset keeps the server default (on).
+                        type: boolean
                     type: object
                 type: object
               image:

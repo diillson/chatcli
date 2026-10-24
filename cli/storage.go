@@ -47,17 +47,21 @@ const (
 	StoreCCR         = "ccr"
 	StoreHub         = "hub"
 	StoreMemory      = "memory"
-	StoreSkills      = "skills"
-	StorePlugins     = "plugins"
-	StoreContexts    = "contexts"
-	StoreAgents      = "agents"
-	StoreCommands    = "commands"
-	StoreReflexion   = "reflexion"
-	StoreScheduler   = "scheduler"
-	StoreTokenizers  = "tokenizers"
-	StoreMCP         = "mcp"
-	StoreCache       = "cache"
-	StoreLogs        = "logs"
+	// StoreVault is the Obsidian vault projection of the memory graph
+	// (knowledge_vault.go). Protected: notes there may carry the person's
+	// own edits, and the vault removes its stale notes itself.
+	StoreVault      = "vault"
+	StoreSkills     = "skills"
+	StorePlugins    = "plugins"
+	StoreContexts   = "contexts"
+	StoreAgents     = "agents"
+	StoreCommands   = "commands"
+	StoreReflexion  = "reflexion"
+	StoreScheduler  = "scheduler"
+	StoreTokenizers = "tokenizers"
+	StoreMCP        = "mcp"
+	StoreCache      = "cache"
+	StoreLogs       = "logs"
 	// StoreAttachments holds the saved copies of images attached to web
 	// turns (saveTurnAttachments).
 	StoreAttachments = "attachments"
@@ -141,7 +145,7 @@ func StorageStoreNames() []string {
 	return []string{
 		StoreCosts, StoreCheckpoints, StoreSessions, StoreTranscripts, StoreParked,
 		StorePending, StoreTaskGraph, StorePulse, StoreCCR, StoreHub,
-		StoreMemory, StoreSkills, StorePlugins, StoreContexts, StoreAgents, StoreCommands,
+		StoreMemory, StoreVault, StoreSkills, StorePlugins, StoreContexts, StoreAgents, StoreCommands,
 		StoreReflexion, StoreScheduler, StoreTokenizers, StoreMCP, StoreCache, StoreLogs,
 		StoreAttachments,
 	}
