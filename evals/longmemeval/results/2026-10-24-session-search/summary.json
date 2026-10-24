@@ -1,0 +1,380 @@
+{
+  "manifest": {
+    "started": "2026-10-24T13:03:49",
+    "binary": "chatcli built from ad858d6c: main after #1883 plus the session search of #1887 (code identical to the PR)",
+    "binary_sha256": "e8954a81a54d1b03a356025b66a069f53d2ad15d501c9161bd2bf5ce808fa6b3",
+    "binary_version": "\n── ChatCLI · Versão ───────────────────────────────────────────────────────────────────\n\n  Instalada            v1.224.1-0.20261024155753-ad858d6c2620\n  Build                ad858d6c2620 · 2026-10-24 15:57:53\n  Canal de instalação  go install\n  Última release       v1.224.0\n\n  ✓ Você já está na versão mais recente.\n\n",
+    "dataset": "longmemeval_s_cleaned.json (huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)",
+    "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "harness_sha256": "1d4ef86c340bedc77dee98119bb40c03f7893ab48ac598828751112ac19525cc",
+    "judge_prompts_sha256": "b5c88d0a0de08cc7ec3c68471bb4e39a1fb204fd399024d464707b48acf8adcc",
+    "answer_model": "claude-sonnet-5-5",
+    "judge_model": "claude-sonnet-5-5",
+    "mode": "coder",
+    "question_frame": "Answer my question using what you know about me from our previous conversations (they are saved as chat sessions). If those conversations do not contain the answer, say so. End with a short, direct final answer.\n\nQuestion: {q}",
+    "reference_clock": true,
+    "workers": 4,
+    "timeout_s": 600,
+    "picked": 500,
+    "split": "development = sha1(question_id) even (240 questions, the only ones whose failures were read while designing the changes); validation = odd (260, never read). One run over all 500 on the merged code.",
+    "finished": "2026-10-24T13:55:19",
+    "commit": "ad858d6c",
+    "note": "Three validation failures of the 2026-10-24 base run (07741c45, 6a1eabeb, 830ce83f) were read while checking that run for regressions; no change was designed from them. Validation without them: 245/257."
+  },
+  "overall": {
+    "n": 500,
+    "pass": 479,
+    "acc": 0.958,
+    "ci95": [
+      0.9366479487604387,
+      0.9723679006652538
+    ],
+    "task_averaged_acc": 0.9633121264700212
+  },
+  "by_type": {
+    "knowledge-update": {
+      "n": 78,
+      "pass": 76,
+      "acc": 0.9743589743589743,
+      "ci95": [
+        0.9112455918660102,
+        0.9929400545534147
+      ]
+    },
+    "multi-session": {
+      "n": 133,
+      "pass": 122,
+      "acc": 0.9172932330827067,
+      "ci95": [
+        0.857964783257629,
+        0.9531920579368613
+      ]
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "pass": 56,
+      "acc": 1.0,
+      "ci95": [
+        0.9358038555118847,
+        1.0
+      ]
+    },
+    "single-session-preference": {
+      "n": 30,
+      "pass": 28,
+      "acc": 0.9333333333333333,
+      "ci95": [
+        0.7867618227892791,
+        0.9815233646723066
+      ]
+    },
+    "single-session-user": {
+      "n": 70,
+      "pass": 70,
+      "acc": 1.0,
+      "ci95": [
+        0.9479751251327164,
+        0.9999999999999998
+      ]
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "pass": 127,
+      "acc": 0.9548872180451128,
+      "ci95": [
+        0.9050709587689915,
+        0.9791630753259036
+      ]
+    }
+  },
+  "abstention": {
+    "n": 30,
+    "pass": 28
+  },
+  "non_abstention": {
+    "n": 470,
+    "pass": 451
+  },
+  "cost_usd": {
+    "answer_total": 48.3700485,
+    "judge_total": 1.8335975,
+    "answer_mean": 0.096740097,
+    "answer_p95": 0.13525099999999998
+  },
+  "latency_s": {
+    "median": 20.25,
+    "p90": 28.5,
+    "p99": 43.9,
+    "max": 54.2
+  },
+  "tokens": {
+    "input_mean": 77970.662,
+    "input_p95": 114991,
+    "output_mean": 769.314
+  },
+  "tools": {
+    "calls_mean": 3.44,
+    "calls_p95": 7,
+    "zero_tool_questions": 0,
+    "by_kind": [
+      [
+        "@session get",
+        875
+      ],
+      [
+        "@session search",
+        617
+      ],
+      [
+        "@memory recall",
+        166
+      ],
+      [
+        "@date diff",
+        35
+      ],
+      [
+        "@date resolve",
+        16
+      ],
+      [
+        "@memory timeline",
+        5
+      ],
+      [
+        "@coder search",
+        2
+      ],
+      [
+        "@session list",
+        2
+      ],
+      [
+        "@tools describe",
+        1
+      ],
+      [
+        "@recall",
+        1
+      ]
+    ],
+    "date_flag_calls": 51,
+    "date_flag_questions": 50,
+    "web_questions": 0
+  },
+  "exits": {
+    "0": 500
+  },
+  "retrieval": {
+    "all": {
+      "n": 470,
+      "any_seen": 470,
+      "any_opened": 444,
+      "all_seen": 460
+    },
+    "passed": {
+      "n": 451,
+      "any_seen": 451,
+      "any_opened": 425,
+      "all_seen": 442
+    },
+    "failed": {
+      "n": 19,
+      "any_seen": 19,
+      "any_opened": 19,
+      "all_seen": 18
+    }
+  },
+  "failure_taxonomy": [
+    [
+      "evidence surfaced, wrong answer (reasoning)",
+      17
+    ],
+    [
+      "answered an unanswerable question",
+      2
+    ],
+    [
+      "evidence surfaced but model said it is not there",
+      1
+    ],
+    [
+      "partial evidence (multi-session aggregation)",
+      1
+    ]
+  ],
+  "accuracy_by_haystack_size": {
+    "400k-500k chars": "430/449",
+    "500k-600k chars": "49/51"
+  },
+  "failures": [
+    {
+      "id": "07741c45",
+      "type": "knowledge-update",
+      "cat": "evidence surfaced but model said it is not there",
+      "question": "Where do I currently keep my old sneakers?",
+      "answer": "in a shoe rack in my closet",
+      "hypothesis_tail": "ng up space.\" None of the saved conversations confirm that you actually did the move, and none say where they were at that point.\n\n**Final answer:** Under your bed, as far as the saved conversations show. You planned to move them to a closet shoe rack, but I can't find confirmation that it happened."
+    },
+    {
+      "id": "031748ae_abs",
+      "type": "knowledge-update",
+      "cat": "answered an unanswerable question",
+      "question": "How many engineers do I lead when I just started my new role as Software Engineer Manager?",
+      "answer": "The information provided is not enough. You mentioned starting the role as Senior Software Engineer but not Software Engineer Manager.",
+      "hypothesis_tail": "m seems to have grown since then.\n\nI'm assuming \"Software Engineer Manager\" means that Senior Software Engineer role, since nothing else in memory fits.\n\n**Final answer:** Not recorded under that title. If you mean the Senior Software Engineer role, you led 4 engineers when you started, and later 5."
+    },
+    {
+      "id": "d851d5ba",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How much money did I raise for charity in total?",
+      "answer": "$3,750",
+      "hypothesis_tail": ",000\"), so $8,750 is a floor and the true total may be a bit higher. The upcoming charity cycling event isn't counted, since no amount has been raised yet. I searched several phrasings, but a fundraiser you never mentioned in these chats wouldn't show up.\n\n**Final answer: at least $8,750 in total.**"
+    },
+    {
+      "id": "88432d0a",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many times did I bake something in the past two weeks?",
+      "answer": "4",
+      "hypothesis_tail": "t counted:** baking chicken wings, a focaccia, and a rustic Italian bread were only plans.\n- **Not yours:** the blue cheese chocolate chip cookie blog post was written about someone else's recipe.\n\n**Final answer: 5 times** (cookies, sourdough bread, whole wheat baguette, chocolate cake, apple pie)."
+    },
+    {
+      "id": "gpt4_2f8be40d",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many weddings have I attended in this year?",
+      "answer": "I attended three weddings. The couples were Rachel and Mike, Emily and Sarah, and Jen and Tom.",
+      "hypothesis_tail": "chel's wedding or a different one, so it is not counted separately.\n- **Sister's wedding:** you were the maid of honor, but the chat gives no date, so I can't confirm it was this year. If it was, the total would be 4.\n\n**Final answer: 3 weddings** (possibly 4 if your sister's wedding was this year)."
+    },
+    {
+      "id": "6456829e",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many plants did I initially plant for tomatoes and cucumbers?",
+      "answer": "8",
+      "hypothesis_tail": "**Cucumbers:** On 2023-05-28 you said you had \"3 plants that are producing a lot\" of cucumbers. You didn't say \"initially\", and nothing in the saved sessions suggests the count changed. The 05-26 garden-planning session gives no plant counts.\n\n**Final answer: 5 tomato plants and 3 cucumber plants.**"
+    },
+    {
+      "id": "9ee3ecd6",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many points do I need to earn to redeem a free skincare product at Sephora?",
+      "answer": "100",
+      "hypothesis_tail": " 2023-05-21 conversation fits with this. You had 200 points then, after earning 50 from an eyeshadow palette. That session doesn't state a redemption threshold. It only lists assistant-suggested rewards at 50 and 100 points, so I'm relying on your own 300-point figure.\n\n**Final answer: 300 points.**"
+    },
+    {
+      "id": "bf659f65",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many music albums or EPs have I purchased or downloaded?",
+      "answer": "3",
+      "hypothesis_tail": "it, so I counted it.\n\nYou also mentioned getting a Tame Impala vinyl signed at Red Rocks and wanting to add to your collection. You never said which album it was or that you bought it, so I left it out. If you count it, the total is 3.\n\n**Final answer: 2** (3 if the signed Tame Impala vinyl counts)."
+    },
+    {
+      "id": "80ec1f4f_abs",
+      "type": "multi-session",
+      "cat": "answered an unanswerable question",
+      "question": "How many different museums or galleries did I visit in December?",
+      "answer": "0. You did not mention visitng any museum in December",
+      "hypothesis_tail": "mentioned visiting your friend Emma's art studio and an upcoming exhibition at your local museum, but neither is a dated December visit. A search restricted to December 2022 returned no matches.\n\n**Final answer:** Zero. I found no museum or gallery visits in December, only January and February ones."
+    },
+    {
+      "id": "37f165cf",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "What was the page count of the two novels I finished in January and March?",
+      "answer": "856",
+      "hypothesis_tail": "sion saved 2023-05-27.\n\nSearches for January and March finishes only returned unrelated sessions, such as a Chicago trip and a hearing date. The long-term memory store is empty.\n\n**Final answer:** Not recorded in our past conversations. If you tell me the titles, I can help work out the page counts."
+    },
+    {
+      "id": "gpt4_2ba83207",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Which grocery store did I spend the most money at in the past month?",
+      "answer": "Thrive Market",
+      "hypothesis_tail": "as about $150, which is higher, but you described it as an online order \"last month\" in a session from 2023-05-26. That puts it in April, probably before the window, and it is an online retailer rather than a grocery store. If it counts, it would be the top spend.\n\n**Final answer: Walmart (~$120).**"
+    },
+    {
+      "id": "7024f17c",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many hours of jogging and yoga did I do last week?",
+      "answer": "0.5 hours",
+      "hypothesis_tail": "d you were \"hoping to get back into yoga this week\" with one or two sessions. Neither says whether you actually did them.\n\n**Final answer:** Not recorded. The only logged exercise near that time is a 30-minute jog on May 20, which falls before last week, and no completed yoga sessions are mentioned."
+    },
+    {
+      "id": "gpt4_7fce9456",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many properties did I view before making an offer on the townhouse in the Brookside neighborhood?",
+      "answer": "I viewed four properties before making an offer on the townhouse in the Brookside neighborhood. The reasons I didn't make an offer on them were: the kitchen of the bungalow needed serious renovation, the property in Cedar Creek was out of my budget, the noise from the highway was a deal-breaker for the 1-bedroom condo, and my offer on the 2-bedroom condo was rejected due to a higher bid.",
+      "hypothesis_tail": " **3-bedroom Brookside townhouse, Feb 22**: you offered on Feb 25 and agreed on $340,000.\n\nThis count comes only from what you mentioned in those chats. There may be other viewings you never brought up.\n\n**Final answer: 4 properties, which is the 3 earlier ones plus the Brookside townhouse itself.**"
+    },
+    {
+      "id": "75832dbd",
+      "type": "single-session-preference",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Can you recommend some recent publications or conferences that I might find interesting?",
+      "answer": "The user would prefer suggestions related to recent research papers, articles, or conferences that focus on artificial intelligence in healthcare, particularly those that involve deep learning for medical image analysis. They would not be interested in general AI topics or those unrelated to healthcare.",
+      "hypothesis_tail": "ests in reinforcement learning, robotics, AI for sustainability and explainable medical imaging, look at NeurIPS, ICML, ICLR, CVPR and ICCV, plus MICCAI, MIDL, AAMAS and CoRL. The Climate Change AI workshops are also worth a look. I can search the web for current dates and recent papers if you want."
+    },
+    {
+      "id": "75f70248",
+      "type": "single-session-preference",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I've been sneezing quite a bit lately. Do you think it might be my living room?",
+      "answer": "The user would prefer responses that consider the potential impact of their cat, Luna, and her shedding on their sneezing, as well as the recent deep clean of the living room and its possible effect on stirring up dust. They might not prefer responses that fail to take into account these specific details previously mentioned, such as generic suggestions or unrelated factors.",
+      "hypothesis_tail": "g eases when you're away from the living room or the cat, that points to the room.\n\n**Short answer:** It's plausible, since your living room has a shedding cat and dust, but your past conversations don't confirm it. They only show the dust and cat-hair concern, not any sneezing or allergy diagnosis."
+    },
+    {
+      "id": "gpt4_2312f94c",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Which device did I got first, the Samsung Galaxy S22 or the Dell XPS 13?",
+      "answer": "Samsung Galaxy S22",
+      "hypothesis_tail": "fore the XPS 13 arrived on February 25th. If you count the pre-order, the XPS 13 came first by about three weeks.\n\n**Final answer:** You got the Dell XPS 13 first if you count the pre-order (January 28th). The Galaxy S22 reached you first, on February 20th, five days before the laptop was delivered."
+    },
+    {
+      "id": "gpt4_f420262c",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "What is the order of airlines I flew with from earliest to latest before today?",
+      "answer": "JetBlue, Delta, United, American Airlines",
+      "hypothesis_tail": " recovering from a 2-hour weather delay on a LAX–JFK flight.\n\nOn Feb 14 you booked JetBlue (Boston to Fort Lauderdale) and Delta (return) for your March trip. Nothing in your chats shows those flights have happened, so I left them out.\n\n**Final answer: JetBlue, then United, then American Airlines.**"
+    },
+    {
+      "id": "9a707b81",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many days ago did I attend a baking class at a local culinary school when I made my friend's birthday cake?",
+      "answer": "21 days. 22 days (including the last day) is also acceptable.",
+      "hypothesis_tail": "lass. You mentioned baking a chocolate cake for a friend's birthday party \"today\" in your 2022-04-10 session, which is 5 days ago. That cake was a new recipe with espresso powder, with no mention of the class.\n\nI took the class itself as the event you're asking about.\n\n**Final answer: 26 days ago.**"
+    },
+    {
+      "id": "71017277",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I received a piece of jewelry last Saturday from whom?",
+      "answer": "my aunt",
+      "hypothesis_tail": "n mentions a jewelry gift. The other jewelry mentions were general topics: Indian wedding jewelry, and jewelry-making tools you already own.\n\n**Final answer:** Not recorded. The only gift from last Saturday was a crystal chandelier from your aunt. If the jewelry came from her too, that isn't stated."
+    },
+    {
+      "id": "370a8ff4",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many weeks had passed since I recovered from the flu when I went on my 10th jog outdoors?",
+      "answer": "15",
+      "hypothesis_tail": "outdoors today.\"\n- **Gap between them:** 81 days, which is 11 weeks and 4 days (from the date tool).\n\nBoth sessions describe the event as happening \"today,\" so I used each session's save date as the event date.\n\n**Final answer: about 11 weeks (11 weeks and 4 days) after you recovered from the flu.**"
+    },
+    {
+      "id": "0bc8ad93",
+      "type": "temporal-reasoning",
+      "cat": "partial evidence (multi-session aggregation)",
+      "question": "I mentioned visiting a museum two months ago. Did I visit with a friend or not?",
+      "answer": "No, you did not visit with a friend.",
+      "hypothesis_tail": "d 2022-12-16) don't mention anyone going with you.\n\nIf you meant the History Museum lecture, your chats don't say whether you went with anyone.\n\n**Final answer: the museum visit I can find where you mention a companion is the Science Museum tour, and you went with a friend (a chemistry professor).**"
+    }
+  ]
+}
