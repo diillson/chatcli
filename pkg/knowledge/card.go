@@ -20,7 +20,7 @@ import (
 // kindOrder fixes the display order so the card is byte-stable across turns.
 var kindOrder = []Kind{
 	KindProfile, KindProject, KindTopic, KindSkill,
-	KindEpisode, KindSession, KindKB, KindCard,
+	KindEpisode, KindNote, KindSession, KindKB, KindContext, KindDoc, KindCard,
 	KindFact, KindTag,
 }
 
@@ -58,7 +58,7 @@ func (g *Graph) IndexCard(maxHubs int) string {
 	b.WriteString(strings.Join(tally, ", "))
 	b.WriteString(").")
 
-	if hubs := g.Hubs(maxHubs); len(hubs) > 0 {
+	if hubs := g.cardHubs(maxHubs); len(hubs) > 0 {
 		titles := make([]string, 0, len(hubs))
 		for _, h := range hubs {
 			t := strings.TrimSpace(h.Title)
@@ -72,6 +72,60 @@ func (g *Graph) IndexCard(maxHubs int) string {
 		b.WriteString(".")
 	}
 	return b.String()
+}
+
+// cardHubs ranks hubs for the per-turn card by their links to the user's
+// own notes only: documents and journal notes neither become hubs nor
+// lend degree to others. A knowledge base with 2,000 documents, or a busy
+// day linking 20 facts, would otherwise crowd projects and topics out of
+// the card every turn; they stay reachable through neighbors and the
+// tally. Same ordering rules as Hubs otherwise.
+func (g *Graph) cardHubs(limit int) []*Node {
+	skip := func(k Kind) bool { return k == KindDoc || k == KindNote }
+	type scored struct {
+		n    *Node
+		wdeg float64
+		deg  int
+	}
+	ranked := make([]scored, 0, len(g.nodes))
+	for id, n := range g.nodes {
+		if skip(n.Kind) {
+			continue
+		}
+		var w float64
+		deg := 0
+		for nb, ew := range g.adj[id] {
+			if other, ok := g.nodes[nb]; ok && skip(other.Kind) {
+				continue
+			}
+			w += ew
+			deg++
+		}
+		ranked = append(ranked, scored{n: n, wdeg: w, deg: deg})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].deg != ranked[j].deg {
+			return ranked[i].deg > ranked[j].deg
+		}
+		if ranked[i].wdeg != ranked[j].wdeg {
+			return ranked[i].wdeg > ranked[j].wdeg
+		}
+		if ranked[i].n.Weight != ranked[j].n.Weight {
+			return ranked[i].n.Weight > ranked[j].n.Weight
+		}
+		return ranked[i].n.ID < ranked[j].n.ID
+	})
+	out := make([]*Node, 0, limit)
+	for _, s := range ranked {
+		if s.deg == 0 {
+			continue
+		}
+		out = append(out, s.n)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 func knownKind(k Kind) bool {
