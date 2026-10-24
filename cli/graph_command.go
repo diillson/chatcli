@@ -186,6 +186,18 @@ func kindColor(k knowledge.Kind) string {
 		return "#7d5ba6" // purple
 	case knowledge.KindTag:
 		return "#6b6b7b" // (tags are excluded from the view, but keep a color)
+	case knowledge.KindEpisode:
+		return "#a0526d" // rose — timeline
+	case knowledge.KindNote:
+		return "#5a5fa8" // indigo — journal
+	case knowledge.KindSession:
+		return "#2a7f99" // teal
+	case knowledge.KindKB, knowledge.KindContext:
+		return "#a4503c" // brick — contexts
+	case knowledge.KindDoc:
+		return "#b0682a" // amber — documents
+	case knowledge.KindCard:
+		return "#8a5a2b" // brown — board
 	default:
 		return "#4a4a52" // fact — slate
 	}

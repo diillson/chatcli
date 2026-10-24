@@ -69,6 +69,9 @@ type GraphEdge struct {
 	Source string  `json:"source"`
 	Target string  `json:"target"`
 	Weight float64 `json:"weight,omitempty"`
+	// Label names the relationship(s) the edge stands for ("about",
+	// "links_to · mentions"); shown when the edge is selected.
+	Label string `json:"label,omitempty"`
 }
 
 // GraphData is the full payload injected into the HTML template.
@@ -160,7 +163,7 @@ entities and relations you extracted as nodes/edges with source=json.`
 }
 
 // Version is semver.
-func (*BuiltinGraphViewPlugin) Version() string { return "1.0.0" }
+func (*BuiltinGraphViewPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinGraphViewPlugin) Path() string { return "" }
@@ -174,7 +177,7 @@ func (*BuiltinGraphViewPlugin) Schema() string {
 		"flags": []map[string]interface{}{
 			{"name": "source", "type": "string", "description": "json (default): you provide nodes/edges. knowledge: the in-core knowledge graph. conversation: a structural graph of this session."},
 			{"name": "nodes", "type": "array", "description": "source=json. Array of {id, label, kind?, summary?, weight?}. kind drives node color (e.g. topic, project, file, entity, person)."},
-			{"name": "edges", "type": "array", "description": "source=json. Array of {source, target, weight?} where source/target are node ids."},
+			{"name": "edges", "type": "array", "description": "source=json. Array of {source, target, weight?, label?} where source/target are node ids and label names the relationship (shown when the edge is selected)."},
 			{"name": "file", "type": "string", "description": "Path to a JSON file holding {\"nodes\":[...],\"edges\":[...]} — use for large graphs instead of inline args."},
 			{"name": "title", "type": "string", "description": "Graph title shown in the toolbar."},
 			{"name": "theme", "type": "string", "description": "dark (default) or light."},
@@ -300,6 +303,8 @@ type gvEdgeInput struct {
 	From   string  `json:"from"`
 	To     string  `json:"to"`
 	Weight float64 `json:"weight"`
+	Label  string  `json:"label"`
+	Rel    string  `json:"rel"`
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -404,7 +409,7 @@ func normalizeEdgeInputs(in []gvEdgeInput) []GraphEdge {
 		if s == "" || t == "" {
 			continue
 		}
-		out = append(out, GraphEdge{Source: s, Target: t, Weight: e.Weight})
+		out = append(out, GraphEdge{Source: s, Target: t, Weight: e.Weight, Label: firstNonEmpty(e.Label, e.Rel)})
 	}
 	return out
 }

@@ -217,3 +217,50 @@ func TestBuiltinMemory_NoAdapter(t *testing.T) {
 		t.Error("expected error when no adapter is wired")
 	}
 }
+
+// fakeMemLinker adds the optional link capability to fakeMemAdapter.
+type fakeMemLinker struct {
+	fakeMemAdapter
+	link, unlink [3]string
+	note         string
+}
+
+func (f *fakeMemLinker) Link(from, to, rel, note string) (string, error) {
+	f.link, f.note = [3]string{from, to, rel}, note
+	return "linked", nil
+}
+
+func (f *fakeMemLinker) Unlink(from, to, rel string) (string, error) {
+	f.unlink = [3]string{from, to, rel}
+	return "unlinked", nil
+}
+
+func TestBuiltinMemory_LinkUnlink(t *testing.T) {
+	p := NewBuiltinMemoryPlugin()
+	ctx := context.Background()
+
+	SetMemoryAdapter(&fakeMemAdapter{})
+	if _, err := p.Execute(ctx, []string{`{"cmd":"link","args":{"from":"a","to":"b"}}`}); err == nil {
+		t.Fatal("link without the capability must fail")
+	}
+	fake := &fakeMemLinker{}
+	SetMemoryAdapter(fake)
+	t.Cleanup(func() { SetMemoryAdapter(nil) })
+
+	if out, err := p.Execute(ctx, []string{`{"cmd":"link","args":{"from":"[[A]]","to":"topic:b","rel":"about","note":"why"}}`}); err != nil || out != "linked" {
+		t.Fatalf("link: %q %v", out, err)
+	}
+	if fake.link != [3]string{"[[A]]", "topic:b", "about"} || fake.note != "why" {
+		t.Fatalf("link dispatch = %v %q", fake.link, fake.note)
+	}
+	if out, err := p.Execute(ctx, []string{`{"cmd":"disconnect","args":{"source":"x","target":"y"}}`}); err != nil || out != "unlinked" || fake.unlink != [3]string{"x", "y", ""} {
+		t.Fatalf("unlink alias: %q %v %v", out, err, fake.unlink)
+	}
+	// Legacy aliases keep routing to neighbors (no behavior change).
+	if out, _ := p.Execute(ctx, []string{`{"cmd":"backlinks","args":{"query":"auth"}}`}); out != "neighbors" {
+		t.Fatalf("backlinks alias must stay neighbors, got %q", out)
+	}
+	if _, err := p.Execute(ctx, []string{`{"cmd":"unlink","args":{"from":"x"}}`}); err == nil {
+		t.Fatal("unlink without to accepted")
+	}
+}

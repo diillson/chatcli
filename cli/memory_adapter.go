@@ -384,3 +384,14 @@ func (a *memoryPluginAdapter) GraphMap() (string, error) {
 func (a *memoryPluginAdapter) GraphNeighbors(query string) (string, error) {
 	return a.cli.graphNeighborsText(query)
 }
+
+// Link and Unlink back @memory link/unlink: explicit, persisted links
+// between notes (knowledge_links.go). The graph rebuild that follows is
+// driven by the link store's change tap.
+func (a *memoryPluginAdapter) Link(from, to, rel, note string) (string, error) {
+	return a.cli.graphLinkText(from, to, rel, note)
+}
+
+func (a *memoryPluginAdapter) Unlink(from, to, rel string) (string, error) {
+	return a.cli.graphUnlinkText(from, to, rel)
+}
