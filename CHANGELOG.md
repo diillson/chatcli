@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.225.0](https://github.com/diillson/chatcli/compare/v1.224.0...v1.225.0) (2026-10-24)
+
+
+### Features
+
+* **context:** context documents as linked notes, with [@knowledge](https://github.com/knowledge) links ([#1879](https://github.com/diillson/chatcli/issues/1879)) ([298b265](https://github.com/diillson/chatcli/commit/298b2650d3e6ff63ba003c6d2bf2b4549f6f96e1))
+* **memory:** durable explicit links between notes (links.json) ([#1878](https://github.com/diillson/chatcli/issues/1878)) ([f48b763](https://github.com/diillson/chatcli/commit/f48b763c5d2cd21ae2e79f66fb41280efc948aac))
+* **memory:** keep an Obsidian vault of the memory graph in sync ([#1883](https://github.com/diillson/chatcli/issues/1883)) ([6fe833d](https://github.com/diillson/chatcli/commit/6fe833d4dbbb27e5f52175d5e07b1cd10c0579da))
+* **memory:** link notes explicitly with [@memory](https://github.com/memory) link and /memory link ([#1882](https://github.com/diillson/chatcli/issues/1882)) ([52113ec](https://github.com/diillson/chatcli/commit/52113eca5efae8232be4da6333debe166101973f))
+* **memory:** Obsidian vault writer (pkg/vault) ([#1880](https://github.com/diillson/chatcli/issues/1880)) ([8538a9d](https://github.com/diillson/chatcli/commit/8538a9d6ea013a341cefe8b6efd66740795311b0))
+* **memory:** the knowledge graph as a vault of linked notes ([#1881](https://github.com/diillson/chatcli/issues/1881)) ([65574de](https://github.com/diillson/chatcli/commit/65574de572e96c9510f16a1a8e2bef6c74f17ae4))
+* **memory:** typed links, backlinks and wikilink resolution in the knowledge graph ([#1877](https://github.com/diillson/chatcli/issues/1877)) ([b1a315c](https://github.com/diillson/chatcli/commit/b1a315c0de2fa9601e09eabbe52453f80d1307f3))
+* **session:** search several phrasings at once and find sessions by meaning ([#1887](https://github.com/diillson/chatcli/issues/1887)) ([d17d750](https://github.com/diillson/chatcli/commit/d17d750f0e26f253e796b080a0513ca99c68e0ef))
+
+
+### Bug Fixes
+
+* **registry:** honor the environment overrides on the first run ([#1885](https://github.com/diillson/chatcli/issues/1885)) ([d4bd93e](https://github.com/diillson/chatcli/commit/d4bd93e3548f99640e9ddf16aae388f630c2aa19))
+* **vision:** let off-catalog models see, and recover a turn whose images are refused ([#1886](https://github.com/diillson/chatcli/issues/1886)) ([ab0d169](https://github.com/diillson/chatcli/commit/ab0d16993b792b9b62c4e75dacd40e407f7b038a))
+
 ## [1.224.0](https://github.com/diillson/chatcli/compare/v1.223.0...v1.224.0) (2026-10-23)
 
 
