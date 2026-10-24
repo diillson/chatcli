@@ -93,3 +93,30 @@ func TestCoordinatorCircuitBreaker(t *testing.T) {
 		t.Fatal("success must reset the failure streak")
 	}
 }
+
+// A run that is not due must never hold the gate, not even while it is being
+// judged: a due run racing it would find the gate taken, give up, and no run
+// would happen at all. The clock is read while judging, so it sees the gate.
+func TestRunCoordinator_NotDueNeverHoldsTheGate(t *testing.T) {
+	rc := newRunCoordinator(0, 4)
+	var heldWhileJudging []bool
+	rc.now = func() time.Time {
+		heldWhileJudging = append(heldWhileJudging, rc.isRunning())
+		return time.Now()
+	}
+	if rc.tryAcquire(2) {
+		t.Fatal("2 new items acquired with a minimum of 4")
+	}
+	for _, held := range heldWhileJudging {
+		if held {
+			t.Fatal("a not-due attempt held the gate while being judged")
+		}
+	}
+	if rc.isRunning() {
+		t.Fatal("gate left held")
+	}
+	if !rc.tryAcquire(4) {
+		t.Fatal("a due run did not acquire")
+	}
+	rc.release()
+}

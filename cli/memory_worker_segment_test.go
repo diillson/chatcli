@@ -127,3 +127,39 @@ func TestNudgeSegment_DuringRunningPassRerunsAfterIt(t *testing.T) {
 		t.Fatal("the rerun request must be consumed")
 	}
 }
+
+// Due queued work that finds the gate held by another pass (the live-history
+// pass, or a queue pass) is not dropped: it marks a re-run, and the holder
+// drains the queue when it releases.
+func TestQueuedPass_LosingTheGateSchedulesARerun(t *testing.T) {
+	extractor := &scriptedClient{name: "claude", response: "NOTHING_NEW"}
+	mw := newResilienceWorker(t, extractor)
+	segment := []models.Message{{Role: "user", Content: "u"}, {Role: "assistant", Content: "a"}}
+	if _, err := mw.persistPending(segment); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mw.persistPending(segment); err != nil {
+		t.Fatal(err)
+	}
+
+	if !mw.coord.tryAcquire(memoryMinNewMessages) { // another pass holds the gate
+		t.Fatal("setup: could not hold the gate")
+	}
+	mw.runQueuedPass(context.Background(), mw.pendingBacklogCount())
+	if extractor.calls.Load() != 0 {
+		t.Fatal("ran while the gate was held")
+	}
+	if !mw.rerunQueued.Load() {
+		t.Fatal("due work lost the gate without scheduling a re-run")
+	}
+
+	mw.coord.release()
+	mw.rerunIfQueued(context.Background())
+	deadline := time.Now().Add(5 * time.Second)
+	for len(mw.pendingFiles()) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("queue not drained by the re-run: %v (calls %d)", mw.pendingFiles(), extractor.calls.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
