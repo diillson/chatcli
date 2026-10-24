@@ -35,6 +35,10 @@ type Compactor struct {
 	memDir string
 
 	lastCompaction time.Time
+	// lastRemap is what the last LLM compaction rewrote (see
+	// compactionRemap); Manager moves explicit links along it. Held behind
+	// a pointer so Compactor stays a comparable type.
+	lastRemap *factRemap
 }
 
 // compactorState is the on-disk shape of the compactor's durable state.
@@ -104,6 +108,7 @@ func (c *Compactor) NeedsCompaction() bool {
 // RunWithLLM performs LLM-assisted compaction.
 func (c *Compactor) RunWithLLM(ctx context.Context, sendPrompt func(ctx context.Context, prompt string) (string, error)) error {
 	c.logger.Info("Starting memory compaction (LLM-assisted)")
+	c.lastRemap = nil
 
 	facts := c.facts.GetAll()
 	if len(facts) < 10 {
@@ -175,6 +180,7 @@ func (c *Compactor) RunWithLLM(ctx context.Context, sendPrompt func(ctx context.
 		zap.Int("after", len(consolidated)),
 		zap.Int("archived", len(dropped)))
 
+	c.lastRemap = &factRemap{moves: compactionRemap(facts, consolidated)}
 	c.facts.ReplaceFacts(consolidated)
 	c.markCompacted()
 
@@ -182,6 +188,70 @@ func (c *Compactor) RunWithLLM(ctx context.Context, sendPrompt func(ctx context.
 	c.writeMemoryMD()
 
 	return nil
+}
+
+// compactionRemapJaccard is the token overlap a fact the consolidation
+// CREATED needs with a removed original to inherit its explicit links.
+const compactionRemapJaccard = 0.34
+
+// compactionRemap maps each original fact the consolidation removed to the
+// newly created consolidated fact that best restates it ("fact:old" →
+// "fact:new"). Only facts this compaction created are candidates — a
+// survivor that merely resembles a removed fact is a different fact — and
+// originals with no close successor are left out (their links dangle and
+// GC judges them).
+func compactionRemap(originals, consolidated []*Fact) map[string]string {
+	orig := make(map[string]bool, len(originals))
+	for _, f := range originals {
+		orig[f.ID] = true
+	}
+	kept := make(map[string]bool, len(consolidated))
+	var created []*Fact
+	for _, f := range consolidated {
+		kept[f.ID] = true
+		if !orig[f.ID] {
+			created = append(created, f)
+		}
+	}
+	if len(created) == 0 {
+		return nil
+	}
+	createdTokens := make([]map[string]bool, len(created))
+	for i, f := range created {
+		createdTokens[i] = factTokenSet(f.Content)
+	}
+	remap := make(map[string]string)
+	for _, old := range originals {
+		if kept[old.ID] {
+			continue
+		}
+		oldTokens := factTokenSet(old.Content)
+		best, bestSim := "", 0.0
+		for i, f := range created {
+			if sim := jaccard(oldTokens, createdTokens[i]); sim > bestSim {
+				best, bestSim = f.ID, sim
+			}
+		}
+		if best != "" && bestSim >= compactionRemapJaccard {
+			remap["fact:"+old.ID] = "fact:" + best
+		}
+	}
+	return remap
+}
+
+// LastRemap returns the "fact:old" → "fact:new" mapping the last LLM
+// compaction produced (nil after a score-based run or when nothing was
+// rewritten).
+func (c *Compactor) LastRemap() map[string]string {
+	if c.lastRemap == nil {
+		return nil
+	}
+	return c.lastRemap.moves
+}
+
+// factRemap is one LLM compaction's "fact:old" → "fact:new" mapping.
+type factRemap struct {
+	moves map[string]string
 }
 
 // RunScoreBased performs score-based compaction (no LLM needed).

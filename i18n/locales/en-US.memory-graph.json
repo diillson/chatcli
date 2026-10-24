@@ -1,0 +1,4 @@
+{
+  "memory.export.done": "Exported %d records to %s (%d facts, %d episodes, %d topics, %d projects, %d links) · %s",
+  "memory.import.done": "Merged %d records: %d facts added (%d already known), %d episodes (%d already known), %d topics, %d projects, %d links"
+}

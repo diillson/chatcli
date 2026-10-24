@@ -42,7 +42,7 @@ const exportSealedPrefix = "enc:"
 
 // ExportRecord is one JSONL line of a memory export.
 type ExportRecord struct {
-	Kind    string       `json:"kind"` // fact | episode | topic | project | profile | header
+	Kind    string       `json:"kind"` // fact | episode | topic | project | profile | link | header
 	Version int          `json:"version,omitempty"`
 	At      time.Time    `json:"at,omitempty"`
 	Fact    *Fact        `json:"fact,omitempty"`
@@ -50,18 +50,19 @@ type ExportRecord struct {
 	Topic   *Topic       `json:"topic,omitempty"`
 	Project *Project     `json:"project,omitempty"`
 	Profile *UserProfile `json:"profile,omitempty"`
+	Link    *StoredLink  `json:"link,omitempty"`
 }
 
 // ExportReport counts what an export wrote.
 type ExportReport struct {
-	Facts, Episodes, Topics, Projects int
-	Profile                           bool
-	Sealed                            bool
+	Facts, Episodes, Topics, Projects, Links int
+	Profile                                  bool
+	Sealed                                   bool
 }
 
 // Total is the number of data records.
 func (r ExportReport) Total() int {
-	n := r.Facts + r.Episodes + r.Topics + r.Projects
+	n := r.Facts + r.Episodes + r.Topics + r.Projects + r.Links
 	if r.Profile {
 		n++
 	}
@@ -141,6 +142,15 @@ func (m *Manager) Export(w io.Writer) (ExportReport, error) {
 			rep.Projects++
 		}
 	}
+	if m.Links != nil {
+		for _, l := range m.Links.All() {
+			l := l
+			if err := write(ExportRecord{Kind: "link", Link: &l}); err != nil {
+				return rep, err
+			}
+			rep.Links++
+		}
+	}
 	return rep, bw.Flush()
 }
 
@@ -162,14 +172,14 @@ func (m *Manager) ExportToFile(path string) (ExportReport, error) {
 
 // ImportReport counts what an import merged.
 type ImportReport struct {
-	Facts, FactsSkipped, Episodes, EpisodesSkipped, Topics, Projects int
-	Profile                                                          bool
-	Lines                                                            int
+	Facts, FactsSkipped, Episodes, EpisodesSkipped, Topics, Projects, Links int
+	Profile                                                                 bool
+	Lines                                                                   int
 }
 
 // Total is the number of records merged.
 func (r ImportReport) Total() int {
-	n := r.Facts + r.Episodes + r.Topics + r.Projects
+	n := r.Facts + r.Episodes + r.Topics + r.Projects + r.Links
 	if r.Profile {
 		n++
 	}
@@ -244,6 +254,8 @@ func (m *Manager) Import(r io.Reader) (ImportReport, error) {
 				m.Profile.MergeProfile(*rec.Profile)
 				rep.Profile = true
 			}
+		case "link":
+			rep.Links += m.importLink(rec.Link)
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -254,6 +266,15 @@ func (m *Manager) Import(r io.Reader) (ImportReport, error) {
 		rep.Facts, rep.FactsSkipped = added, skipped
 	}
 	return rep, nil
+}
+
+// importLink merges one exported explicit link; returns 1 when it changed
+// the store.
+func (m *Manager) importLink(l *StoredLink) int {
+	if l == nil || m.Links == nil || !m.Links.Merge(*l) {
+		return 0
+	}
+	return 1
 }
 
 // ImportFromFile merges the export at path.

@@ -37,8 +37,11 @@ import (
 )
 
 // graphSchemaVersion gates persisted files: any format/derivation change
-// bumps it, and older files are discarded and rebuilt.
-const graphSchemaVersion = 1
+// bumps it, and older files are discarded and rebuilt. 2 = typed links,
+// aliases, context documents and autolinked mentions (the vault model); a
+// v1 file is simply rebuilt from the stores on first boot — the migration
+// is transparent because every byte of the graph is derived.
+const graphSchemaVersion = 2
 
 // graphFingerprintTTL bounds how often the fast path re-checks the source
 // fingerprint. External edits (skills changed in an editor, sessions written
@@ -68,6 +71,10 @@ type GraphCache struct {
 	lastFPCheckMu sync.Mutex
 	lastFPCheck   time.Time
 
+	// onDirty is notified (cheaply, possibly under a store lock) every time
+	// the cache is marked stale — the vault syncer's debounce trigger.
+	onDirty atomic.Pointer[func()]
+
 	path            string
 	persistInFlight atomic.Bool
 	persistWG       sync.WaitGroup
@@ -91,7 +98,24 @@ func NewGraphCache(memoryDir string, logger *zap.Logger) *GraphCache {
 func (gc *GraphCache) MarkDirty() {
 	if gc != nil {
 		gc.dirty.Store(true)
+		if fn := gc.onDirty.Load(); fn != nil {
+			(*fn)()
+		}
 	}
+}
+
+// SetOnDirty registers a callback fired on every MarkDirty (nil detaches).
+// It runs on the mutating goroutine, possibly while a store lock is held,
+// so it must be cheap and must never read the graph or any store.
+func (gc *GraphCache) SetOnDirty(fn func()) {
+	if gc == nil {
+		return
+	}
+	if fn == nil {
+		gc.onDirty.Store(nil)
+		return
+	}
+	gc.onDirty.Store(&fn)
 }
 
 // SetSource wires the builder and fingerprint functions, then tries to adopt
@@ -275,6 +299,15 @@ func (gc *GraphCache) persistAsync(g *knowledge.Graph, fp string) {
 			gc.logger.Warn("memory graph cache: persist failed", zap.Error(err))
 		}
 	}()
+}
+
+// Peek returns the current snapshot (possibly stale, possibly nil) without
+// ever rebuilding — for per-keystroke callers such as completion.
+func (gc *GraphCache) Peek() *knowledge.Graph {
+	if gc == nil {
+		return nil
+	}
+	return gc.snap.Load()
 }
 
 // Stats reports the cached snapshot's size without ever triggering a build
