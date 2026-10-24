@@ -72,8 +72,8 @@
     "surface": "bef6a5a6caa9105b"
   },
   "@graphview": {
-    "version": "1.0.0",
-    "surface": "d8d93c77e6e7f695"
+    "version": "1.1.0",
+    "surface": "0f641f7c66349ad0"
   },
   "@http": {
     "version": "1.1.0",
@@ -104,8 +104,8 @@
     "surface": "6a9a6b03d9d04f25"
   },
   "@memory": {
-    "version": "1.4.0",
-    "surface": "ca721b0de6343f90"
+    "version": "1.5.0",
+    "surface": "f49a44826a769349"
   },
   "@moa": {
     "version": "1.1.0",

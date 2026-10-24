@@ -1,5 +1,26 @@
 {
   "memory.export.done": "Exportados %d registros para %s (%d fatos, %d episódios, %d tópicos, %d projetos, %d links) · %s",
   "memory.import.done": "Mesclados %d registros: %d fatos adicionados (%d já conhecidos), %d episódios (%d já conhecidos), %d tópicos, %d projetos, %d links",
-  "plugins.knowledge.describe_links": "Seguindo os links de %s"
+  "plugins.knowledge.describe_links": "Seguindo os links de %s",
+  "graph.link.ambiguous": "%q corresponde a mais de uma nota — use um destes ids:%s",
+  "graph.link.not_found": "Nenhuma nota corresponde a %q (tente um id de nó, um id de fato do @memory list, um título ou [[um wikilink]]).",
+  "graph.link.unavailable": "Links explícitos precisam da memória de longo prazo, que está desativada nesta sessão.",
+  "graph.link.self": "Uma nota não pode linkar para si mesma (%s).",
+  "graph.link.exists": "Já linkados: %s → %s (%s).",
+  "graph.link.created": "Linkado %s → %s (%s).",
+  "graph.link.full": "O armazenamento de links está cheio (10.000 links); remova antes, com unlink, os links que não precisa mais.",
+  "graph.link.readonly": "Não dá para salvar links: o links.json está cifrado com uma chave que este processo não tem.",
+  "graph.link.invalid": "Essas notas não podem ser linkadas (%s → %s): um id está vazio ou passa de 512 bytes.",
+  "graph.unlink.derived": "Não há link explícito entre %s e %s; eles se conectam pelos próprios dados (%s) — altere o fato, a tag, o projeto ou o documento para mudar isso.",
+  "graph.unlink.none": "Não há link entre %s e %s.",
+  "graph.unlink.removed": "Removido(s) %d link(s) entre %s e %s.",
+  "memory.link.usage": "Uso: /memory link <origem> -> <destino> [--rel <relação>] [--note <motivo>]  (notas: id, id de fato, título ou [[wikilink]])",
+  "memory.unlink.usage": "Uso: /memory unlink <origem> -> <destino> [--rel <relação>]",
+  "memory.links.usage": "Uso: /memory links <nota>  — links (→), backlinks (←) e notas próximas",
+  "mem.cmd.suggest.links": "Links, backlinks e notas próximas de uma nota",
+  "mem.cmd.suggest.link": "Linkar duas notas: <origem> -> <destino> [--rel r] [--note motivo]",
+  "mem.cmd.suggest.unlink": "Remover um link que você criou: <origem> -> <destino>",
+  "plugins.memory.describe.link": "Linkando %s → %s",
+  "plugins.memory.describe.unlink": "Removendo link %s ↔ %s",
+  "memory.usage": "Uso: /memory [today|yesterday|week|longterm|list|load <data>|profile|profile set <k>=<v>|remember [cat] <fato>|forget <trecho>|facts|topics|projects|stats|timeline [q]|compact|export [caminho]|import <caminho>|recall <consulta>|why|links <nota>|link <a> -> <b>|unlink <a> -> <b>|<YYYY-MM-DD>]"
 }

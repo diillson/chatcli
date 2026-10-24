@@ -124,6 +124,8 @@ const KIND_COLORS = {
   profile: "#f9e2af", project: "#89b4fa", topic: "#a6e3a1", skill: "#cba6f7",
   fact: "#94e2d5", tag: "#9399b2", message: "#89b4fa", user: "#f9e2af",
   assistant: "#a6e3a1", tool: "#cba6f7", file: "#fab387", entity: "#f38ba8",
+  episode: "#f5c2e7", session: "#74c7ec", kbcontext: "#eba0ac", context: "#eba0ac",
+  doc: "#fab387", note: "#b4befe", card: "#f2cdcd",
 };
 const FALLBACK_COLORS = ["#89b4fa","#a6e3a1","#cba6f7","#fab387","#f38ba8","#94e2d5","#f9e2af","#74c7ec"];
 const kindPalette = {};
@@ -170,7 +172,7 @@ for (const e of rawEdges) {
   const a = byId.get(e.source), b = byId.get(e.target);
   if (!a || !b || a === b) continue;
   const w = typeof e.weight === "number" && e.weight > 0 ? e.weight : 1;
-  edges.push({ a, b, w });
+  edges.push({ a, b, w, label: typeof e.label === "string" ? e.label : "" });
   a.deg++; b.deg++;
 }
 // node radius from degree + intrinsic weight
@@ -412,6 +414,7 @@ function selectEdge(e) {
     `<span class="d-close">×</span>` +
     `<div class="d-kind">edge</div>` +
     `<div class="d-title">${esc(e.a.label)} — ${esc(e.b.label)}</div>` +
+    (e.label ? `<div class="d-summary">${esc(e.label)}</div>` : "") +
     `<div class="d-summary">weight ${(+e.w).toFixed(2)}</div>`;
   detail.querySelector(".d-close").addEventListener("click", clearSelection);
 }

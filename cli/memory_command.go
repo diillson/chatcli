@@ -42,6 +42,10 @@ func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 
 	args := strings.TrimSpace(strings.TrimPrefix(input, "/memory"))
 
+	if cli.dispatchMemoryPrefixCommand(ctx, args) {
+		return
+	}
+
 	switch {
 	case args == "" || args == "today":
 		cli.showDayNotes(time.Now())
@@ -83,24 +87,12 @@ func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 	case args == "stats":
 		cli.showMemoryStats()
 
-	case args == "timeline" || strings.HasPrefix(args, "timeline "):
-		cli.showMemoryTimeline(strings.TrimSpace(strings.TrimPrefix(args, "timeline")))
-
 	case strings.HasPrefix(args, "facts"):
 		category := strings.TrimSpace(strings.TrimPrefix(args, "facts"))
 		cli.showMemoryFacts(category)
 
 	case args == "compact":
 		cli.runMemoryCompact(ctx)
-
-	case args == "export" || strings.HasPrefix(args, "export "):
-		cli.exportMemory(strings.TrimSpace(strings.TrimPrefix(args, "export")))
-
-	case args == "import" || strings.HasPrefix(args, "import "):
-		cli.importMemory(strings.TrimSpace(strings.TrimPrefix(args, "import")))
-
-	case args == "recall" || strings.HasPrefix(args, "recall "):
-		cli.recallMemory(ctx, strings.TrimSpace(strings.TrimPrefix(args, "recall")))
 
 	case args == "why":
 		cli.explainLastRecall()
@@ -114,6 +106,32 @@ func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 		}
 		cli.showDayNotes(date)
 	}
+}
+
+// dispatchMemoryPrefixCommand runs the /memory subcommands that take a
+// free-form argument ("<name>" or "<name> <rest>"). Returns false when args
+// names none of them. A table instead of switch cases keeps the dispatcher
+// flat as subcommands are added.
+func (cli *ChatCLI) dispatchMemoryPrefixCommand(ctx context.Context, args string) bool {
+	commands := []struct {
+		name string
+		run  func(rest string)
+	}{
+		{"timeline", cli.showMemoryTimeline},
+		{"export", cli.exportMemory},
+		{"import", cli.importMemory},
+		{"recall", func(rest string) { cli.recallMemory(ctx, rest) }},
+		{"links", cli.memoryLinksCommand},
+		{"link", func(rest string) { cli.memoryLinkCommand(rest, false) }},
+		{"unlink", func(rest string) { cli.memoryLinkCommand(rest, true) }},
+	}
+	for _, c := range commands {
+		if args == c.name || strings.HasPrefix(args, c.name+" ") {
+			c.run(strings.TrimSpace(strings.TrimPrefix(args, c.name)))
+			return true
+		}
+	}
+	return false
 }
 
 func (cli *ChatCLI) showDayNotes(date time.Time) {
@@ -772,6 +790,9 @@ func (cli *ChatCLI) getMemorySuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "import", Description: i18n.T("mem.cmd.suggest.import")},
 			{Text: "recall", Description: i18n.T("mem.cmd.suggest.recall")},
 			{Text: "why", Description: i18n.T("mem.cmd.suggest.why")},
+			{Text: "links", Description: i18n.T("mem.cmd.suggest.links")},
+			{Text: "link", Description: i18n.T("mem.cmd.suggest.link")},
+			{Text: "unlink", Description: i18n.T("mem.cmd.suggest.unlink")},
 		}
 		return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 	}
@@ -824,6 +845,12 @@ func (cli *ChatCLI) getMemoryArgSuggestions(d prompt.Document, args []string, li
 			return nil
 		}
 		return prompt.FilterHasPrefix(memoryCategorySuggestions(true), word, true)
+
+	case "links", "link", "unlink":
+		if !atArg(args, line, 2) {
+			return nil
+		}
+		return prompt.FilterHasPrefix(cli.graphHubSuggestions(), word, true)
 
 	case "profile":
 		if (len(args) == 2 && strings.HasSuffix(line, " ")) || (len(args) == 3 && args[2] != "set" && !strings.HasSuffix(line, " ")) {

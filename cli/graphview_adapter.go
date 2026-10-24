@@ -19,10 +19,12 @@ package cli
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/diillson/chatcli/cli/plugins"
+	"github.com/diillson/chatcli/pkg/knowledge"
 )
 
 // graphViewMaxConversationMsgs caps how many recent messages the conversation
@@ -59,7 +61,7 @@ func (a *graphViewPluginAdapter) KnowledgeGraph() (plugins.GraphData, error) {
 		})
 	}
 	for _, e := range g.EdgeList() {
-		data.Edges = append(data.Edges, plugins.GraphEdge{Source: e.A, Target: e.B, Weight: e.Weight})
+		data.Edges = append(data.Edges, plugins.GraphEdge{Source: e.A, Target: e.B, Weight: e.Weight, Label: edgeRelLabel(g, e.A, e.B)})
 	}
 	return data, nil
 }
@@ -218,4 +220,19 @@ func graphViewTurnLabel(role, content string) string {
 		first = "(tool call)"
 	}
 	return prefix + " " + truncateForLog(first, 48)
+}
+
+// edgeRelLabel names the typed links behind an undirected edge, in a stable
+// order ("about · mentions"), for the graph view's edge detail.
+func edgeRelLabel(g *knowledge.Graph, a, b string) string {
+	var rels []string
+	seen := map[knowledge.Rel]bool{}
+	for _, l := range g.LinksBetween(a, b) {
+		if !seen[l.Rel] {
+			seen[l.Rel] = true
+			rels = append(rels, string(l.Rel))
+		}
+	}
+	sort.Strings(rels)
+	return strings.Join(rels, " · ")
 }

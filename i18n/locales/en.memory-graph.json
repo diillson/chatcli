@@ -1,5 +1,26 @@
 {
   "memory.export.done": "Exported %d records to %s (%d facts, %d episodes, %d topics, %d projects, %d links) · %s",
   "memory.import.done": "Merged %d records: %d facts added (%d already known), %d episodes (%d already known), %d topics, %d projects, %d links",
-  "plugins.knowledge.describe_links": "Following links of %s"
+  "plugins.knowledge.describe_links": "Following links of %s",
+  "graph.link.ambiguous": "%q names more than one note — use one of these ids:%s",
+  "graph.link.not_found": "No note matches %q (try a node id, a fact id from @memory list, a title, or [[a wikilink]]).",
+  "graph.link.unavailable": "Explicit links need long-term memory, which is disabled in this session.",
+  "graph.link.self": "A note cannot link to itself (%s).",
+  "graph.link.exists": "Already linked: %s → %s (%s).",
+  "graph.link.created": "Linked %s → %s (%s).",
+  "graph.link.full": "The link store is full (10,000 links); remove links you no longer need with unlink first.",
+  "graph.link.readonly": "Links cannot be saved: links.json is sealed with an encryption key this process does not have.",
+  "graph.link.invalid": "Those notes cannot be linked (%s → %s): an id is empty or longer than 512 bytes.",
+  "graph.unlink.derived": "No explicit link between %s and %s; they are connected by the data itself (%s) — change the fact, tag, project or document to change that.",
+  "graph.unlink.none": "No link between %s and %s.",
+  "graph.unlink.removed": "Removed %d link(s) between %s and %s.",
+  "memory.link.usage": "Usage: /memory link <from> -> <to> [--rel <relation>] [--note <why>]  (notes: id, fact id, title or [[wikilink]])",
+  "memory.unlink.usage": "Usage: /memory unlink <from> -> <to> [--rel <relation>]",
+  "memory.links.usage": "Usage: /memory links <note>  — links (→), backlinks (←) and nearby notes",
+  "mem.cmd.suggest.links": "Links, backlinks and nearby notes of a note",
+  "mem.cmd.suggest.link": "Link two notes: <from> -> <to> [--rel r] [--note why]",
+  "mem.cmd.suggest.unlink": "Remove a link you drew: <from> -> <to>",
+  "plugins.memory.describe.link": "Linking %s → %s",
+  "plugins.memory.describe.unlink": "Unlinking %s ↔ %s",
+  "memory.usage": "Usage: /memory [today|yesterday|week|longterm|list|load <date>|profile|profile set <k>=<v>|remember [cat] <fact>|forget <substr>|facts|topics|projects|stats|timeline [q]|compact|export [path]|import <path>|recall <query>|why|links <note>|link <a> -> <b>|unlink <a> -> <b>|<YYYY-MM-DD>]"
 }

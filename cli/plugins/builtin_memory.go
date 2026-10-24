@@ -75,6 +75,18 @@ type GraphAccessor interface {
 	GraphNeighbors(query string) (string, error)
 }
 
+// GraphLinker is an OPTIONAL capability behind @memory link/unlink: drawing
+// and removing explicit links between notes (persisted, unlike the derived
+// graph). Same optional-interface pattern as GraphAccessor.
+type GraphLinker interface {
+	// Link draws from → to with an optional relation and note. Endpoints
+	// are node ids, fact ids, titles/aliases or [[wikilinks]].
+	Link(from, to, rel, note string) (string, error)
+	// Unlink removes the explicit links between from and to (both
+	// directions; only rel when set).
+	Unlink(from, to, rel string) (string, error)
+}
+
 // TimelineAccessor is an OPTIONAL capability a MemoryAdapter may implement to
 // back the @memory timeline subcommand — the chronological view of episodic
 // memory ("what did we do three months ago?"). Same optional-interface
@@ -131,7 +143,7 @@ func (*BuiltinMemoryPlugin) Name() string { return "@memory" }
 
 // Description surfaces the tool in /plugin list and the help.
 func (*BuiltinMemoryPlugin) Description() string {
-	return "Persist or recall long-term memory, and explore the knowledge graph of how it connects. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction. Use 'recall' to find facts by content, 'timeline' for WHEN questions (\"what did we do 3 months ago?\", per-project work history; as_of counts relative dates from another day for that one call), and 'neighbors'/'map' to see how a subject connects (backlinks, related notes)."
+	return "Persist or recall long-term memory, and explore the knowledge graph of how it connects. Use it the moment the user reveals a durable fact about themselves (certifications, skills, role, preferences, goals) or the project — don't wait for background extraction. Use 'recall' to find facts by content, 'timeline' for WHEN questions (\"what did we do 3 months ago?\", per-project work history; as_of counts relative dates from another day for that one call), and 'neighbors'/'map' to see how a subject connects (links, backlinks, related notes). Everything remembered — facts, topics, projects, the profile, episodes, sessions, skills, board cards, contexts and their documents — is a note in one linked graph; use 'link' to connect two notes the user relates (\"this gotcha is about that project\") so the relationship is recalled with either."
 }
 
 // Usage explains the canonical invocation forms.
@@ -147,8 +159,10 @@ Subcommands (cmd + args):
   recall    {query?:"topic to recall", as_of?}
   timeline  {project?, from?, to?, query?, limit?, as_of?}   dated episode history (WHEN);
             as_of (YYYY-MM-DD) counts "3 months ago" from that day, this call only
-  neighbors {query:"<subject or node id>"}   local graph: backlinks + related notes
+  neighbors {query:"<subject or node id>"}   local graph: links (→), backlinks (←) + related notes
   map                                         knowledge-graph overview (counts + hubs)
+  link      {from, to, rel?, note?}           connect two notes (titles, [[wikilinks]], ids); persisted
+  unlink    {from, to, rel?}                  remove links drawn with 'link' (both directions)
 
 Prefer 'profile' for stable attributes of the user (name/role/certifications/
 skills/goals/interests/directives/milestone or any key=value), and 'remember'
@@ -156,7 +170,8 @@ for project facts, conventions, and gotchas. Use 'recall' to search by content,
 'timeline' when the question is about WHEN ("o que fizemos há 3 meses?",
 "what happened in april?") — from/to accept ISO dates (2026-04) or natural
 EN/PT expressions ("3 months ago", "abril") — and 'neighbors' to follow
-relationships from a subject.
+relationships from a subject. Write [[Title]] inside remembered content to
+link it to that note; 'link' connects two existing notes explicitly.
 
 Profile LIST fields (certifications/skills/goals/interests/directives) UPSERT
 by default: new items append, and an item restating an existing entry (same
@@ -180,7 +195,7 @@ examples or generated artifacts.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.4.0" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.5.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
@@ -274,6 +289,30 @@ func (*BuiltinMemoryPlugin) Schema() string {
 				"description": "Knowledge-graph overview: node counts by kind and the hub subjects.",
 				"flags":       []map[string]interface{}{},
 				"examples":    []string{`{"cmd":"map"}`},
+			},
+			{
+				"name":        "link",
+				"description": "Connect two notes with an explicit, persisted link (from → to). Endpoints may be node ids (topic:auth), fact ids from list, titles/aliases or [[wikilinks]]; an ambiguous reference is refused with candidate ids. rel names the relationship (about, depends_on, explains, related…; default related).",
+				"flags": []map[string]interface{}{
+					{"name": "from", "type": "string", "required": true, "description": "Source note reference."},
+					{"name": "to", "type": "string", "required": true, "description": "Target note reference."},
+					{"name": "rel", "type": "string", "description": "Relationship name (snake_case; default related)."},
+					{"name": "note", "type": "string", "description": "Optional one-line reason for the link."},
+				},
+				"examples": []string{
+					`{"cmd":"link","args":{"from":"3f9a1c02","to":"Orbital","rel":"about"}}`,
+					`{"cmd":"link","args":{"from":"[[Setup]]","to":"topic:telemetry security","rel":"explains"}}`,
+				},
+			},
+			{
+				"name":        "unlink",
+				"description": "Remove links drawn with link between two notes (both directions; only rel when given). Links derived from the data (tags, projects, wikilinks, mentions) cannot be removed this way — change the data instead.",
+				"flags": []map[string]interface{}{
+					{"name": "from", "type": "string", "required": true, "description": "One note reference."},
+					{"name": "to", "type": "string", "required": true, "description": "The other note reference."},
+					{"name": "rel", "type": "string", "description": "Only this relationship."},
+				},
+				"examples": []string{`{"cmd":"unlink","args":{"from":"3f9a1c02","to":"Orbital"}}`},
 			},
 		},
 	}
@@ -413,11 +452,43 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 			return "", errors.New(`@memory neighbors: "query" is required (a subject or node id)`)
 		}
 		return ga.GraphNeighbors(in.Query)
+	case "link", "unlink":
+		return executeMemoryLink(adapter, cmd, inner)
 	default:
 		return "", fmt.Errorf(
-			"@memory: unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map)", cmd,
+			"@memory: unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map|link|unlink)", cmd,
 		)
 	}
+}
+
+// executeMemoryLink runs @memory link / unlink against the optional
+// GraphLinker capability. source/target/relation are accepted as aliases of
+// from/to/rel (lenient parsing: the model reaches for either).
+func executeMemoryLink(adapter MemoryAdapter, cmd, inner string) (string, error) {
+	gl, ok := adapter.(GraphLinker)
+	if !ok {
+		return "", fmt.Errorf("@memory %s: explicit links are not available in this session", cmd)
+	}
+	var in struct {
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Source string `json:"source"`
+		Target string `json:"target"`
+		Rel    string `json:"rel"`
+		Kind   string `json:"relation"`
+		Note   string `json:"note"`
+	}
+	_ = json.Unmarshal([]byte(inner), &in)
+	from := strings.TrimSpace(firstNonBlank(in.From, in.Source))
+	to := strings.TrimSpace(firstNonBlank(in.To, in.Target))
+	rel := strings.TrimSpace(firstNonBlank(in.Rel, in.Kind))
+	if from == "" || to == "" {
+		return "", fmt.Errorf(`@memory %s: "from" and "to" are required (note ids, fact ids, titles or [[wikilinks]])`, cmd)
+	}
+	if cmd == "link" {
+		return gl.Link(from, to, rel, in.Note)
+	}
+	return gl.Unlink(from, to, rel)
 }
 
 // parseMemoryInvocation accepts the JSON envelope {"cmd":..,"args":{..}},
@@ -443,7 +514,7 @@ func parseMemoryInvocation(args []string) (string, string, error) {
 		canon := canonicalMemoryCmd(cmdStr)
 		if canon == "" {
 			return "", "", fmt.Errorf(
-				"missing or unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map)", cmdStr,
+				"missing or unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map|link|unlink)", cmdStr,
 			)
 		}
 		var inner string
@@ -490,6 +561,10 @@ func canonicalMemoryCmd(s string) string {
 		return "map"
 	case "timeline", "history", "episodes", "chronology":
 		return "timeline"
+	case "link", "relate", "connect", "link_notes", "add_link":
+		return "link"
+	case "unlink", "disconnect", "unrelate", "remove_link", "delete_link":
+		return "unlink"
 	}
 	return ""
 }

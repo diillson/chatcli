@@ -263,6 +263,10 @@ func (*BuiltinMemoryPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.memory.describe.map")
 	case "neighbors":
 		return i18n.T("plugins.memory.describe.neighbors", describeTrunc(describeStr(inner, "query"), 50))
+	case "link":
+		return i18n.T("plugins.memory.describe.link", describeTrunc(describeStr(inner, "from"), 30), describeTrunc(describeStr(inner, "to"), 30))
+	case "unlink":
+		return i18n.T("plugins.memory.describe.unlink", describeTrunc(describeStr(inner, "from"), 30), describeTrunc(describeStr(inner, "to"), 30))
 	default:
 		return i18n.T("plugins.memory.describe.default")
 	}
