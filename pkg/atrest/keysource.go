@@ -372,3 +372,30 @@ func OpensWith(secret, path string, payload []byte) bool {
 	_, err = enc.Decrypt(payload)
 	return err == nil
 }
+
+// OpenLines returns a line-oriented store with every sealed line opened, in
+// memory only: the file on disk is not touched. bound says whether its lines
+// are bound to path (journals) or not (the prompt history). Plain lines pass
+// through; a line that does not open is an error naming it.
+func OpenLines(path string, data []byte, linePrefix string, bound bool) ([]byte, error) {
+	at := ""
+	if bound {
+		at = path
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, linePrefix) {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(line[len(linePrefix):])
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", i+1, err)
+		}
+		plain, err := OpenAt(at, raw)
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", i+1, err)
+		}
+		lines[i] = string(plain)
+	}
+	return []byte(strings.Join(lines, "\n")), nil
+}

@@ -63,6 +63,8 @@ func (cli *ChatCLI) routeConfigSecurity(args []string) {
 		cli.configSecurityReload()
 	case "reseal", "rotate-key":
 		cli.configSecurityReseal()
+	case "reveal", "show", "decrypt":
+		cli.configSecurityReveal(rest)
 	case "verify-audit", "audit-verify":
 		cli.configSecurityVerifyAudit(rest)
 	case "recovery-key":
@@ -85,6 +87,7 @@ func (cli *ChatCLI) printConfigSecurityUsage() {
 	fmt.Println("  /config security forget \"<pattern>\"                 [--yes]")
 	fmt.Println("  /config security reload")
 	fmt.Println("  /config security reseal")
+	fmt.Println("  /config security reveal [<file>] [--out <path>] [--force]")
 	fmt.Println("  /config security recovery-key [--save <file> | --restore <file>]")
 	fmt.Println("  /config security use-keychain")
 	fmt.Println("  /config security verify-audit [path]")
