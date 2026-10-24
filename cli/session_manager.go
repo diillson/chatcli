@@ -573,6 +573,17 @@ type SessionSearchHit struct {
 	Partial bool
 	Covered int
 	Terms   int
+
+	// Via lists the phrasings that found this session when one search ran
+	// several (SearchMany); empty for a single-phrasing search.
+	Via []string
+	// Related marks a session found by meaning (semantic similarity or
+	// expansion) rather than by the query's words; it follows every
+	// lexical hit and carries its closest messages as snippets.
+	Related bool
+	// Similarity is the cosine similarity behind a Related hit found
+	// through embeddings (0 when found by expansion).
+	Similarity float64
 }
 
 // sessionSearchDoc maps one BM25 document (a message) back to its session.

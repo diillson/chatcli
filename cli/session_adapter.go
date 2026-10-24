@@ -34,26 +34,91 @@ type sessionPluginAdapter struct {
 }
 
 // Search runs a free-text search across saved sessions.
-func (a *sessionPluginAdapter) Search(_ context.Context, query string, limit int) (string, error) {
+func (a *sessionPluginAdapter) Search(ctx context.Context, query string, limit int) (string, error) {
 	if a.cli == nil || a.cli.sessionManager == nil {
 		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
 	}
-	hits, err := a.cli.sessionManager.SearchSessions(query, limit)
-	if err != nil {
-		return "", err
-	}
-	if len(hits) == 0 {
-		return i18n.T("session.tool.no_match", query), nil
-	}
-	return renderSessionHits(i18n.T("session.tool.match_header", query), hits, utils.ReferenceNow()), nil
+	return a.searchPlain(ctx, query, limit)
 }
 
 // SearchWindow implements plugins.SessionWindowSearcher: the same search
 // bounded to sessions saved in a date window, with relative expressions
 // (in from, to or query) counted from asOf for this call only.
-func (a *sessionPluginAdapter) SearchWindow(_ context.Context, query string, limit int, from, to, asOf string) (string, error) {
+func (a *sessionPluginAdapter) SearchWindow(ctx context.Context, query string, limit int, from, to, asOf string) (string, error) {
+	return a.SearchMany(ctx, []string{query}, limit, from, to, asOf)
+}
+
+// SearchMany implements plugins.SessionMultiSearcher: one search over
+// several phrasings of the same question (fused by reciprocal rank, each
+// hit saying which phrasings found it), bounded to a date window like
+// SearchWindow, followed by the sessions related by meaning when an
+// embedding provider or HyDE is configured. One phrasing, no window and no
+// semantic signal is exactly the plain search.
+func (a *sessionPluginAdapter) SearchMany(ctx context.Context, queries []string, limit int, from, to, asOf string) (string, error) {
 	if a.cli == nil || a.cli.sessionManager == nil {
 		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
+	}
+	return a.searchWindowed(ctx, normalizePhrasings(queries), limit, from, to, asOf)
+}
+
+// searchPlain is the undated search of one phrasing (adapters without the
+// window capability), plus what the semantic layer adds.
+func (a *sessionPluginAdapter) searchPlain(ctx context.Context, query string, limit int) (string, error) {
+	sm := a.cli.sessionManager
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("empty query")
+	}
+	phrasings := []string{query}
+	if extra := a.cli.hydePhrasing(ctx, query); extra != "" {
+		phrasings = append(phrasings, extra)
+	}
+	hits, err := a.searchPhrasings(phrasings, limit, time.Time{}, time.Time{}, utils.ReferenceNow())
+	if err != nil {
+		return "", err
+	}
+	related := a.cli.relatedSessions(ctx, sm, phrasings, hits, time.Time{}, time.Time{}, limit)
+	if len(hits) == 0 && len(related) == 0 {
+		return i18n.T("session.tool.no_match", query), nil
+	}
+	return renderSessionHits(searchHeader(phrasings), append(hits, related...), utils.ReferenceNow()), nil
+}
+
+// searchPhrasings runs every phrasing over the same corpus and window and
+// fuses the rankings; a single phrasing returns its hits unchanged.
+func (a *sessionPluginAdapter) searchPhrasings(phrasings []string, limit int, from, to, now time.Time) ([]SessionSearchHit, error) {
+	sm := a.cli.sessionManager
+	if len(phrasings) == 1 {
+		return sm.searchSessionsAt(phrasings[0], limit, 0, from, to, now)
+	}
+	results := make([][]SessionSearchHit, len(phrasings))
+	var firstErr error
+	for i, p := range phrasings {
+		hits, err := sm.searchSessionsAt(p, limit, 0, from, to, now)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		results[i] = hits
+	}
+	fused := fuseSessionHits(phrasings, results, limit, now)
+	if len(fused) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return fused, nil
+}
+
+// searchHeader names what was searched: the query, or every phrasing.
+func searchHeader(phrasings []string) string {
+	if len(phrasings) == 1 {
+		return i18n.T("session.tool.match_header", phrasings[0])
+	}
+	return i18n.T("session.tool.match_header_many", len(phrasings), strings.Join(phrasings, " | "))
+}
+
+// searchWindowed is SearchWindow over one or more phrasings.
+func (a *sessionPluginAdapter) searchWindowed(ctx context.Context, phrasings []string, limit int, from, to, asOf string) (string, error) {
+	query := ""
+	if len(phrasings) > 0 {
+		query = phrasings[0]
 	}
 	now, err := resolveRecallAnchor(asOf)
 	if err != nil {
@@ -83,9 +148,28 @@ func (a *sessionPluginAdapter) SearchWindow(_ context.Context, query string, lim
 		}
 	}
 
-	hits, err := a.cli.sessionManager.searchSessionsAt(q, limit, 0, fromT, toT, now)
+	// The window came from the first phrasing; the others rank inside it.
+	ranked := phrasings
+	if len(ranked) > 0 {
+		ranked = append([]string{q}, ranked[1:]...)
+	}
+	ranked = normalizePhrasings(ranked)
+	if len(ranked) == 1 && ranked[0] != "" {
+		if extra := a.cli.hydePhrasing(ctx, ranked[0]); extra != "" {
+			ranked = append(ranked, extra)
+		}
+	}
+	var hits []SessionSearchHit
+	if len(ranked) == 0 {
+		hits, err = a.cli.sessionManager.searchSessionsAt("", limit, 0, fromT, toT, now)
+	} else {
+		hits, err = a.searchPhrasings(ranked, limit, fromT, toT, now)
+	}
 	if err != nil {
 		return "", err
+	}
+	if len(ranked) > 0 {
+		hits = append(hits, a.cli.relatedSessions(ctx, a.cli.sessionManager, ranked, hits, fromT, toT, limit)...)
 	}
 	window := i18n.T("session.tool.as_of", now.Format("2006-01-02"))
 	if !fromT.IsZero() || !toT.IsZero() {
@@ -94,9 +178,9 @@ func (a *sessionPluginAdapter) SearchWindow(_ context.Context, query string, lim
 	if len(hits) == 0 {
 		return i18n.T("session.tool.no_match_window", q, window), nil
 	}
-	header := i18n.T("session.tool.match_header", q)
-	if q == "" {
-		header = i18n.T("session.tool.window_list_header")
+	header := i18n.T("session.tool.window_list_header")
+	if len(ranked) > 0 {
+		header = searchHeader(ranked)
 	}
 	return renderSessionHits(header+" "+window, hits, now), nil
 }
@@ -120,6 +204,16 @@ func renderSessionHits(header string, hits []SessionSearchHit, now time.Time) st
 		if h.Partial {
 			meta += " · " + i18n.T("session.tool.partial_match", h.Covered, h.Terms)
 		}
+		if h.Related {
+			if h.Similarity > 0 {
+				meta += " · " + i18n.T("session.tool.related_similarity", h.Similarity)
+			} else {
+				meta += " · " + i18n.T("session.tool.related")
+			}
+		}
+		if len(h.Via) > 0 && len(h.Via) < phrasingCount(hits) {
+			meta += " · " + i18n.T("session.tool.found_by", strings.Join(h.Via, " | "))
+		}
 		fmt.Fprintf(&b, "\n• %s (%s)\n", label, meta)
 		for _, sn := range h.Snippets {
 			sn = strings.TrimSpace(sn)
@@ -129,6 +223,21 @@ func renderSessionHits(header string, hits []SessionSearchHit, now time.Time) st
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// phrasingCount is how many distinct phrasings produced these hits (0 or 1
+// for a single-phrasing search, where "found by" says nothing).
+func phrasingCount(hits []SessionSearchHit) int {
+	seen := map[string]bool{}
+	for _, h := range hits {
+		for _, v := range h.Via {
+			seen[v] = true
+		}
+	}
+	if len(seen) < 2 {
+		return 0
+	}
+	return len(seen)
 }
 
 // getPageLimit is the default @session get page size, in messages.
