@@ -306,6 +306,10 @@ func (cli *ChatCLI) builtinAutoRecallBlock(ctx context.Context, hints []string, 
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// autoRecallSkipKinds mirror the related-notes expansion: documents and
+// journal notes never take a slot in the "Related (graph)" nudge.
+var autoRecallSkipKinds = map[knowledge.Kind]bool{knowledge.KindDoc: true, knowledge.KindNote: true}
+
 // autoRecallRelatedLine renders "Related (graph): ..." from the 1-hop
 // neighborhood of the shown facts. Tag and profile nodes are filtered (glue
 // and ever-present hub), already-shown facts are skipped, and the pointer
@@ -322,7 +326,7 @@ func autoRecallRelatedLine(g *knowledge.Graph, shownFactIDs []string) string {
 	var names []string
 	seen := make(map[string]bool)
 	for _, id := range shownFactIDs {
-		for _, n := range g.Neighborhood("fact:"+id, 1, autoRecallRelatedMax*2) {
+		for _, n := range g.NeighborsExcept("fact:"+id, autoRecallRelatedMax*2, autoRecallSkipKinds) {
 			if len(names) >= autoRecallRelatedMax {
 				break
 			}

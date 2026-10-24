@@ -327,6 +327,12 @@ const (
 	relatedLineTrunc     = 160
 )
 
+// relatedGraphSkipKinds are left out of the related-notes expansion before
+// the per-seed cap: context documents are knowledge retrieval's job and
+// journal notes are dated narrative already behind @memory timeline — and
+// neither may push a related fact, topic or project out of its slot.
+var relatedGraphSkipKinds = map[knowledge.Kind]bool{knowledge.KindDoc: true, knowledge.KindNote: true}
+
 // relatedGraphSection expands the top-ranked facts through the knowledge
 // graph and renders the structurally adjacent memories that lexical/semantic
 // ranking did NOT already surface. Additive by construction: everything the
@@ -356,7 +362,7 @@ func (r *RelevanceRetriever) relatedGraphSection(ranked []*Fact, remaining int) 
 	var accessedIDs []string
 	seen := make(map[string]bool)
 	for _, seed := range seeds {
-		for _, n := range g.Neighborhood("fact:"+seed.ID, 1, relatedGraphPerSeed) {
+		for _, n := range g.NeighborsExcept("fact:"+seed.ID, relatedGraphPerSeed, relatedGraphSkipKinds) {
 			if len(lines) >= relatedGraphMaxLines {
 				break
 			}

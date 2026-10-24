@@ -50,6 +50,20 @@ const (
 	// card tally in the index card is how a fresh session learns in-flight
 	// work exists at all.
 	KindCard Kind = "card"
+	// KindContext is a /context context in a non-knowledge mode (full,
+	// chunked, summary, smart) at context granularity (id prefix "ctx:",
+	// keyed by FileContext.ID). Knowledge-mode contexts stay KindKB.
+	KindContext Kind = "context"
+	// KindDoc is one source document of a context (id prefix "doc:",
+	// "<context id>:<source path>"): every chunk of a docs-flatten corpus
+	// folds into the document it came from, so the graph holds documents,
+	// never chunks.
+	KindDoc Kind = "doc"
+	// KindNote is a journal note of the memory: a daily note (id prefix
+	// "note:daily:", YYYY-MM-DD) or a weekly/monthly rollup digest
+	// ("note:weekly:", "note:monthly:"). Bounded by the stores' own
+	// retention (~30 dailies, 26 weeklies, one monthly per month).
+	KindNote Kind = "note"
 )
 
 // Node is one vertex. ID is unique and namespaced by kind (e.g. "topic:auth").
@@ -73,6 +87,16 @@ type Neighbor struct {
 type Graph struct {
 	nodes map[string]*Node
 	adj   map[string]map[string]float64
+
+	// Typed-link metadata (links.go): one record per (from, to, rel) plus
+	// per-node out/in indexes for outlinks and backlinks.
+	linkTab map[linkKey]*Link
+	outIdx  map[string][]linkKey
+	inIdx   map[string][]linkKey
+	// aliases holds alternative names per node id; refIdx is the lazily
+	// built normalized-name index Resolve reads (nil = stale).
+	aliases map[string][]string
+	refIdx  map[string][]string
 }
 
 // New returns an empty graph.
@@ -90,6 +114,7 @@ func (g *Graph) AddNode(n Node) *Node {
 	if strings.TrimSpace(n.ID) == "" {
 		return nil
 	}
+	g.refIdx = nil // titles feed reference resolution
 	if existing, ok := g.nodes[n.ID]; ok {
 		if n.Title != "" {
 			existing.Title = n.Title
@@ -277,6 +302,28 @@ func (g *Graph) Search(keywords []string, limit int) []*Node {
 	out := make([]*Node, 0, limit)
 	for _, s := range ranked {
 		out = append(out, s.n)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+// NeighborsExcept returns the 1-hop neighbors of id in Neighborhood order
+// (edge weight desc, then id), skipping nodes of the given kinds BEFORE
+// applying limit — so excluded kinds never take a slot from the rest.
+// With no excluded neighbor present it equals Neighborhood(id, 1, limit).
+func (g *Graph) NeighborsExcept(id string, limit int, skip map[Kind]bool) []*Node {
+	if _, ok := g.nodes[id]; !ok {
+		return nil
+	}
+	out := make([]*Node, 0, limit)
+	for _, nb := range g.Neighbors(id) {
+		n := g.nodes[nb.ID]
+		if skip[n.Kind] {
+			continue
+		}
+		out = append(out, n)
 		if len(out) >= limit {
 			break
 		}
