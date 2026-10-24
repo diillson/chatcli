@@ -82,12 +82,12 @@ func LoadConfig() (RegistriesConfig, error) {
 	data, err := os.ReadFile(configPath) // #nosec G304 -- path from ConfigPath (user home dir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// First run: persist the plain defaults (never the environment's
+			// values, which belong to this process only), then honor the
+			// environment exactly like a later run reading the file would.
 			cfg := DefaultConfig()
-			if saveErr := SaveConfig(cfg); saveErr != nil {
-				// Non-fatal: use defaults even if save fails
-				return cfg, nil
-			}
-			return cfg, nil
+			_ = SaveConfig(cfg) // non-fatal: the defaults still apply
+			return applyEnvOverrides(cfg), nil
 		}
 		return RegistriesConfig{}, err
 	}
