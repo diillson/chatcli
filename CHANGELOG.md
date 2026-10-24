@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.226.0](https://github.com/diillson/chatcli/compare/v1.225.0...v1.226.0) (2026-10-24)
+
+
+### Features
+
+* **security:** read one sealed file in plaintext with /config security reveal ([#1892](https://github.com/diillson/chatcli/issues/1892)) ([896ac5b](https://github.com/diillson/chatcli/commit/896ac5b73da8eecf605f11e72c875bac7c1760e5))
+
+
+### Bug Fixes
+
+* **graphview:** render memory graphs of thousands of notes without the layout diverging ([#1890](https://github.com/diillson/chatcli/issues/1890)) ([75c61e5](https://github.com/diillson/chatcli/commit/75c61e551cf26252d585223d5f17e497a402d6df))
+* **memory:** a not-due extraction attempt no longer drops a due one ([#1893](https://github.com/diillson/chatcli/issues/1893)) ([8401bc8](https://github.com/diillson/chatcli/commit/8401bc82cc50727b173dbbdf066a02ac19ef6347))
+
 ## [1.225.0](https://github.com/diillson/chatcli/compare/v1.224.0...v1.225.0) (2026-10-24)
 
 
