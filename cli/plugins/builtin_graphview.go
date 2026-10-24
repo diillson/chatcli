@@ -50,9 +50,12 @@ var graphViewTemplate string
 // replaced with the JSON-encoded GraphData at render time.
 const graphViewDataPlaceholder = "__CHATCLI_GRAPH_DATA__"
 
-// graphViewMaxNodes bounds the rendered graph. The simulation is O(n²) per
-// tick; a couple thousand nodes is the comfortable ceiling for a smooth drag.
-const graphViewMaxNodes = 2000
+// graphViewMaxNodes bounds the rendered graph. Above 1,000 nodes the page
+// lays the graph out with Barnes-Hut (O(n log n) per tick) and draws edges in
+// batches, culling what is off screen, so a memory graph of several thousand
+// notes stays interactive; 20,000 keeps the self-contained page and the
+// browser's memory within reason.
+const graphViewMaxNodes = 20000
 
 // GraphNode is one vertex of a rendered graph. Field names match the JSON the
 // embedded template consumes.
@@ -163,7 +166,7 @@ entities and relations you extracted as nodes/edges with source=json.`
 }
 
 // Version is semver.
-func (*BuiltinGraphViewPlugin) Version() string { return "1.1.0" }
+func (*BuiltinGraphViewPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinGraphViewPlugin) Path() string { return "" }

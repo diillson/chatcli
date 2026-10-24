@@ -8,8 +8,11 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -277,5 +280,99 @@ func TestExecuteGraphViewFromFileSource(t *testing.T) {
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("output not written: %v", err)
+	}
+}
+
+func bigGraphArgs(t *testing.T, n int, out string) []string {
+	t.Helper()
+	var nodes, edges []map[string]any
+	for i := 0; i < n; i++ {
+		id := "n" + strconv.Itoa(i)
+		nodes = append(nodes, map[string]any{"id": id, "label": id, "kind": "fact"})
+		if i > 0 {
+			edges = append(edges, map[string]any{"source": "n0", "target": id})
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"output": out, "open": false, "nodes": nodes, "edges": edges})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []string{string(raw)}
+}
+
+// A memory graph of several thousand notes renders; past the cap the error
+// says so instead of writing a page the browser cannot hold.
+func TestExecuteGraphViewLargeGraphs(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "big.html")
+	if _, err := (&BuiltinGraphViewPlugin{}).Execute(context.Background(), bigGraphArgs(t, 6200, out)); err != nil {
+		t.Fatalf("6200 nodes must render: %v", err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&BuiltinGraphViewPlugin{}).Execute(context.Background(), bigGraphArgs(t, graphViewMaxNodes+1, filepath.Join(t.TempDir(), "x.html")))
+	if err == nil || !strings.Contains(err.Error(), strconv.Itoa(graphViewMaxNodes+1)) {
+		t.Fatalf("over the cap must fail naming the size: %v", err)
+	}
+}
+
+// The layout must settle, not diverge: the page's own physics (extracted
+// from the template) runs under Node on a 900-leaf star (exact mode — a hub
+// used to fly to 1e68) and on a 3000-node graph with hubs (Barnes-Hut).
+// Skipped where Node is not installed.
+func TestGraphViewPhysicsSettles(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	start := strings.Index(graphViewTemplate, "// ---- physics")
+	end := strings.Index(graphViewTemplate, "// ---- visibility")
+	if start < 0 || end < start {
+		t.Fatal("physics section markers not found in the template")
+	}
+	physics := graphViewTemplate[start:end]
+	harness := `
+const kindOn = {fact: true, project: true};
+function visible(n) { return kindOn[n.kind]; }
+let dragNode = null;
+` + physics + `
+function run(n, hubs) {
+  nodes.length = 0; edges.length = 0; alpha = 1;
+  for (let i = 0; i < n; i++) {
+    const ang = i * 2.399963, r = 12 * Math.sqrt(i + 1);
+    nodes.push({x: Math.cos(ang) * r, y: Math.sin(ang) * r, vx: 0, vy: 0, deg: 0, kind: i < hubs ? "project" : "fact", pinned: false, r: 6});
+  }
+  for (let i = hubs; i < n; i++) {
+    const h = nodes[i % hubs]; const a = nodes[i];
+    edges.push({a: h, b: a, w: 1}); h.deg++; a.deg++;
+    if (i + 1 < n && i % 3 === 0) { edges.push({a, b: nodes[i + 1], w: 1}); a.deg++; nodes[i + 1].deg++; }
+  }
+  for (let t = 0; t < 600 && alpha >= 0.002; t++) step();
+  let max = 0;
+  for (const p of nodes) { if (!isFinite(p.x) || !isFinite(p.y)) return Infinity; max = Math.max(max, Math.abs(p.x), Math.abs(p.y)); }
+  return max;
+}
+const nodes = [], edges = [];
+console.log(JSON.stringify({star: run(901, 1), hubs: run(3000, 5)}));
+`
+	// the physics section declares no nodes/edges; they are globals here
+	harness = strings.Replace(harness, "const nodes = [], edges = [];", "", 1)
+	harness = "var nodes = [], edges = [];\n" + harness
+	f := filepath.Join(t.TempDir(), "physics.js")
+	if err := os.WriteFile(f, []byte(harness), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outB, err := exec.Command(node, f).CombinedOutput() // #nosec G204 -- node from PATH running a test harness
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, outB)
+	}
+	var got struct{ Star, Hubs float64 }
+	if err := json.Unmarshal(outB, &got); err != nil {
+		t.Fatalf("output %q: %v", outB, err)
+	}
+	for name, v := range map[string]float64{"star": got.Star, "hubs": got.Hubs} {
+		if math.IsInf(v, 0) || math.IsNaN(v) || v > 1e7 {
+			t.Fatalf("%s layout diverged: max |coord| = %g", name, v)
+		}
 	}
 }
