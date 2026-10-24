@@ -1,0 +1,22 @@
+{
+  "started": "2026-10-24T11:12:56",
+  "binary": "chatcli built from 51dc3570, the tip of the memory-graph stack #1877–#1883 (same code as main after #1883)",
+  "binary_sha256": "18aeab5784d4bc2050a96d44d96b41776395ae76af6b649a978f4a1ae7228d80",
+  "binary_version": "──────────────────────\n\n  Features\n    • agent: a failed action no longer discards its independent siblings, and transient\n      read failures retry once (#1849)\n    • agent: todo blocked and cancelled statuses; plain-text content in the XML tool\n      protocol (#1868)\n    • agent: tool results past their cap are saved to disk and previewed to the budget\n      (#1848)\n    • browser: @browser 1.1.0 with text, find, clear, downloads, response bodies,\n      headless identity and seen screenshots (#1857)\n    • browser: page scan v2, real mouse clicks, editor-aware typing and bot-challenge\n      detection (#1843)\n    • catalog: English scaffolding for the tool catalog and describe several tools in\n      one call (#1854)\n\n  …e mais 22 — https://github.com/diillson/chatcli/releases/tag/v1.224.0\n\n",
+  "dataset": "longmemeval_s_cleaned.json (huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)",
+  "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "harness_sha256": "1d4ef86c340bedc77dee98119bb40c03f7893ab48ac598828751112ac19525cc",
+  "judge_prompts_sha256": "b5c88d0a0de08cc7ec3c68471bb4e39a1fb204fd399024d464707b48acf8adcc",
+  "answer_model": "claude-sonnet-5-5",
+  "judge_model": "claude-sonnet-5-5",
+  "mode": "coder",
+  "question_frame": "Answer my question using what you know about me from our previous conversations (they are saved as chat sessions). If those conversations do not contain the answer, say so. End with a short, direct final answer.\n\nQuestion: {q}",
+  "reference_clock": true,
+  "workers": 4,
+  "timeout_s": 600,
+  "picked": 500,
+  "split": "development = sha1(question_id) even (240 questions, the only ones whose failures were read while designing the changes); validation = odd (260, never read). One run over all 500 on the merged code.",
+  "finished": "2026-10-24T12:02:06",
+  "commit": "51dc3570",
+  "note": "Three validation failures (07741c45, 6a1eabeb, 830ce83f) were read while checking this run for regressions; they were not used to design any change. Validation without them: 240/257."
+}
