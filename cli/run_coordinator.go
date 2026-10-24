@@ -65,24 +65,36 @@ func (rc *runCoordinator) isRunning() bool { return rc.running.Load() }
 
 // tryAcquire marks a run in progress and returns true only when one is due:
 // nothing else running, enough new work, the cooldown elapsed and the breaker
-// closed. On any miss it releases the gate and returns false, so a caller must
-// only release() when tryAcquire returned true.
+// closed. A caller must only release() when tryAcquire returned true.
+//
+// Whether a run is due is decided BEFORE taking the gate: an attempt that is
+// not due must never hold it, not even for an instant, or a due attempt
+// racing it finds the gate taken and gives up, and with the not-due one
+// releasing right after, no run happens at all (a queued RPC segment then
+// waited for the next 3-minute tick). It is checked again under the gate in
+// case a run finished in between.
 func (rc *runCoordinator) tryAcquire(newItems int) bool {
+	if !rc.due(newItems) {
+		return false
+	}
 	if !rc.running.CompareAndSwap(false, true) {
 		return false
 	}
-	rc.mu.Lock()
-	now := rc.now()
-	due := newItems >= rc.minNewItems &&
-		now.Sub(rc.lastRun) >= rc.cooldown &&
-		!now.Before(rc.openUntil)
-	rc.mu.Unlock()
-
-	if !due {
+	if !rc.due(newItems) {
 		rc.running.Store(false)
 		return false
 	}
 	return true
+}
+
+// due reports whether a run with newItems of new work may start now.
+func (rc *runCoordinator) due(newItems int) bool {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	now := rc.now()
+	return newItems >= rc.minNewItems &&
+		now.Sub(rc.lastRun) >= rc.cooldown &&
+		!now.Before(rc.openUntil)
 }
 
 // release clears the back-pressure gate.

@@ -289,8 +289,14 @@ func (mw *memoryWorker) pendingBacklogCount() int {
 // delta — for RPC turns the delta lives in the queue, not in cli.history.
 func (mw *memoryWorker) extractQueued(ctx context.Context, newMessages int) {
 	mw.runQueuedPass(ctx, newMessages)
-	// A segment nudged while this pass held the gate was queued but could
-	// not schedule a pass of its own: run one now with the current backlog.
+	mw.rerunIfQueued(ctx)
+}
+
+// rerunIfQueued runs the queued-segment pass that a segment nudged while
+// another pass held the gate could not schedule itself, with the backlog as
+// it stands now. Every pass that releases the gate calls it: the queue pass
+// and the live-history pass alike.
+func (mw *memoryWorker) rerunIfQueued(ctx context.Context) {
 	if mw.rerunQueued.Swap(false) {
 		backlog := mw.pendingBacklogCount()
 		mw.spawn(func() { mw.extractQueued(ctx, backlog) })
@@ -300,6 +306,11 @@ func (mw *memoryWorker) extractQueued(ctx context.Context, newMessages int) {
 // runQueuedPass is one extraction pass over the queue under the gate.
 func (mw *memoryWorker) runQueuedPass(ctx context.Context, newMessages int) {
 	if !mw.coord.tryAcquire(newMessages) {
+		if mw.coord.isRunning() {
+			// Due work lost the gate to a pass in progress: that pass runs
+			// once more when it releases (rerunIfQueued).
+			mw.rerunQueued.Store(true)
+		}
 		return
 	}
 	defer mw.coord.release()
@@ -425,7 +436,11 @@ func (mw *memoryWorker) maybeExtract(ctx context.Context) {
 	if !mw.coord.tryAcquire(newMessages) {
 		return
 	}
-	defer mw.coord.release()
+	defer func() {
+		mw.coord.release()
+		// A segment queued while this live pass held the gate.
+		mw.rerunIfQueued(context.WithoutCancel(ctx))
+	}()
 
 	// Extract the new messages (copy to avoid races)
 	messagesToProcess := make([]models.Message, newMessages)
