@@ -44,6 +44,14 @@ type KnowledgeAdapter interface {
 	List() (string, error)
 }
 
+// KnowledgeLinker is an OPTIONAL capability behind @knowledge links: a
+// document's links and backlinks inside its knowledge base (relative
+// markdown links and [[wikilinks]] the documents write). Optional so
+// existing adapters keep compiling.
+type KnowledgeLinker interface {
+	Links(source, kb string) (string, error)
+}
+
 // knowAdapterHolder mirrors memAdapterHolder: a concrete wrapper type so
 // atomic.Value never sees a bare nil interface or a type switch.
 type knowAdapterHolder struct{ a KnowledgeAdapter }
@@ -77,7 +85,7 @@ func (*BuiltinKnowledgePlugin) Name() string { return "@knowledge" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinKnowledgePlugin) Description() string {
-	return "Query the knowledge bases attached to this session (documentation corpora indexed by /context --mode knowledge). Search passages, read full documents page by page, and walk the table of contents — ground answers in the corpus and cite source paths. Ideal for authoring skills from documentation: search the topic, read the relevant documents with get, then write the skill."
+	return "Query the knowledge bases attached to this session (documentation corpora indexed by /context --mode knowledge). Search passages, read full documents page by page, and walk the table of contents — ground answers in the corpus and cite source paths. Documents are linked notes: search results point at linked documents, and links shows what a document links to and what links back to it, so you can follow a topic across the corpus. Ideal for authoring skills from documentation: search the topic, read the relevant documents with get, then write the skill."
 }
 
 // Usage explains the canonical invocation forms.
@@ -88,14 +96,16 @@ Subcommands (cmd + args):
   search {query, top_k?:1-30, kb?:"<base name>"}
   get    {source:"docs/install.md", offset?:0, kb?}
   toc    {prefix?:"docs/", kb?}
+  links  {source:"docs/install.md", kb?}   links (→) and backlinks (←) of a document
   list   {}
 
 Workflow: search to locate, get to read whole documents (paginate via the
-returned next offset), toc when you need to see what exists.`
+returned next offset), links to follow related documents, toc when you need
+to see what exists.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinKnowledgePlugin) Version() string { return "1.0.0" }
+func (*BuiltinKnowledgePlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinKnowledgePlugin) Path() string { return "" }
@@ -134,6 +144,15 @@ func (*BuiltinKnowledgePlugin) Schema() string {
 					{"name": "kb", "type": "string", "description": "Restrict to one knowledge base by name."},
 				},
 				"examples": []string{`{"cmd":"toc","args":{"prefix":"guide/"}}`},
+			},
+			{
+				"name":        "links",
+				"description": "A document's links (documents it links to) and backlinks (documents linking to it) inside its knowledge base, with titles — follow these to read related material. Also lists [[wikilinks]] that point at memory notes outside the base.",
+				"flags": []map[string]interface{}{
+					{"name": "source", "type": "string", "required": true, "description": "Document path as cited by search/toc (a cited chunk id like 'docs/a.md#0002' also works)."},
+					{"name": "kb", "type": "string", "description": "Restrict to one knowledge base by name."},
+				},
+				"examples": []string{`{"cmd":"links","args":{"source":"docs/gateway.md"}}`},
 			},
 			{
 				"name":        "list",
@@ -198,10 +217,24 @@ func (p *BuiltinKnowledgePlugin) ExecuteWithStream(_ context.Context, args []str
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
 		return adapter.TOC(in.KB, in.Prefix)
+	case "links":
+		kl, ok := adapter.(KnowledgeLinker)
+		if !ok {
+			return "", errors.New("@knowledge links: document links are not available in this session")
+		}
+		var in struct {
+			Source string `json:"source"`
+			KB     string `json:"kb"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		if strings.TrimSpace(in.Source) == "" {
+			return "", errors.New(`@knowledge links: "source" is required (a document path from search/toc)`)
+		}
+		return kl.Links(in.Source, in.KB)
 	case "list":
 		return adapter.List()
 	default:
-		return "", fmt.Errorf("@knowledge: unknown cmd %q (valid: search|get|toc|list)", cmd)
+		return "", fmt.Errorf("@knowledge: unknown cmd %q (valid: search|get|toc|links|list)", cmd)
 	}
 }
 
@@ -226,7 +259,7 @@ func parseKnowledgeInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalKnowledgeCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|get|toc|list)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|get|toc|links|list)", cmdStr)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -249,11 +282,11 @@ func parseKnowledgeInvocation(args []string) (string, string, error) {
 	// The agent flattener delivers the {cmd,args} envelope as "--flag value"
 	// pairs; numeric fields (top_k, offset) must come back as numbers, and a
 	// bare positional maps onto the subcommand's primary field.
-	primary := map[string]string{"search": "query", "get": "source", "toc": "prefix"}[canon]
+	primary := map[string]string{"search": "query", "get": "source", "toc": "prefix", "links": "source"}[canon]
 	return canon, argvInner(args[1:], primary, nil, map[string]bool{"top_k": true, "offset": true}), nil
 }
 
-// canonicalKnowledgeCmd folds aliases into the four canonical names.
+// canonicalKnowledgeCmd folds aliases into the canonical names.
 func canonicalKnowledgeCmd(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "search", "find", "query", "lookup":
@@ -264,6 +297,8 @@ func canonicalKnowledgeCmd(s string) string {
 		return "toc"
 	case "list", "kbs", "bases", "status":
 		return "list"
+	case "links", "backlinks", "related", "see_also", "neighbors", "linked":
+		return "links"
 	}
 	return ""
 }
