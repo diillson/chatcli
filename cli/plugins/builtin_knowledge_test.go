@@ -146,7 +146,7 @@ func TestKnowledgePlugin_Metadata(t *testing.T) {
 	for _, s := range schema.Subcommands {
 		got = append(got, s.Name)
 	}
-	if strings.Join(got, ",") != "search,get,toc,list" {
+	if strings.Join(got, ",") != "search,get,toc,links,list" {
 		t.Errorf("Schema subcommands = %v", got)
 	}
 }
@@ -198,5 +198,49 @@ func TestKnowledgePlugin_DescribeCall(t *testing.T) {
 		if tc.want != "" && !strings.Contains(got, tc.want) {
 			t.Errorf("DescribeCall(%q) = %q, want substring %q", tc.args, got, tc.want)
 		}
+	}
+}
+
+// fakeKnowledgeLinker adds the optional links capability.
+type fakeKnowledgeLinker struct {
+	fakeKnowledgeAdapter
+	linksSource, linksKB string
+}
+
+func (f *fakeKnowledgeLinker) Links(source, kb string) (string, error) {
+	f.linksSource, f.linksKB = source, kb
+	return "links-ok", nil
+}
+
+func TestKnowledgePlugin_Links(t *testing.T) {
+	p := NewBuiltinKnowledgePlugin()
+	ctx := context.Background()
+
+	// Without the optional capability: a clear error, never a panic.
+	withFakeKnowledgeAdapter(t)
+	if _, err := p.Execute(ctx, []string{`{"cmd":"links","args":{"source":"docs/a.md"}}`}); err == nil {
+		t.Fatal("links without a linker must fail")
+	}
+
+	fake := &fakeKnowledgeLinker{}
+	SetKnowledgeAdapter(fake)
+	t.Cleanup(func() { SetKnowledgeAdapter(nil) })
+	for _, args := range [][]string{
+		{`{"cmd":"backlinks","args":{"source":"docs/a.md","kb":"handbook"}}`},
+		{"links", "docs/a.md", "--kb", "handbook"}, // flattened argv form
+	} {
+		out, err := p.Execute(ctx, args)
+		if err != nil || out != "links-ok" || fake.linksSource != "docs/a.md" || fake.linksKB != "handbook" {
+			t.Fatalf("%v: out=%q err=%v source=%q kb=%q", args, out, err, fake.linksSource, fake.linksKB)
+		}
+	}
+	if _, err := p.Execute(ctx, []string{`{"cmd":"links","args":{}}`}); err == nil {
+		t.Fatal("links without source accepted")
+	}
+	if !p.IsReadOnly([]string{`{"cmd":"links","args":{"source":"x"}}`}) {
+		t.Fatal("links only reads")
+	}
+	if d := p.DescribeCall([]string{`{"cmd":"links","args":{"source":"docs/a.md"}}`}); !strings.Contains(d, "docs/a.md") {
+		t.Fatalf("describe = %q", d)
 	}
 }

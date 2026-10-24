@@ -70,7 +70,20 @@ func (a *knowledgePluginAdapter) Search(query, kb string, topK int) (string, err
 	if err != nil {
 		return "", err
 	}
-	return ctxmgr.FormatKnowledgeHits(query, hits), nil
+	out := ctxmgr.FormatKnowledgeHits(query, hits)
+	if hints := mgr.KnowledgeLinkHints(hits); hints != "" {
+		out += "\n\n" + hints
+	}
+	return out, nil
+}
+
+// Links returns a document's links and backlinks within its knowledge base.
+func (a *knowledgePluginAdapter) Links(source, kb string) (string, error) {
+	mgr := a.manager()
+	if mgr == nil {
+		return "", fmt.Errorf("context manager unavailable in this session")
+	}
+	return mgr.KnowledgeLinks(a.sessionID(), kb, source)
 }
 
 // Get returns one page of a document plus explicit pagination guidance.

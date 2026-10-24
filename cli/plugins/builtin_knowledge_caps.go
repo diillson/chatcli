@@ -52,6 +52,12 @@ func (p *BuiltinKnowledgePlugin) DescribeCall(args []string) string {
 			return i18n.T("plugins.knowledge.describe_generic")
 		}
 		return i18n.T("plugins.knowledge.describe_get", describeTrim(in.Source))
+	case "links":
+		var in struct {
+			Source string `json:"source"`
+		}
+		_ = json.Unmarshal([]byte(inner), &in)
+		return i18n.T("plugins.knowledge.describe_links", describeTrim(in.Source))
 	case "toc":
 		return i18n.T("plugins.knowledge.describe_toc")
 	case "list":

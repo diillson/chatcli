@@ -1,4 +1,5 @@
 {
   "memory.export.done": "Exportados %d registros para %s (%d fatos, %d episódios, %d tópicos, %d projetos, %d links) · %s",
-  "memory.import.done": "Mesclados %d registros: %d fatos adicionados (%d já conhecidos), %d episódios (%d já conhecidos), %d tópicos, %d projetos, %d links"
+  "memory.import.done": "Mesclados %d registros: %d fatos adicionados (%d já conhecidos), %d episódios (%d já conhecidos), %d tópicos, %d projetos, %d links",
+  "plugins.knowledge.describe_links": "Seguindo os links de %s"
 }

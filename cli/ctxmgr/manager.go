@@ -54,6 +54,11 @@ type Manager struct {
 	// O(corpus), so recomputing it per turn scales with the corpus for free.
 	digestMu    sync.Mutex
 	digestCache map[string]knowledgeDigestEntry
+
+	// docsMu/docsCache memoize the document graph (docgraph.go) per context
+	// revision — the knowledge graph rebuild reads it for every context.
+	docsMu    sync.Mutex
+	docsCache map[string]documentsEntry
 }
 
 // AttachEmbeddingProvider wires (or rewires) the embedding provider that powers
@@ -370,6 +375,7 @@ func (m *Manager) DeleteContext(contextID string) error {
 	m.digestMu.Lock()
 	delete(m.digestCache, contextID)
 	m.digestMu.Unlock()
+	m.dropDocuments(contextID)
 
 	m.logger.Info("Contexto deletado",
 		zap.String("id", contextID),
