@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.227.0](https://github.com/diillson/chatcli/compare/v1.226.0...v1.227.0) (2026-10-30)
+
+
+### Features
+
+* **catalog:** add Gemini 4 Argon with its dated price and implicit-only caching ([#1909](https://github.com/diillson/chatcli/issues/1909)) ([e65e236](https://github.com/diillson/chatcli/commit/e65e2366de9ae3fe572f6e0a7b371106afd4a404))
+
+
+### Bug Fixes
+
+* **cost:** count Gemini thinking in the session output and on every Gemini wire ([#1910](https://github.com/diillson/chatcli/issues/1910)) ([db40ad6](https://github.com/diillson/chatcli/commit/db40ad638ae54146ffec7b16187b2f66c929c3ad))
+* **deps:** bump golang.org/x/net to v0.62.0 for GO-2026-6866 and GO-2026-6860 ([#1907](https://github.com/diillson/chatcli/issues/1907)) ([232a44a](https://github.com/diillson/chatcli/commit/232a44af7d669d63ddb1e0bfcbc4062c691c188a))
+* **vision:** probe listing-registered models and pick describers that can see ([#1906](https://github.com/diillson/chatcli/issues/1906)) ([3651043](https://github.com/diillson/chatcli/commit/36510433f512cecdd20af521444901a9224002db))
+
 ## [1.226.0](https://github.com/diillson/chatcli/compare/v1.225.0...v1.226.0) (2026-10-24)
 
 
