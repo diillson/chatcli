@@ -34,7 +34,7 @@ func legacyRecomputeRecordCost(rec *ModelUsageRecord) {
 	cacheRead := unbilled(rec.CacheReadTokens, rec.BilledCacheReadTokens)
 	cacheCreation := unbilled(rec.CacheCreationTokens, rec.BilledCacheCreationTokens)
 
-	if reasoningTokensAdditive(rec.Provider) {
+	if reasoningTokensAdditive(rec.Provider, rec.Model) {
 		completionTokens += unbilled(rec.ReasoningTokens, 0)
 	}
 

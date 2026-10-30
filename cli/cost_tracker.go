@@ -854,6 +854,14 @@ func (ct *CostTracker) recomputeAggregates() {
 		ct.totalPromptTokens += rec.PromptTokens
 		ct.totalInputTokens += recordInputTokens(rec)
 		ct.totalCompletionTokens += rec.CompletionTokens
+		if reasoningTokensAdditive(rec.Provider, rec.Model) {
+			// Gemini reports thinking outside the candidates count and
+			// bills it as output: the session's output is what was
+			// billed, so /cost's Output row, its "Reasoning (already
+			// counted in Output)" note and cost per output token agree
+			// with the price.
+			ct.totalCompletionTokens += rec.ReasoningTokens
+		}
 		ct.totalCacheCreation += rec.CacheCreationTokens
 		ct.totalCacheRead += rec.CacheReadTokens
 		ct.totalReasoning += rec.ReasoningTokens
@@ -953,8 +961,8 @@ func (ct *CostTracker) GetSummary(provider, model string, history int) string {
 // reasoningTokensAdditive reports whether a provider's reasoning tokens are
 // reported outside the completion count (Gemini) and must be billed on
 // top of it.
-func reasoningTokensAdditive(provider string) bool {
-	return pricing.ReasoningTokensAdditive(provider)
+func reasoningTokensAdditive(provider, model string) bool {
+	return pricing.ReasoningTokensAdditiveFor(provider, model)
 }
 
 // recordPricingInput is the record's token ledger in the engine's shape.

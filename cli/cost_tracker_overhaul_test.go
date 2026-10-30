@@ -407,3 +407,26 @@ func TestUnpricedModelsSurfaceInsteadOfHiding(t *testing.T) {
 		t.Fatalf("unpriced listing = %v", unpriced)
 	}
 }
+
+// Gemini reports thinking outside the candidates count and the engine
+// bills it as output, so the session's Output must carry it: /cost
+// showed Output without it next to "Reasoning (already counted in
+// Output)", and anyone pricing the session from that screen left the
+// thinking out. Providers that count reasoning inside completion tokens
+// must not count it twice.
+func TestSessionOutput_IncludesAdditiveReasoning(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ct := NewCostTracker()
+	ct.RecordRealUsage("GOOGLEAI", "gemini-3.1-pro", &models.UsageInfo{
+		PromptTokens: 1000, CompletionTokens: 100, ReasoningTokens: 40, IsReal: true,
+	})
+	ct.RecordRealUsage("OPENAI", "gpt-5.6", &models.UsageInfo{
+		PromptTokens: 10, CompletionTokens: 500, ReasoningTokens: 300, IsReal: true,
+	})
+	if ct.totalCompletionTokens != 100+40+500 {
+		t.Fatalf("session output = %d, want %d (Gemini thinking added, OpenAI reasoning already inside)", ct.totalCompletionTokens, 640)
+	}
+	if ct.totalReasoning != 340 {
+		t.Fatalf("reasoning stays informational in full: %d", ct.totalReasoning)
+	}
+}

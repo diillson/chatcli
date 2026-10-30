@@ -9,6 +9,7 @@ package pricing
 import (
 	"testing"
 
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -315,4 +316,36 @@ func TestContextTokens(t *testing.T) {
 	u := &models.UsageInfo{PromptTokens: 100, CacheReadInputTokens: 300, CacheCreationInputTokens: 50}
 	assert.Equal(t, 450, ContextTokens("CLAUDEAI", "claude-sonnet-5", u))
 	assert.Equal(t, 100, ContextTokens("OPENAI", "gpt-5.4", u))
+}
+
+// Only the Gemini wire bills reasoning on top of output. Every built-in
+// provider is pinned, so a change for one cannot silently move another;
+// a Gemini model served through another provider's OpenAI-shaped wire
+// (OpenRouter, Copilot) counts reasoning inside completion.
+func TestReasoningTokensAdditiveFor_AllBuiltinProviders(t *testing.T) {
+	cases := map[string]string{
+		catalog.ProviderOpenAI:          "gpt-6.1-sol",
+		catalog.ProviderOpenAIAssistant: "gpt-4o",
+		catalog.ProviderClaudeAI:        "claude-opus-5-5",
+		catalog.ProviderBedrock:         "us.anthropic.claude-opus-5-5-v1:0",
+		catalog.ProviderXAI:             "grok-4.7",
+		catalog.ProviderZAI:             "glm-5.3",
+		catalog.ProviderMoonshot:        "kimi-k3",
+		catalog.ProviderMiniMax:         "MiniMax-M3",
+		catalog.ProviderStackSpot:       "StackSpotAI",
+		catalog.ProviderOllama:          "qwen3",
+		catalog.ProviderCopilot:         "gemini-3.1-pro",
+		catalog.ProviderOpenRouter:      "google/gemini-3.1-pro-preview",
+		catalog.ProviderDevin:           "gemini-3.1-pro",
+	}
+	for p, m := range cases {
+		if ReasoningTokensAdditiveFor(p, m) {
+			t.Errorf("%s/%s: reasoning is inside completion on this wire", p, m)
+		}
+	}
+	for _, m := range []string{"gemini-4-argon", "gemini-3.8-flash", "gemini-test-unlisted"} {
+		if !ReasoningTokensAdditiveFor(catalog.ProviderGoogleAI, m) {
+			t.Errorf("GOOGLEAI/%s: thinking is outside the candidates count", m)
+		}
+	}
 }
