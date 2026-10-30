@@ -8,6 +8,7 @@ package pricing
 
 import (
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/zai/codingplan"
@@ -272,6 +273,9 @@ func openAIPricing(model string) (float64, float64, bool) {
 // 31/Dez/2026; dobra a partir de Jan/2027 — revisar na virada).
 func googlePricing(model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "gemini-4-argon"):
+		in, out := geminiArgonRates(now())
+		return in, out, true
 	case strings.Contains(model, "gemini-3.8-flash"), strings.Contains(model, "gemini-3.7-flash"),
 		strings.Contains(model, "gemini-3.6-flash"):
 		// 3.8-flash (GA 02/Set/2026) entrou no mesmo tier introdutório.
@@ -573,6 +577,12 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 			return 0, inputCost * 0.15
 		}
 		return 0, inputCost * 0.16
+	case strings.Contains(model, "gemini-4-argon"):
+		// Gemini 4 Argon: implicit caching only, cached input at 5% of
+		// input — $0.10 on the $2 introductory price, $0.20 on $4 from
+		// Dec 1 2026 (ai.google.dev/gemini-api/docs/pricing, Oct 2026).
+		// Must precede the generic Gemini case, which bills reads at 10%.
+		return 0, inputCost * 0.05
 	case strings.Contains(model, "gemini"):
 		// Google context caching (implicit or explicit): cached reads at
 		// 10% of input across the 2.5/3.x families
@@ -713,4 +723,23 @@ func cacheWrite1hCost(provider, model string, write5m float64) float64 {
 		}
 	}
 	return write5m
+}
+
+// now is the clock dated prices are read against; tests replace it.
+var now = time.Now
+
+// geminiArgonIntroEnd is when Gemini 4 Argon's introductory price ends:
+// Google lists it "through Nov 30, 2026" and the standard price "from Dec
+// 1, 2026" (ai.google.dev/gemini-api/docs/pricing, Oct 2026). Midnight
+// Pacific, the time zone Google bills the Gemini API in.
+var geminiArgonIntroEnd = time.Date(2026, time.December, 1, 0, 0, 0, 0, time.FixedZone("PST", -8*60*60))
+
+// geminiArgonRates is Gemini 4 Argon's input and output price per million
+// tokens at t: $2/$10 introductory, $4/$20 standard. Output includes
+// thinking tokens; there is no long-context tier.
+func geminiArgonRates(t time.Time) (in, out float64) {
+	if t.Before(geminiArgonIntroEnd) {
+		return 2.0, 10.0
+	}
+	return 4.0, 20.0
 }

@@ -163,3 +163,18 @@ func TestDocsDescriber_ProbesActiveAndFallsBack(t *testing.T) {
 		t.Fatalf("a failing describer must give way to the next: by=%q err=%v", by, err)
 	}
 }
+
+// Gemini 4 Argon is in the catalog as a vision model: images go natively
+// with no probe, and it ranks first among Google describers.
+func TestGeminiArgon_NativeVisionAndFirstDescriber(t *testing.T) {
+	c, m := visionTestCLI(t, catalog.ProviderGoogleAI)
+	c.Provider, c.Model = catalog.ProviderGoogleAI, "gemini-4-argon"
+	if got := c.resolveVisionModeCtx(context.Background(), c.Provider, c.Model, true); got != visionNative || m.callsTo(c.Model) != 0 {
+		t.Fatalf("argon must see natively without a probe: mode %v, calls %d", got, m.callsTo(c.Model))
+	}
+	c.Model = "gemini-test-unknown"
+	m.listing[catalog.ProviderGoogleAI] = apiListing("gemini-3.8-flash", "gemini-4-argon")
+	if got := c.describeCandidates(context.Background()); len(got) == 0 || got[0].model != "gemini-4-argon" {
+		t.Fatalf("the newest listed vision model must describe first: %+v", got)
+	}
+}
