@@ -42,6 +42,9 @@ const (
 	APIResponses         PreferredAPI = "responses"
 	APIAssistants        PreferredAPI = "assistants"
 	APIAnthropicMessages PreferredAPI = "anthropic_messages"
+	// APIGemini is the Gemini generateContent API (Google AI and any
+	// provider plugin speaking its dialect).
+	APIGemini PreferredAPI = "gemini_api"
 )
 
 // ModelMeta guarda metadados estáticos e seguros

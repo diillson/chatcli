@@ -9,6 +9,7 @@ package pricing
 import (
 	"strings"
 
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 )
 
@@ -54,7 +55,7 @@ func RatesFor(provider, model string) ModelRates {
 		CacheReadPerMTok:        read,
 		Known:                   known,
 		CacheTokensAdditive:     CacheTokensAdditive(provider, model),
-		ReasoningTokensAdditive: ReasoningTokensAdditive(provider),
+		ReasoningTokensAdditive: ReasoningTokensAdditiveFor(provider, model),
 	}
 }
 
@@ -137,7 +138,7 @@ func RecordCost(in RecordInput) Cost {
 	// Gemini reports thinking tokens (thoughtsTokenCount) OUTSIDE the
 	// candidates count and bills them as output; OpenAI's reasoning tokens
 	// are already inside completion_tokens. Add them only where additive.
-	if ReasoningTokensAdditive(in.Provider) {
+	if ReasoningTokensAdditiveFor(in.Provider, in.Model) {
 		completionTokens += unbilled(in.ReasoningTokens, 0)
 	}
 
@@ -217,6 +218,15 @@ func ReasoningTokensAdditive(provider string) bool {
 		return true
 	}
 	return false
+}
+
+// ReasoningTokensAdditiveFor is ReasoningTokensAdditive for one model: it
+// also holds for any provider serving the model through the Gemini API —
+// a provider plugin in the gemini dialect, which the Gemini client reports
+// in the same shape (thinking outside the candidates count) under the
+// plugin's name. Every other wire counts reasoning inside completion.
+func ReasoningTokensAdditiveFor(provider, model string) bool {
+	return ReasoningTokensAdditive(provider) || catalog.GetPreferredAPI(provider, model) == catalog.APIGemini
 }
 
 // longContextThresholdTokens is the prompt size above which the providers

@@ -100,12 +100,35 @@ func (p *Plugin) Descriptor() catalog.ProviderDescriptor {
 		ModelEnv:     name + "_MODEL",
 		MaxOutputEnv: name + "_MAX_TOKENS",
 		AuthEnv:      append([]string(nil), p.info.AuthEnv...),
-		PreferredAPI: catalog.APIChatCompletions,
+		PreferredAPI: p.preferredAPI(""),
 	}
 	if cached := p.CachedModels(); len(cached) > 0 {
 		d.DefaultModel = cached[0].ID
 	}
 	return d
+}
+
+// preferredAPI is the wire a model of this plugin is spoken on: in dialect
+// mode the model's own dialect, else the plugin's; chat completions for a
+// plugin that serves chat itself. Usage accounting reads it — the Gemini
+// wire reports thinking outside the output count, every other inside.
+func (p *Plugin) preferredAPI(modelDialect providerproto.DialectAPI) catalog.PreferredAPI {
+	if p.info.Mode != providerproto.ModeDialect || p.info.Dialect == nil {
+		return catalog.APIChatCompletions
+	}
+	api := p.info.Dialect.API
+	if modelDialect != "" {
+		api = modelDialect
+	}
+	switch api {
+	case providerproto.DialectOpenAIResponses:
+		return catalog.APIResponses
+	case providerproto.DialectAnthropicMessages:
+		return catalog.APIAnthropicMessages
+	case providerproto.DialectGemini:
+		return catalog.APIGemini
+	}
+	return catalog.APIChatCompletions
 }
 
 // headersFor returns the auth/token headers, cached until shortly before
@@ -211,7 +234,7 @@ func (p *Plugin) registerModels(models []providerproto.Model) {
 			ContextWindow:   m.ContextWindow,
 			MaxOutputTokens: m.MaxOutputTokens,
 			Capabilities:    append([]string(nil), m.Capabilities...),
-			PreferredAPI:    catalog.APIChatCompletions,
+			PreferredAPI:    p.preferredAPI(m.Dialect),
 		}
 		if up := m.Upstream; up != nil {
 			if um, ok := catalog.Resolve(up.Provider, up.Model); ok {
