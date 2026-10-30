@@ -42,6 +42,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
@@ -107,7 +108,7 @@ func (c *GeminiClient) explicitState() *explicitCache {
 // system text, or "" when the request must carry the system instruction
 // itself. Never returns an error: every failure degrades to "".
 func (c *GeminiClient) explicitCacheFor(ctx context.Context, systemParts []map[string]string) string {
-	if !client.ExplicitCacheEnabled() {
+	if !client.ExplicitCacheEnabled() || catalog.HasCapability(c.catalogName(), c.model, catalog.CapabilityNoExplicitCache) {
 		return ""
 	}
 	text := systemTextOf(systemParts)

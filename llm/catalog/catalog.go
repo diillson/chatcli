@@ -66,6 +66,11 @@ type ModelMeta struct {
 	CapabilitiesUnknown bool
 }
 
+// CapabilityNoExplicitCache marks a model that serves implicit prompt
+// caching only: a request to create an explicit cache resource for it
+// (Gemini cachedContents) is refused, so the client never attempts one.
+const CapabilityNoExplicitCache = "no_explicit_cache"
+
 // registry: lista plana para facilitar matching por provedor + id/alias
 //
 // IMPORTANT ordering rule: newer entries MUST be declared BEFORE older
@@ -773,6 +778,24 @@ var registry = []ModelMeta{
 	// (kept only as an alias). The whole generation shares the uniform
 	// 1,048,576 / 65,536 profile. Newest first so generic alias prefixes
 	// don't shadow the more specific ids.
+	{
+		// gemini-4-argon (Stable, Oct 2026, ai.google.dev/gemini-api/docs/
+		// models/gemini-4-argon): Google's flagship reasoning model. Text,
+		// image, video, audio and PDF in; text out. 1,048,576-token window
+		// shared by input and output, 65,536 output tokens on a synchronous
+		// call (long decode goes further). Thinking levels low|medium|high;
+		// implicit caching only — explicit cachedContents is not supported,
+		// so the client never creates one for it. Price is dated:
+		// llm/pricing geminiArgonRates.
+		ID:              "gemini-4-argon",
+		Aliases:         []string{"gemini-4-argon"},
+		DisplayName:     "Gemini 4 Argon",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution", CapabilityNoExplicitCache},
+	},
 	{
 		// gemini-3.8-flash (GA Sep 2 2026, ai.google.dev/gemini-api/docs/
 		// changelog; model card deepmind.google/models/model-cards/
