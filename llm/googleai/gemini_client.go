@@ -611,6 +611,9 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 				DisplayName:  displayName,
 				Provider:     catalog.ProviderGoogleAI,
 				PreferredAPI: "gemini_api",
+				// The listing reports generation methods, not input
+				// modalities: vision is learned from the model.
+				CapabilitiesUnknown: true,
 			})
 		}
 	}

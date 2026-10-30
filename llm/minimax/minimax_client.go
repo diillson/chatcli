@@ -459,6 +459,9 @@ func (c *MiniMaxClient) ListModels(ctx context.Context) ([]client.ModelInfo, err
 				DisplayName:  m.ID,
 				Provider:     catalog.ProviderMiniMax,
 				PreferredAPI: catalog.APIChatCompletions,
+				// The listing carries no input modalities: vision is
+				// learned from the model.
+				CapabilitiesUnknown: true,
 			})
 		}
 	}

@@ -610,6 +610,9 @@ func (c *OpenAIResponsesClient) listModelsAPIKey(ctx context.Context) ([]client.
 				DisplayName:  m.ID,
 				Provider:     catalog.ProviderOpenAI,
 				PreferredAPI: catalog.APIResponses,
+				// The listing carries no input modalities: vision is
+				// learned from the model.
+				CapabilitiesUnknown: true,
 			})
 		}
 	}

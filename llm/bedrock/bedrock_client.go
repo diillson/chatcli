@@ -1122,6 +1122,10 @@ func registerBedrockModel(id, displayName, underlyingID string) {
 			caps = stripCapability(caps, "bedrock_mantle_only")
 		}
 		meta.Capabilities = caps
+	} else {
+		// No spec donor: the listing says nothing about input modalities,
+		// so vision is learned from the model.
+		meta.CapabilitiesUnknown = true
 	}
 	catalog.Register(meta)
 }

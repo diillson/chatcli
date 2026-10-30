@@ -339,6 +339,9 @@ func (c *MoonshotClient) ListModels(ctx context.Context) ([]client.ModelInfo, er
 				DisplayName:  m.ID,
 				Provider:     catalog.ProviderMoonshot,
 				PreferredAPI: catalog.APIChatCompletions,
+				// The listing carries no input modalities: vision is
+				// learned from the model.
+				CapabilitiesUnknown: true,
 			})
 		}
 	}

@@ -1078,6 +1078,9 @@ func (c *ClaudeClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 				Provider:     catalog.ProviderClaudeAI,
 				PreferredAPI: catalog.APIAnthropicMessages,
 				APIVersion:   config.ClaudeAIAPIVersionDefault,
+				// The listing carries no input modalities: vision is
+				// learned from the model.
+				CapabilitiesUnknown: true,
 			})
 		}
 	}

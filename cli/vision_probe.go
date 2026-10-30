@@ -50,6 +50,12 @@ const (
 	visionProbeTimeout = 30 * time.Second
 	// visionVerdictFile holds the learned verdicts under the state root.
 	visionVerdictFile = "vision_capabilities.json"
+	// visionProbeMaxTokens leaves a reasoning model room to think before
+	// its one-word reply: Gemini counts thinking against the output cap
+	// and answers nothing under a cap of a few tokens, and the OpenAI
+	// Responses API rejects a cap below 16. Either left every probe
+	// inconclusive. Only the tokens produced are billed.
+	visionProbeMaxTokens = 1024
 )
 
 // probePNG is a small, valid, all-white PNG built with the standard
@@ -150,7 +156,7 @@ var imageRejectionMarkers = []string{
 	"image_url is only supported", "unknown variant `image_url`", "unknown variant \"image_url\"",
 	"does not support multimodal", "multimodal input is not supported", "vision is not supported",
 	"model does not support vision", "not a multimodal model", "image content block",
-	"invalid content type. image_url",
+	"invalid content type. image_url", "image input modality is not enabled",
 }
 
 // isImageInputRejected reports whether err is the provider refusing image
@@ -187,7 +193,7 @@ func (cli *ChatCLI) probeVision(ctx context.Context, provider, model string) (bo
 		Content: "Reply with the single word ok.",
 		Images:  []models.ImageContent{{MediaType: "image/png", Data: probePNG, FileName: "probe.png"}},
 	}
-	_, err = client.SendPrompt(ctx, msg.Content, []models.Message{msg}, 5)
+	_, err = client.SendPrompt(ctx, msg.Content, []models.Message{msg}, visionProbeMaxTokens)
 	switch {
 	case err == nil:
 		return true, nil
@@ -221,11 +227,17 @@ func (cli *ChatCLI) learnedVisionFor(ctx context.Context, provider, model string
 }
 
 // catalogKnowsVision reports whether the catalog has an entry for the
-// route, and what it says about vision.
+// route, and what it says about vision. An entry a provider's model
+// listing registered without input modalities (gemini-4-argon from the
+// Gemini /models API) is no verdict: the missing "vision" means "not
+// reported", so the model is probed like any other unknown one.
 func catalogKnowsVision(provider, model string) (sees, known bool) {
 	meta, ok := catalog.Resolve(provider, model)
 	if !ok {
 		return false, false
 	}
-	return metaHasVision(meta), true
+	if metaHasVision(meta) {
+		return true, true
+	}
+	return false, !meta.CapabilitiesUnknown
 }

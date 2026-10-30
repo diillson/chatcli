@@ -7,7 +7,9 @@ package cli
 
 import (
 	"context"
+	"iter"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,9 +23,20 @@ import (
 	"go.uber.org/zap"
 )
 
-// describeMaxTokens caps the captioning response. A few paragraphs of
-// description is plenty; we do not want the bridge to balloon the prompt.
-const describeMaxTokens = 1500
+// describeMaxTokens caps the captioning response. The instruction asks for
+// a few paragraphs; the headroom is for reasoning models, which count their
+// thinking against the same cap — gemini-2.5-pro spent all of a 1500-token
+// cap thinking and returned no description. Only the tokens produced are
+// billed, and a model with a smaller output ceiling gets its own.
+const describeMaxTokens = 8192
+
+// describeTokensFor is describeMaxTokens within the model's output ceiling.
+func describeTokensFor(provider, model string) int {
+	if meta, ok := catalog.Resolve(provider, model); ok && meta.MaxOutputTokens > 0 && meta.MaxOutputTokens < describeMaxTokens {
+		return meta.MaxOutputTokens
+	}
+	return describeMaxTokens
+}
 
 // visionMode is how attached images are handled for the active model.
 type visionMode int
@@ -69,13 +82,22 @@ func (cli *ChatCLI) resolveVisionModeFor(provider, model string) visionMode {
 // model itself (vision_probe.go). Catalog-known models keep exactly the
 // previous precedence; only "unknown" changes.
 func (cli *ChatCLI) resolveVisionModeCtx(ctx context.Context, provider, model string, allowProbe bool) visionMode {
+	// A provider whose wire carries text only (OpenAI Assistants, StackSpot,
+	// Devin) never gets an image natively, whatever its model could see.
+	carries := catalog.ProviderCarriesImages(provider)
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_VISION_INPUT"))) {
 	case "native", "on", "force":
-		return visionNative
+		if carries {
+			return visionNative
+		}
+		return visionDescribe
 	case "describe", "caption", "fallback":
 		return visionDescribe
 	case "off", "none", "ignore":
 		return visionOff
+	}
+	if !carries {
+		return visionDescribe
 	}
 	sees, known := catalogKnowsVision(provider, model)
 	if known && sees {
@@ -137,24 +159,23 @@ func (cli *ChatCLI) describeImagesFallback(ctx context.Context, images []models.
 	ctx, span := beginMediaPattern(ctx, pulseVisionDescribe)
 	span.With("images", strconv.Itoa(len(images))).With("bytes_in", strconv.Itoa(imagesBytes(images)))
 
-	candidates := cli.describeCandidates(ctx)
-	if len(candidates) == 0 {
-		span.Outcome(pulse.StatusError, "no vision model")
-		return "", false
-	}
 	instruction := i18n.T("vision.describe.instruction")
 	userMsg := models.Message{Role: "user", Content: instruction, Images: images}
 
 	// Try the candidates in order: a catalog model the account cannot use
 	// (not enabled in this Bedrock account or region, no key for that
 	// provider) fails fast and the next one is tried, instead of the whole
-	// fallback giving up on the first.
+	// fallback giving up on the first. Candidates are produced lazily, so
+	// another provider's model listing is fetched only when the ones
+	// before it are exhausted.
 	var provider, model, desc string
 	var lastErr error
-	for i, c := range candidates {
-		if i >= describeMaxAttempts {
+	tried := 0
+	for c := range cli.describeCandidateSeq(ctx) {
+		if tried >= describeMaxAttempts {
 			break
 		}
+		tried++
 		client, err := cli.manager.GetClient(c.provider, c.model)
 		if err != nil {
 			lastErr = err
@@ -163,7 +184,7 @@ func (cli *ChatCLI) describeImagesFallback(ctx context.Context, images []models.
 		if cli.animation != nil {
 			cli.animation.UpdateMessage(i18n.T("vision.describe.in_progress", c.model))
 		}
-		out, err := client.SendPrompt(ctx, instruction, []models.Message{userMsg}, describeMaxTokens)
+		out, err := client.SendPrompt(ctx, instruction, []models.Message{userMsg}, describeTokensFor(c.provider, c.model))
 		if err != nil {
 			lastErr = err
 			if isImageInputRejected(err) {
@@ -179,9 +200,13 @@ func (cli *ChatCLI) describeImagesFallback(ctx context.Context, images []models.
 		provider, model, desc = c.provider, c.model, out
 		break
 	}
+	if tried == 0 {
+		span.Outcome(pulse.StatusError, "no vision model")
+		return "", false
+	}
 	if desc == "" {
 		cli.logger.Warn("vision describe-fallback: no candidate could describe the image",
-			zap.Int("tried", minInt(len(candidates), describeMaxAttempts)), zap.Error(lastErr))
+			zap.Int("tried", tried), zap.Error(lastErr))
 		span.Outcome(pulse.StatusOf(lastErr), "describe failed")
 		return "", false
 	}
@@ -211,63 +236,118 @@ func rememberDescriber(provider, model string) {
 	lastDescriber.Unlock()
 }
 
-// describeCandidates orders the models that may caption an image: the
-// explicit CHATCLI_VISION_PROVIDER/MODEL pair, the describer that worked
-// last, then — per provider, the session's first — the vision models the
-// account can actually invoke (the provider's own model listing, in the
-// invokable id form: a Bedrock inference profile rather than the bare
-// foundation id) ahead of the remaining catalog vision models. Models
-// already learned to be blind are skipped; the list is de-duplicated.
+// describeCandidates is describeCandidateSeq collected: every candidate,
+// listing every available provider.
 func (cli *ChatCLI) describeCandidates(ctx context.Context) []visionRoute {
-	var out []visionRoute
-	seen := map[string]bool{}
-	add := func(p, m string) {
-		k := visionVerdictKey(p, m)
-		if p == "" || m == "" || seen[k] {
+	return slices.Collect(cli.describeCandidateSeq(ctx))
+}
+
+// describeCandidateSeq yields the models that may caption an image, in
+// order: the explicit CHATCLI_VISION_PROVIDER/MODEL pair, the describer
+// that worked last, then — per provider, the session's first — the vision
+// models the account can actually invoke (the provider's own model
+// listing, in the invokable id form: a Bedrock inference profile rather
+// than the bare foundation id) ahead of the remaining catalog vision
+// models. Models already learned to be blind are skipped; nothing is
+// yielded twice.
+//
+// A listed id counts only when the catalog knows that exact id as a vision
+// model: a loose match handed "gemini-2.5-pro-preview-tts" the vision of
+// gemini-2.5-pro, and text-to-speech models were asked to describe a
+// screenshot. Listed models are tried in catalog order (newest first)
+// rather than the listing's, which put a model the provider no longer
+// serves ahead of its successors. A provider is listed only when the
+// candidates before it are exhausted.
+func (cli *ChatCLI) describeCandidateSeq(ctx context.Context) iter.Seq[visionRoute] {
+	return func(yield func(visionRoute) bool) {
+		seen := map[string]bool{}
+		emit := func(p, m string) bool {
+			k := visionVerdictKey(p, m)
+			if p == "" || m == "" || seen[k] {
+				return true
+			}
+			seen[k] = true
+			if !catalog.ProviderCarriesImages(p) {
+				cli.logger.Debug("vision describe-fallback: provider carries text only, skipped",
+					zap.String("provider", p), zap.String("model", m))
+				return true
+			}
+			if sees, known := learnedVision.lookup(cli.stateRoot, p, m); known && !sees {
+				return true
+			}
+			return yield(visionRoute{p, m})
+		}
+		if p := strings.TrimSpace(os.Getenv("CHATCLI_VISION_PROVIDER")); p != "" {
+			if !emit(p, strings.TrimSpace(os.Getenv("CHATCLI_VISION_MODEL"))) {
+				return
+			}
+		}
+		if cli.manager == nil {
 			return
 		}
-		if sees, known := learnedVision.lookup(cli.stateRoot, p, m); known && !sees {
+		available := cli.manager.GetAvailableProviders()
+		lastDescriber.Lock()
+		last := lastDescriber.route
+		lastDescriber.Unlock()
+		if providerAvailable(available, last.provider) && !emit(last.provider, last.model) {
 			return
 		}
-		seen[k] = true
-		out = append(out, visionRoute{p, m})
-	}
-	if p := strings.TrimSpace(os.Getenv("CHATCLI_VISION_PROVIDER")); p != "" {
-		add(p, strings.TrimSpace(os.Getenv("CHATCLI_VISION_MODEL")))
-	}
-	if cli.manager == nil {
-		return out
-	}
-	available := cli.manager.GetAvailableProviders()
-	lastDescriber.Lock()
-	last := lastDescriber.route
-	lastDescriber.Unlock()
-	if providerAvailable(available, last.provider) {
-		add(last.provider, last.model)
-	}
-	ordered := make([]string, 0, len(available)+1)
-	if cli.Provider != "" {
-		ordered = append(ordered, cli.Provider)
-	}
-	for _, p := range available {
-		if !strings.EqualFold(p, cli.Provider) {
-			ordered = append(ordered, p)
+		ordered := make([]string, 0, len(available)+1)
+		if cli.Provider != "" {
+			ordered = append(ordered, cli.Provider)
+		}
+		for _, p := range available {
+			if !strings.EqualFold(p, cli.Provider) {
+				ordered = append(ordered, p)
+			}
+		}
+		for _, p := range ordered {
+			// Only a provider with vision models in the catalog is worth
+			// listing: a listed id counts only as a known vision model, and
+			// some clients have side effects when built for a listing.
+			if !providerAvailable(available, p) || !catalog.ProviderCarriesImages(p) || !providerHasVisionModels(p) {
+				continue
+			}
+			for _, id := range listedVisionModels(p, cli.invokableModels(ctx, p)) {
+				if !emit(p, id) {
+					return
+				}
+			}
+			for _, meta := range catalog.ListByProvider(p) {
+				if metaHasVision(meta) && !emit(p, meta.ID) {
+					return
+				}
+			}
 		}
 	}
-	for _, p := range ordered {
-		if !providerAvailable(available, p) {
+}
+
+// listedVisionModels keeps the listed ids the catalog knows exactly as
+// vision models, ordered by their catalog position (newest first; ids the
+// listing registered keep the listing's order after the curated ones).
+func listedVisionModels(provider string, listed []string) []string {
+	rank := map[string]int{}
+	for i, meta := range catalog.ListByProvider(provider) {
+		if _, dup := rank[strings.ToLower(meta.ID)]; !dup {
+			rank[strings.ToLower(meta.ID)] = i
+		}
+	}
+	type ranked struct {
+		id   string
+		rank int
+	}
+	var keep []ranked
+	for _, id := range listed {
+		meta, ok := catalog.ResolveExact(provider, id)
+		if !ok || !metaHasVision(meta) {
 			continue
 		}
-		for _, id := range cli.invokableModels(ctx, p) {
-			if meta, ok := catalog.Resolve(p, id); ok && metaHasVision(meta) {
-				add(p, id)
-			}
-		}
-		for _, meta := range catalog.ListByProvider(p) {
-			if metaHasVision(meta) {
-				add(p, meta.ID)
-			}
-		}
+		keep = append(keep, ranked{id, rank[strings.ToLower(meta.ID)]})
+	}
+	slices.SortStableFunc(keep, func(a, b ranked) int { return a.rank - b.rank })
+	out := make([]string, len(keep))
+	for i, k := range keep {
+		out[i] = k.id
 	}
 	return out
 }
@@ -323,51 +403,10 @@ func (cli *ChatCLI) invokableModels(ctx context.Context, provider string) []stri
 	return listing.ids
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// resolveVisionDescribeModel picks the provider+model used to caption images
-// for the describe-fallback. Resolution order:
-//  1. explicit CHATCLI_VISION_PROVIDER + CHATCLI_VISION_MODEL env override;
-//  2. a vision-capable model on the CURRENT provider (cheapest auth-wise);
-//  3. the first vision-capable model on any other available provider.
-//
-// Returns ok=false when no available provider exposes a vision model.
-func (cli *ChatCLI) resolveVisionDescribeModel() (string, string, bool) {
-	if p := strings.TrimSpace(os.Getenv("CHATCLI_VISION_PROVIDER")); p != "" {
-		if m := strings.TrimSpace(os.Getenv("CHATCLI_VISION_MODEL")); m != "" {
-			return p, m, true
-		}
-	}
-
-	available := cli.manager.GetAvailableProviders()
-
-	// Prefer the current provider so we reuse already-configured credentials.
-	ordered := make([]string, 0, len(available)+1)
-	if cli.Provider != "" {
-		ordered = append(ordered, cli.Provider)
-	}
-	for _, p := range available {
-		if !strings.EqualFold(p, cli.Provider) {
-			ordered = append(ordered, p)
-		}
-	}
-
-	for _, p := range ordered {
-		if !providerAvailable(available, p) {
-			continue
-		}
-		for _, meta := range catalog.ListByProvider(p) {
-			if metaHasVision(meta) {
-				return p, meta.ID, true
-			}
-		}
-	}
-	return "", "", false
+// providerHasVisionModels reports whether the catalog knows any vision
+// model for the provider.
+func providerHasVisionModels(provider string) bool {
+	return slices.ContainsFunc(catalog.ListByProvider(provider), metaHasVision)
 }
 
 func providerAvailable(available []string, p string) bool {

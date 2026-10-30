@@ -59,7 +59,22 @@ type ProviderDescriptor struct {
 	FallbackMaxTokens     func(model string) int
 	FallbackContextWindow func(model string) int
 
+	// TextOnlyTransport marks a provider whose wire carries text only: an
+	// image never reaches the model, whatever the model could see. Such a
+	// provider always gets image descriptions, and its models are never
+	// probed for vision — a probe would be answered without the image and
+	// read as "sees".
+	TextOnlyTransport bool
+
 	builtin bool
+}
+
+// ProviderCarriesImages reports whether images can reach the provider's
+// models natively. Unknown providers are assumed to carry them; the model
+// decides from there.
+func ProviderCarriesImages(name string) bool {
+	d, ok := LookupProvider(name)
+	return !ok || !d.TextOnlyTransport
 }
 
 // Builtin reports whether the provider ships with chatcli.
@@ -142,6 +157,8 @@ var builtinProviders = []ProviderDescriptor{
 		AuthEnv:               []string{"OPENAI_API_KEY"},
 		PreferredAPI:          APIAssistants,
 		FallbackContextWindow: fixedTokens(128000),
+		// The thread receives the prompt text only.
+		TextOnlyTransport: true,
 	},
 	{
 		Name:         ProviderClaudeAI,
@@ -253,6 +270,8 @@ var builtinProviders = []ProviderDescriptor{
 		// windows); the generic 50K default made compaction fire on
 		// almost every agent turn.
 		FallbackContextWindow: fixedTokens(128000),
+		// The agent API takes one flattened text conversation.
+		TextOnlyTransport: true,
 	},
 	{
 		Name:                  ProviderOllama,
@@ -296,6 +315,8 @@ var builtinProviders = []ProviderDescriptor{
 		// Modelo desconhecido servido pelo Devin CLI: janela conservadora;
 		// CHATCLI_CONTEXT_WINDOW é o escape para deployments que diferem.
 		FallbackContextWindow: fixedTokens(200000),
+		// The Devin CLI transport is a flat text transcript.
+		TextOnlyTransport: true,
 	},
 }
 

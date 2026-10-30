@@ -287,6 +287,9 @@ func (c *XAIClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) 
 				DisplayName:  m.ID,
 				Provider:     catalog.ProviderXAI,
 				PreferredAPI: catalog.APIChatCompletions,
+				// The listing carries no input modalities: vision is
+				// learned from the model.
+				CapabilitiesUnknown: true,
 			})
 		}
 	}
