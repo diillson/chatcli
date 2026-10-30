@@ -184,6 +184,11 @@ backend supports it.
 - `stopReason` is one of `end`, `max_tokens`, `tool_use` or `refusal`.
 - `usage.inputTokens` excludes cached tokens. `costUSD`, when present, is
   treated as authoritative.
+- `usage.outputTokens` includes reasoning tokens; `reasoningTokens` is the
+  informational share of them and is never billed on top. (In `dialect`
+  mode the host's client parses usage itself: on the `gemini` dialect,
+  thinking arrives outside the output count and the host bills it as
+  output.)
 
 ## 7. tokens/count (optional)
 
