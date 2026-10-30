@@ -28,14 +28,14 @@ type routeClient struct {
 }
 
 func (c *routeClient) GetModelName() string { return c.model }
-func (c *routeClient) SendPrompt(_ context.Context, _ string, hist []models.Message, _ int) (string, error) {
+func (c *routeClient) SendPrompt(_ context.Context, _ string, hist []models.Message, maxTokens int) (string, error) {
 	c.m.mu.Lock()
 	defer c.m.mu.Unlock()
 	images := 0
 	for _, h := range hist {
 		images += len(h.Images)
 	}
-	c.m.calls = append(c.m.calls, routeCall{model: c.model, images: images})
+	c.m.calls = append(c.m.calls, routeCall{model: c.model, images: images, maxTokens: maxTokens})
 	if err, ok := c.m.errs[c.model]; ok {
 		return "", err
 	}
@@ -43,8 +43,9 @@ func (c *routeClient) SendPrompt(_ context.Context, _ string, hist []models.Mess
 }
 
 type routeCall struct {
-	model  string
-	images int
+	model     string
+	images    int
+	maxTokens int
 }
 
 type routeManager struct {
@@ -53,6 +54,7 @@ type routeManager struct {
 	errs    map[string]error
 	calls   []routeCall
 	listing map[string][]client.ModelInfo
+	listed  []string
 }
 
 func (m *routeManager) GetClient(_ string, model string) (client.LLMClient, error) {
@@ -60,6 +62,9 @@ func (m *routeManager) GetClient(_ string, model string) (client.LLMClient, erro
 }
 
 func (m *routeManager) ListModelsForProvider(_ context.Context, provider string) ([]client.ModelInfo, error) {
+	m.mu.Lock()
+	m.listed = append(m.listed, provider)
+	m.mu.Unlock()
 	return m.listing[provider], nil
 }
 

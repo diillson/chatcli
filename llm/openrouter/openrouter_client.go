@@ -584,6 +584,8 @@ func (c *OpenRouterClient) ListModels(ctx context.Context) ([]client.ModelInfo, 
 			if m.TopProvider.MaxCompletionTokens > 0 {
 				meta.MaxOutputTokens = m.TopProvider.MaxCompletionTokens
 			}
+			caps, known := m.listedCapabilities()
+			meta.Capabilities, meta.CapabilitiesUnknown = caps, !known
 			catalog.Register(meta)
 		}
 	}
@@ -652,6 +654,24 @@ type openRouterModelEntry struct {
 	TopProvider struct {
 		MaxCompletionTokens int `json:"max_completion_tokens"`
 	} `json:"top_provider"`
+	Architecture struct {
+		InputModalities []string `json:"input_modalities"`
+	} `json:"architecture"`
+}
+
+// listedCapabilities is what the listing says the model takes as input:
+// "vision" when its input modalities include image, and known=false when
+// the entry reported no modalities at all.
+func (m openRouterModelEntry) listedCapabilities() (caps []string, known bool) {
+	if len(m.Architecture.InputModalities) == 0 {
+		return nil, false
+	}
+	for _, mod := range m.Architecture.InputModalities {
+		if strings.EqualFold(strings.TrimSpace(mod), "image") {
+			return []string{"vision"}, true
+		}
+	}
+	return nil, true
 }
 
 // normalizeWireContent round-trips the vision wire content type through

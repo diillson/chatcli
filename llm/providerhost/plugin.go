@@ -235,6 +235,9 @@ func (p *Plugin) registerModels(models []providerproto.Model) {
 		if meta.DisplayName == "" {
 			meta.DisplayName = m.ID
 		}
+		// Neither the plugin nor its upstream said what the model takes as
+		// input: vision is learned from the model.
+		meta.CapabilitiesUnknown = len(meta.Capabilities) == 0
 		catalog.Register(meta)
 
 		switch {

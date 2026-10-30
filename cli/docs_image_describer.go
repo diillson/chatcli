@@ -12,14 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/diillson/chatcli/models"
 	"github.com/diillson/chatcli/pkg/pulse"
 )
-
-// docsImageMaxTokens caps one image description: a dense architecture
-// diagram's elements, flows and verbatim text fit comfortably.
-const docsImageMaxTokens = 2000
 
 // docsImageDescriber is the plugins.DocsImageDescriber @docs-flatten uses
 // to describe the images a documentation corpus references.
@@ -32,8 +27,8 @@ var errNoVisionModel = errors.New("no vision-capable model is configured (set CH
 
 // DescribeImage implements plugins.DocsImageDescriber. The model is the
 // active one when it has vision; otherwise the vision pipeline's own
-// choice (CHATCLI_VISION_PROVIDER/MODEL, then a vision model on the current
-// provider, then on any configured provider).
+// choice (CHATCLI_VISION_PROVIDER/MODEL, the describer that worked last,
+// then the vision models the account can invoke, current provider first).
 func (d *docsImageDescriber) DescribeImage(ctx context.Context, prompt string, img models.ImageContent) (string, string, error) {
 	ctx, span := beginMediaTool(ctx, pulseDocsDescribe)
 	span.With("bytes_in", strconv.Itoa(len(img.Data)))
@@ -46,39 +41,71 @@ func (d *docsImageDescriber) DescribeImage(ctx context.Context, prompt string, i
 }
 
 // describe is DescribeImage under its dashboard node; span learns the
-// model chosen.
+// model chosen. The active model describes when it sees (probed once when
+// the catalog does not know it); otherwise — or when it fails — the vision
+// pipeline's candidates are tried in turn, the same ones and in the same
+// order as the describe-fallback (describeCandidateSeq).
 func (d *docsImageDescriber) describe(ctx context.Context, prompt string, img models.ImageContent, span *pulse.Span) (string, string, error) {
-	provider, model, ok := d.pick()
-	if !ok {
+	c := d.cli
+	if c.manager == nil {
 		return "", "", errNoVisionModel
 	}
-	span.With("provider", strings.ToLower(provider)).With("model", model)
-	client, err := d.cli.manager.GetClient(provider, model)
-	if err != nil {
-		return "", "", err
-	}
-	images := d.cli.compressImagesForVision([]models.ImageContent{img})
+	images := c.compressImagesForVision([]models.ImageContent{img})
 	msg := models.Message{Role: "user", Content: prompt, Images: images}
-	desc, err := client.SendPrompt(ctx, prompt, []models.Message{msg}, docsImageMaxTokens)
-	if err != nil {
-		return "", "", err
+	try := func(provider, model string) (string, error) {
+		client, err := c.manager.GetClient(provider, model)
+		if err != nil {
+			return "", err
+		}
+		out, err := client.SendPrompt(ctx, prompt, []models.Message{msg}, describeTokensFor(provider, model))
+		if err != nil {
+			if isImageInputRejected(err) {
+				learnedVision.record(c.stateRoot, provider, model, false, c.logger)
+			}
+			return "", err
+		}
+		if out = strings.TrimSpace(out); out == "" {
+			return "", errEmptyDescription
+		}
+		return out, nil
 	}
-	return strings.TrimSpace(desc), strings.ToLower(provider) + "/" + model, nil
+	var lastErr error
+	tried, activeTried := 0, false
+	if p, m := c.Provider, c.Model; p != "" && m != "" && !envVisionOverride() &&
+		c.resolveVisionModeCtx(ctx, p, m, true) == visionNative {
+		tried, activeTried = 1, true
+		desc, err := try(p, m)
+		if err == nil {
+			span.With("provider", strings.ToLower(p)).With("model", m)
+			return desc, strings.ToLower(p) + "/" + m, nil
+		}
+		lastErr = err
+	}
+	for cand := range c.describeCandidateSeq(ctx) {
+		if tried >= describeMaxAttempts {
+			break
+		}
+		if activeTried && strings.EqualFold(cand.provider, c.Provider) && cand.model == c.Model {
+			continue
+		}
+		tried++
+		desc, err := try(cand.provider, cand.model)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		rememberDescriber(cand.provider, cand.model)
+		span.With("provider", strings.ToLower(cand.provider)).With("model", cand.model)
+		return desc, strings.ToLower(cand.provider) + "/" + cand.model, nil
+	}
+	if lastErr == nil {
+		lastErr = errNoVisionModel
+	}
+	return "", "", lastErr
 }
 
-// pick chooses the describing model, preferring the active one.
-func (d *docsImageDescriber) pick() (string, string, bool) {
-	c := d.cli
-	if p, m := c.Provider, c.Model; p != "" && m != "" && !envVisionOverride() {
-		if meta, ok := catalog.Resolve(p, m); ok && metaHasVision(meta) {
-			return p, m, true
-		}
-		if modelIDImpliesVision(m) {
-			return p, m, true
-		}
-	}
-	return c.resolveVisionDescribeModel()
-}
+// errEmptyDescription marks a model that answered with no text.
+var errEmptyDescription = errors.New("the vision model returned an empty description")
 
 // envVisionOverride reports whether CHATCLI_VISION_PROVIDER/MODEL pin the
 // describing model; the explicit choice wins over the active model.

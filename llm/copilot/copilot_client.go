@@ -336,19 +336,36 @@ func (c *Client) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 
 		// Dynamically register in catalog if not already present
 		if _, ok := catalog.Resolve(catalog.ProviderCopilot, m.ID); !ok {
+			caps := []string{"tools"}
+			vision, visionKnown := copilotSupportsVision(m.Capabilities)
+			if vision {
+				caps = append(caps, "vision")
+			}
 			catalog.Register(catalog.ModelMeta{
-				ID:              m.ID,
-				Aliases:         []string{"copilot-" + m.ID},
-				DisplayName:     displayName + " (Copilot)",
-				Provider:        catalog.ProviderCopilot,
-				ContextWindow:   128000,
-				MaxOutputTokens: 16384,
-				PreferredAPI:    catalog.APIChatCompletions,
-				Capabilities:    []string{"tools"},
+				ID:                  m.ID,
+				Aliases:             []string{"copilot-" + m.ID},
+				DisplayName:         displayName + " (Copilot)",
+				Provider:            catalog.ProviderCopilot,
+				ContextWindow:       128000,
+				MaxOutputTokens:     16384,
+				PreferredAPI:        catalog.APIChatCompletions,
+				Capabilities:        caps,
+				CapabilitiesUnknown: !visionKnown,
 			})
 		}
 	}
 
 	c.logger.Info(i18n.T("llm.info.fetched_models", "Copilot"), zap.Int("count", len(modelInfos)))
 	return modelInfos, nil
+}
+
+// copilotSupportsVision reads capabilities.supports.vision from a /models
+// entry; known=false when the entry does not say.
+func copilotSupportsVision(capabilities map[string]interface{}) (vision, known bool) {
+	supports, ok := capabilities["supports"].(map[string]interface{})
+	if !ok {
+		return false, false
+	}
+	v, ok := supports["vision"].(bool)
+	return v, ok
 }

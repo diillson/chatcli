@@ -59,6 +59,11 @@ type ModelMeta struct {
 	// history compactor fires for this model (0 = mode default; the
 	// session's /autocompact override always wins).
 	CompactRatio float64
+	// CapabilitiesUnknown marks an entry registered from a provider's live
+	// model listing that did not say what the model takes as input: the
+	// missing "vision" means "not reported", not "blind". Vision for such
+	// an entry is learned from the model itself (cli/vision_probe.go).
+	CapabilitiesUnknown bool
 }
 
 // registry: lista plana para facilitar matching por provedor + id/alias
@@ -2469,6 +2474,38 @@ func HasCapability(provider, model, capability string) bool {
 		}
 	}
 	return false
+}
+
+// ResolveExact is Resolve without the loose passes: the provider's entry
+// whose ID or alias is exactly model. A listing id such as
+// "gemini-2.5-pro-preview-tts" resolves loosely to "gemini-2.5-pro" and
+// would inherit capabilities its own modality variant does not have.
+func ResolveExact(provider, model string) (ModelMeta, bool) {
+	if model == "" {
+		return ModelMeta{}, false
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	p := strings.ToUpper(provider)
+	for _, meta := range registry {
+		if meta.Provider != "" && meta.Provider != p {
+			continue
+		}
+		if strings.EqualFold(meta.ID, model) {
+			return meta, true
+		}
+	}
+	for _, meta := range registry {
+		if meta.Provider != "" && meta.Provider != p {
+			continue
+		}
+		for _, alias := range meta.Aliases {
+			if strings.EqualFold(alias, model) {
+				return meta, true
+			}
+		}
+	}
+	return ModelMeta{}, false
 }
 
 // Lista (best-effort) de todos ModelMeta cadastrados (pode ser útil para debug).
