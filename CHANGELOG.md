@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.228.0](https://github.com/diillson/chatcli/compare/v1.227.0...v1.228.0) (2026-11-03)
+
+
+### Features
+
+* **cli:** add /restart to reopen on the installed version after an update ([#1930](https://github.com/diillson/chatcli/issues/1930)) ([bdf3387](https://github.com/diillson/chatcli/commit/bdf33879e5f7fbe77711585585e0d4ca080b7662))
+* **update:** retry every network step of the update, configurable, with a 5 second default backoff ([#1934](https://github.com/diillson/chatcli/issues/1934)) ([bb5efa9](https://github.com/diillson/chatcli/commit/bb5efa99823527551289d46b79dac9ef220d9829))
+
+
+### Bug Fixes
+
+* **chat:** never return an empty reply after knowledge, memory or pull rounds ([#1928](https://github.com/diillson/chatcli/issues/1928)) ([8953b1c](https://github.com/diillson/chatcli/commit/8953b1c71f7018b85f7929b8ef57bf5df4d39474))
+* **imagegen:** refuse retired image models at the factory and drop the Amazon Bedrock request shapes ([#1931](https://github.com/diillson/chatcli/issues/1931)) ([be6dbda](https://github.com/diillson/chatcli/commit/be6dbda043af915525173d6bd652150b3c1041c4)), closes [#1364](https://github.com/diillson/chatcli/issues/1364)
+* **pricing:** flip Gemini 3.6/3.7/3.8 Flash to the 2027 price on its date ([#1933](https://github.com/diillson/chatcli/issues/1933)) ([5c0b801](https://github.com/diillson/chatcli/commit/5c0b801ba3db62a51ef694b567b2527fda880b5c)), closes [#1345](https://github.com/diillson/chatcli/issues/1345)
+
 ## [1.227.0](https://github.com/diillson/chatcli/compare/v1.226.0...v1.227.0) (2026-10-30)
 
 
