@@ -1,0 +1,12 @@
+{
+  "complete.root.restart": "Reinicia o ChatCLI na versão instalada, mantendo a conversa",
+  "restart.not_interactive": "O /restart só funciona no terminal interativo.",
+  "restart.saving": "Conversa salva como %s — ela será reaberta após o reinício.",
+  "restart.restarting": "Reiniciando o ChatCLI…",
+  "restart.done": "ChatCLI reiniciado.",
+  "restart.done_upgraded": "ChatCLI reiniciado: v%s → v%s.",
+  "restart.failed": "Não foi possível reiniciar o ChatCLI: %v. Abra de novo com o comando chatcli.",
+  "restart.failed_resume_hint": "Sua conversa foi salva: reabra com /session load %s.",
+  "restart.invite": "Digite /restart para abrir a v%s agora — a conversa continua.",
+  "restart.notice.staged": "A v%s foi instalada em background — digite /restart para abri-la agora (a conversa continua)."
+}

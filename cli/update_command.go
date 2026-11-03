@@ -44,7 +44,13 @@ var (
 func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(userInput)
 	checkOnly := len(args) > 1 && (args[1] == "check" || args[1] == "--check")
-	_ = runUpdateFlow(ctx, cli.logger, checkOnly)
+	_ = runUpdateFlow(ctx, cli.logger, checkOnly, func(latest string) {
+		// O processo segue na versão antiga até reiniciar; no REPL o
+		// /restart faz isso sem perder a conversa.
+		if cli.replActive {
+			fmt.Println("  " + colorize("↻ "+i18n.T("restart.invite", latest), ColorCyan))
+		}
+	})
 }
 
 // RunUpdateOneShot é a superfície one-shot do /update (`chatcli update`),
@@ -53,7 +59,7 @@ func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 // última versão"; falha de checagem, canal manual com update pendente e
 // falha de aplicação retornam o erro já impresso.
 func RunUpdateOneShot(ctx context.Context, logger *zap.Logger, checkOnly bool) error {
-	return runUpdateFlow(ctx, logger, checkOnly)
+	return runUpdateFlow(ctx, logger, checkOnly, nil)
 }
 
 // UpdateSubcommandMain é o entrypoint completo do subcomando `chatcli update`:
@@ -107,8 +113,9 @@ func RunUpdateSubcommand(ctx context.Context, logger *zap.Logger, args []string)
 
 // runUpdateFlow é o núcleo compartilhado entre o /update interativo e o
 // subcomando one-shot: checa a release, compara com o binário atual e aplica
-// pelo canal detectado, imprimindo cada passo.
-func runUpdateFlow(ctx context.Context, logger *zap.Logger, checkOnly bool) error {
+// pelo canal detectado, imprimindo cada passo. onApplied (opcional) roda
+// depois de um update aplicado com sucesso, com a versão instalada.
+func runUpdateFlow(ctx context.Context, logger *zap.Logger, checkOnly bool, onApplied func(latest string)) error {
 	info := detectInstallFn()
 	anchor := screenWidth()
 	fmt.Println()
@@ -177,6 +184,9 @@ func runUpdateFlow(ctx context.Context, logger *zap.Logger, checkOnly bool) erro
 		return err
 	}
 	fmt.Println("  " + colorize(i18n.T("update.success_restart", rep.Latest), ColorGreen))
+	if onApplied != nil {
+		onApplied(rep.Latest)
+	}
 	return nil
 }
 
@@ -317,6 +327,8 @@ func (cli *ChatCLI) stageAutoUpdate(ctx context.Context, info update.Info, rep v
 		Method:   info.Method.String(),
 		StagedAt: time.Now().UTC(),
 	})
+	// Já está em disco: o /restart abre a versão nova nesta mesma sessão.
+	cli.queueRestartNotice(rep.Latest)
 	cli.logger.Info("auto-update: nova versão instalada em staging",
 		zap.String("from", rep.Current.Version),
 		zap.String("to", rep.Latest),

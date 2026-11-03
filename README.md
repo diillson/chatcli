@@ -95,7 +95,7 @@ chatcli                                            # interactive
   > /dash                                          # watch everything live
 ```
 
-ChatCLI keeps itself current with `/update` (Homebrew, `go install` or a signature-verified self-replace). [Installation guide →](https://chatcli.edilsonfreitas.com/start/installation)
+ChatCLI keeps itself current with `/update` (Homebrew, `go install` or a signature-verified self-replace), and `/restart` reopens it on the new version without losing the conversation. [Installation guide →](https://chatcli.edilsonfreitas.com/start/installation)
 
 ## Highlights
 

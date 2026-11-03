@@ -1,0 +1,12 @@
+{
+  "complete.root.restart": "Restart ChatCLI on the installed version, keeping the conversation",
+  "restart.not_interactive": "/restart only works in the interactive terminal.",
+  "restart.saving": "Conversation saved as %s — it will be reopened after the restart.",
+  "restart.restarting": "Restarting ChatCLI…",
+  "restart.done": "ChatCLI restarted.",
+  "restart.done_upgraded": "ChatCLI restarted: v%s → v%s.",
+  "restart.failed": "Could not restart ChatCLI: %v. Start it again with the chatcli command.",
+  "restart.failed_resume_hint": "Your conversation was saved: reopen it with /session load %s.",
+  "restart.invite": "Type /restart to open v%s now — the conversation continues.",
+  "restart.notice.staged": "v%s was installed in the background — type /restart to open it now (the conversation continues)."
+}

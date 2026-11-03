@@ -457,6 +457,9 @@ type ChatCLI struct {
 	updateNoticeMu      sync.Mutex
 	pendingUpdateNotice string
 	welcomeUpdateShown  string
+	// pendingRestartNotice: a version auto-update installed in the
+	// background during this session; the next turn offers /restart.
+	pendingRestartNotice string
 
 	// MCP (Model Context Protocol) servers for client mode
 	mcpManager     *mcp.Manager
@@ -1291,7 +1294,11 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	cli.preWelcomeUpdateCheck(ctx)
 	go cli.backgroundUpdateFlow(ctx)
 	cli.PrintWelcomeScreen()
-	cli.printLastSessionNotice()
+	// Started by /restart: resume the handed-over conversation instead of
+	// hinting at the last session (which is that same conversation).
+	if !cli.resumeAfterRestart(ctx) {
+		cli.printLastSessionNotice()
+	}
 	cli.printRecoveryKeyNotice()
 	cli.startHubSync(ctx) // resume the shared cross-channel conversation, if connected
 

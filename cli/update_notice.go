@@ -45,17 +45,35 @@ func (cli *ChatCLI) queueUpdateNotice(latest string) {
 	cli.pendingUpdateNotice = latest
 }
 
-// drainUpdateNotice imprime (uma única vez) o aviso pendente de versão
-// nova. Chamado no início do executor, entre a submissão do usuário e o
+// drainUpdateNotice imprime (uma única vez) os avisos pendentes — versão
+// nova disponível e versão já instalada (convite ao /restart). Chamado no
+// início do executor, entre a submissão do usuário e o
 // processamento do input.
 func (cli *ChatCLI) drainUpdateNotice() {
 	cli.updateNoticeMu.Lock()
-	latest := cli.pendingUpdateNotice
-	cli.pendingUpdateNotice = ""
+	latest, installed := cli.pendingUpdateNotice, cli.pendingRestartNotice
+	cli.pendingUpdateNotice, cli.pendingRestartNotice = "", ""
 	cli.updateNoticeMu.Unlock()
 
-	if latest == "" {
+	if latest != "" {
+		fmt.Println(colorize("  "+i18n.T("update.notice.available", latest), ColorYellow))
+	}
+	if installed != "" && cli.replActive {
+		fmt.Println(colorize("  ↻ "+i18n.T("restart.notice.staged", installed), ColorCyan))
+	}
+}
+
+// queueRestartNotice agenda, para o próximo turno, o aviso de que uma
+// versão nova foi instalada em background e o /restart já a abre. Substitui
+// um aviso de "versão disponível" da mesma versão, que ficou desatualizado.
+func (cli *ChatCLI) queueRestartNotice(installed string) {
+	if installed == "" {
 		return
 	}
-	fmt.Println(colorize("  "+i18n.T("update.notice.available", latest), ColorYellow))
+	cli.updateNoticeMu.Lock()
+	defer cli.updateNoticeMu.Unlock()
+	if cli.pendingUpdateNotice == installed {
+		cli.pendingUpdateNotice = ""
+	}
+	cli.pendingRestartNotice = installed
 }
