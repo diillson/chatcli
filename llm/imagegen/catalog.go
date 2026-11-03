@@ -87,8 +87,11 @@ func (m ModelInfo) RegionList() []string {
 	return strings.Split(m.Regions, ",")
 }
 
-// allModels is the full catalog, retired entries included so a live listing
-// that still reports a shut-down id can be recognized and left out.
+// allModels is the full catalog, retired entries included: they are what lets
+// a live listing that still reports a shut-down id leave it out, Select and
+// the factory refuse a configured one with its shutdown date and
+// replacement, instead of an unknown-model warning or the provider's error.
+// Keep an entry after its date; removing it loses those answers.
 // Sources: each provider's model pages and deprecation lists (Oct 2026).
 func allModels() []ModelInfo {
 	stab := bedrockStabilityRegions

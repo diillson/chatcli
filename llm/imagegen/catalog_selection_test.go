@@ -180,7 +180,7 @@ func TestBedrock_GenerationAndEditPerModel(t *testing.T) {
 	}
 	// Generation bodies carry no "mode": only SD3.5 documents it.
 	var gen map[string]interface{}
-	_ = json.Unmarshal(buildBedrockRequest(defaultBedrockImageModel, "x", Options{}), &gen)
+	_ = json.Unmarshal(buildBedrockRequest("x", Options{}), &gen)
 	if _, has := gen["mode"]; has {
 		t.Error("text-to-image body must not send mode")
 	}

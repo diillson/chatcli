@@ -300,7 +300,7 @@ func TestBedrock_EditIsPerModel(t *testing.T) {
 		"stability.sd3-5-large-v1:0":        true,
 		"us.stability.sd3-5-large-v1:0":     true,
 		"stability.stable-image-ultra-v1:1": true,
-		"amazon.nova-canvas-v1:0":           true,
+		"amazon.nova-canvas-v1:0":           false, // shut down; its IMAGE_VARIATION path is gone
 		defaultBedrockImageModel:            false,
 		"stability.some-future-model-v9:0":  false,
 	}
