@@ -20,11 +20,23 @@ func TestCacheStoragePerMTokenHour(t *testing.T) {
 		"gemini-3.1-pro":        4.50,
 		"gemini-3.5-flash":      1.00,
 		"gemini-3.5-flash-lite": 1.00,
-		"gemini-3.8-flash":      0.50,
 	}
 	for model, want := range cases {
 		if got := cacheStoragePerMTokenHour("GOOGLEAI", model); got != want {
 			t.Fatalf("%s: storage rate %v, want %v", model, got, want)
+		}
+	}
+	// 3.6/3.7/3.8 Flash storage doubles with their token price: $0.50
+	// through 2026, $1.00 from Jan 1 2027 (midnight Pacific).
+	pt := time.FixedZone("PST", -8*60*60)
+	last := time.Date(2026, time.December, 31, 23, 59, 0, 0, pt)
+	first := time.Date(2027, time.January, 1, 0, 0, 0, 0, pt)
+	for _, model := range []string{"gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"} {
+		if got := cacheStoragePerMTokenHourAt("GOOGLEAI", model, last); got != 0.50 {
+			t.Fatalf("%s on %s: storage %v, want 0.50", model, last, got)
+		}
+		if got := cacheStoragePerMTokenHourAt("GOOGLEAI", model, first); got != 1.00 {
+			t.Fatalf("%s on %s: storage %v, want 1.00", model, first, got)
 		}
 	}
 	if got := cacheStoragePerMTokenHour("CLAUDEAI", "claude-sonnet-5"); got != 0 {

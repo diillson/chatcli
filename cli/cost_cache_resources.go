@@ -15,16 +15,24 @@ package cli
 
 import (
 	"strings"
+	"time"
 
 	llmclient "github.com/diillson/chatcli/llm/client"
+	"github.com/diillson/chatcli/llm/pricing"
 )
 
 // cacheStoragePerMTokenHour returns the storage price in USD per million
 // tokens per hour for a provider/model, 0 when the provider does not bill
 // storage (implicit caches). Google prices (ai.google.dev/gemini-api/docs/
-// pricing, Sep/2026): 3.x Flash $0.50 (through 2026), Flash / Flash-Lite
-// $1.00, Pro $4.50.
+// pricing, Nov/2026): 3.6/3.7/3.8 Flash $0.50 through 2026 and $1.00 from
+// 2027 (the day pricing.GeminiFlashIntroEnd names), other Flash /
+// Flash-Lite $1.00, Pro $4.50.
 func cacheStoragePerMTokenHour(provider, model string) float64 {
+	return cacheStoragePerMTokenHourAt(provider, model, time.Now())
+}
+
+// cacheStoragePerMTokenHourAt is cacheStoragePerMTokenHour at t.
+func cacheStoragePerMTokenHourAt(provider, model string, t time.Time) float64 {
 	p := strings.ToLower(provider)
 	m := strings.ToLower(model)
 	if !strings.Contains(p, "googleai") && !strings.Contains(m, "gemini") {
@@ -36,7 +44,10 @@ func cacheStoragePerMTokenHour(provider, model string) float64 {
 	case strings.Contains(m, "lite"):
 		return 1.00
 	case strings.HasPrefix(m, "gemini-3.") && strings.Contains(m, "flash") && !strings.HasPrefix(m, "gemini-3.5"):
-		return 0.50
+		if t.Before(pricing.GeminiFlashIntroEnd()) {
+			return 0.50
+		}
+		return 1.00
 	default:
 		return 1.00
 	}

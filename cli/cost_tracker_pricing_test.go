@@ -5,6 +5,7 @@ import (
 	"github.com/diillson/chatcli/llm/pricing"
 
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -13,6 +14,13 @@ import (
 // Each case is the same shape (provider, model, expected input, expected output)
 // so adding a new family/model is a one-line addition.
 func TestGetModelPricing(t *testing.T) {
+	// Gemini 3.6/3.7/3.8 Flash carry a dated price (pinned on both sides of
+	// the flip in llm/pricing); here the row follows the real clock so the
+	// suite does not break on the day the price changes.
+	flashIn, flashOut := 0.75, 3.75
+	if !time.Now().Before(pricing.GeminiFlashIntroEnd()) {
+		flashIn, flashOut = 1.50, 7.50
+	}
 	cases := []struct {
 		name            string
 		provider, model string
@@ -109,9 +117,9 @@ func TestGetModelPricing(t *testing.T) {
 		// generic "gemini-3" (Pro) case is a substring of every 3.x id,
 		// so the specific tags must win first; same for the flash-lite
 		// vs flash pairs.
-		{"gemini 3.8 flash", "GOOGLEAI", "gemini-3.8-flash", 0.75, 3.75},
-		{"gemini 3.7 flash", "GOOGLEAI", "gemini-3.7-flash", 0.75, 3.75},
-		{"gemini 3.6 flash", "GOOGLEAI", "gemini-3.6-flash", 0.75, 3.75},
+		{"gemini 3.8 flash", "GOOGLEAI", "gemini-3.8-flash", flashIn, flashOut},
+		{"gemini 3.7 flash", "GOOGLEAI", "gemini-3.7-flash", flashIn, flashOut},
+		{"gemini 3.6 flash", "GOOGLEAI", "gemini-3.6-flash", flashIn, flashOut},
 		{"gemini 3.5 flash-lite before flash", "GOOGLEAI", "gemini-3.5-flash-lite", 0.30, 2.50},
 		{"gemini 3.5 flash", "GOOGLEAI", "gemini-3.5-flash", 1.50, 9.0},
 		{"gemini 3.1 pro preview", "GOOGLEAI", "gemini-3.1-pro-preview", 2.0, 12.0},
