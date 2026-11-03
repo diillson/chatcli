@@ -123,9 +123,17 @@ func runUpdateFlow(ctx context.Context, logger *zap.Logger, checkOnly bool, onAp
 	fmt.Println()
 	fmt.Println(colorize("  "+i18n.T("update.checking"), ColorGray))
 
-	rep := version.GetReport(ctx)
+	notifier := updateNotifier{}
+	// The release check is a network step like the others: behind a flaky
+	// proxy it gets the same retries, announced the same way.
+	var rep version.Report
+	_ = update.Retry(ctx, notifier, "check", func() error {
+		rep = version.GetReport(ctx)
+		return rep.CheckErr
+	})
 	if rep.CheckErr != nil {
 		fmt.Println(colorize("  ❌ "+i18n.T("update.err.check", rep.CheckErr.Error()), ColorYellow))
+		printRetryHint(rep.CheckErr)
 		return rep.CheckErr
 	}
 	// Latest vazio sem erro = checagem desabilitada por política
@@ -174,13 +182,10 @@ func runUpdateFlow(ctx context.Context, logger *zap.Logger, checkOnly bool, onAp
 		fmt.Println("  " + colorize(i18n.T("update.downloading", rep.Latest, asset), ColorCyan))
 	}
 
-	opts := update.Options{Stdout: os.Stdout, Stderr: os.Stderr, Notify: update.NotifierFunc(func(n update.Notice) {
-		if n == update.NoticeGoInstallDirectiveFallback {
-			fmt.Println("  " + colorize(i18n.T("update.goinstall_fallback"), ColorYellow))
-		}
-	})}
+	opts := update.Options{Stdout: os.Stdout, Stderr: os.Stderr, Notify: notifier}
 	if err := applyUpdateFn(ctx, info, rep.Latest, opts); err != nil {
 		printUpdateError(logger, err, info, rep.Latest)
+		printRetryHint(err)
 		return err
 	}
 	fmt.Println("  " + colorize(i18n.T("update.success_restart", rep.Latest), ColorGreen))
@@ -334,4 +339,32 @@ func (cli *ChatCLI) stageAutoUpdate(ctx context.Context, info update.Info, rep v
 		zap.String("to", rep.Latest),
 		zap.String("method", info.Method.String()))
 	return true
+}
+
+// updateNotifier prints the non-fatal notices of an interactive update:
+// the go install fallback and every retry of a network step.
+type updateNotifier struct{}
+
+// Notify implements update.Notifier.
+func (updateNotifier) Notify(n update.Notice) {
+	if n == update.NoticeGoInstallDirectiveFallback {
+		fmt.Println("  " + colorize(i18n.T("update.goinstall_fallback"), ColorYellow))
+	}
+}
+
+// NotifyRetry implements update.RetryNotifier.
+func (updateNotifier) NotifyRetry(n update.RetryNotice) {
+	fmt.Println("  " + colorize("⚠ "+i18n.T("update.retry.notice",
+		i18n.T("update.retry.step."+n.Step), n.Attempt, n.Max, n.Err, n.Delay), ColorYellow))
+}
+
+// printRetryHint closes a failure that went through every retry with what
+// usually causes it on a corporate network. A failure that stopped early
+// (a 404, a bad signature, Ctrl+C) already says what to do.
+func printRetryHint(err error) {
+	if !update.Retryable(err) {
+		return
+	}
+	retries, _ := update.RetryPolicy()
+	fmt.Println("  " + colorize(i18n.T("update.retry.gave_up", 1+retries), ColorGray))
 }

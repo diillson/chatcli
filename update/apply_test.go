@@ -131,7 +131,7 @@ func TestApplyGoInstallDirectiveRefusalFallsBackToSelfReplace(t *testing.T) {
 		return errors.New("exit status 1")
 	}
 	var gotPath, gotTag string
-	selfReplaceFn = func(_ context.Context, execPath, tag string) error {
+	selfReplaceFn = func(_ context.Context, execPath, tag string, _ Options) error {
 		gotPath, gotTag = execPath, tag
 		return nil
 	}
@@ -163,7 +163,7 @@ func TestApplyGoInstallOtherFailureDoesNotFallBack(t *testing.T) {
 		return wantErr
 	}
 	selfReplaceCalled := false
-	selfReplaceFn = func(context.Context, string, string) error {
+	selfReplaceFn = func(context.Context, string, string, Options) error {
 		selfReplaceCalled = true
 		return nil
 	}

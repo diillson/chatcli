@@ -64,6 +64,8 @@ var envDefaults = map[string]envDefault{
 	"CHATCLI_CHAT_CONTEXT_PULL":     {Value: "true", IsBool: true, Source: "chat_context_pull.go"},
 	"CHATCLI_DEBUG":                 {Value: "false", IsBool: true, Source: "logger.SetupLogger"},
 	"CHATCLI_AUTO_UPDATE":           {Value: "notify", Source: "update/apply.go"},
+	"CHATCLI_UPDATE_RETRIES":        {Value: "3", Source: "update/retry.go (new attempts per failed network step of the update, 0-10; 0 = no retry)"},
+	"CHATCLI_UPDATE_RETRY_DELAY":    {Value: "5s", Source: "update/retry.go (pause before each new attempt: Go duration or whole seconds, 0-5m)"},
 	"CHATCLI_DISABLE_VERSION_CHECK": {Value: "false", IsBool: true, Source: "version_checker.go"},
 	"CHATCLI_LOG_COMPRESS":          {Value: "true", IsBool: true, Source: "utils/logging_service.go"},
 	"CHATCLI_LOG_MAX_BACKUPS":       {Value: "3", Source: "utils/logging_service.go"},
