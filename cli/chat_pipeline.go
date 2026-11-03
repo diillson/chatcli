@@ -1089,6 +1089,16 @@ func (cli *ChatCLI) handleChatTurnResult(
 		}
 	}
 
+	// A blank reply is never stored nor drawn as an empty envelope: the user
+	// is told plainly and may ask again, and the history keeps no empty
+	// assistant turn (strict providers reject one on every later request).
+	if strings.TrimSpace(aiResponse) == "" {
+		cli.takePendingTurnContext()
+		cli.bookBufferedTurnUsage(activeClient, resolution, userInput, additionalContext, aiResponse)
+		fmt.Println(colorize(i18n.T("chat.empty_answer.notice"), ColorYellow))
+		return
+	}
+
 	// The turn context message is persisted too: the next request must
 	// replay exactly the bytes this one sent, or the prefix cache misses at
 	// this position. Flagged, so exports and extraction can tell it apart.
@@ -1113,15 +1123,7 @@ func (cli *ChatCLI) handleChatTurnResult(
 	cli.persistBoundSession()
 	cli.syncTranscript()
 
-	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
-	// Skip the record when the chat-ask/knowledge exception already booked
-	// this turn per tool round — usage stays in hand for the envelope only.
-	alreadyRecorded := cli.turnUsageRecorded
-	cli.turnUsageRecorded = false
-	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) && !alreadyRecorded {
-		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
-		cli.observeTokenCalibrationChars(resolution.Provider, resolution.Model, cli.lastPromptChars, usage)
-	}
+	usage := cli.bookBufferedTurnUsage(activeClient, resolution, userInput, additionalContext, aiResponse)
 	cli.renderAssistantResponse(activeClient, aiResponse, elapsed, usage, resolution.Provider, resolution.Model)
 	cli.maybeAnnounceBudget()
 	cli.maybeAnnounceCacheMisses()
@@ -1130,6 +1132,24 @@ func (cli *ChatCLI) handleChatTurnResult(
 	if cli.memWorker != nil {
 		cli.memWorker.nudge(ctx)
 	}
+}
+
+// bookBufferedTurnUsage resolves the turn's usage and books it on the
+// buffered path. It skips the record when the chat exception loop already
+// booked this turn per tool round — usage stays in hand for the envelope.
+func (cli *ChatCLI) bookBufferedTurnUsage(
+	activeClient client.LLMClient,
+	resolution SkillClientResolution,
+	userInput, additionalContext, aiResponse string,
+) *models.UsageInfo {
+	usage := client.GetUsageOrEstimate(activeClient, len(userInput+additionalContext), len(aiResponse))
+	alreadyRecorded := cli.turnUsageRecorded
+	cli.turnUsageRecorded = false
+	if cli.costTracker != nil && !client.IsStreamingCapable(activeClient) && !alreadyRecorded {
+		cli.costTracker.RecordRealUsage(resolution.Provider, resolution.Model, usage)
+		cli.observeTokenCalibrationChars(resolution.Provider, resolution.Model, cli.lastPromptChars, usage)
+	}
+	return usage
 }
 
 // renderAssistantResponse draws the assistant message wrapped in a

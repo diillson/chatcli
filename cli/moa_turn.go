@@ -172,7 +172,7 @@ func (cli *ChatCLI) runMoaTurnNative(
 			return "", err
 		}
 		if resp == nil {
-			return "", nil
+			return cli.moaToolFreeAnswer(ctx, tac, ref, prompt, history)
 		}
 		if resp.Usage != nil && cli.costTracker != nil {
 			cli.costTracker.RecordRealUsage(ref.Provider, ref.Model, resp.Usage)
@@ -204,8 +204,25 @@ func (cli *ChatCLI) runMoaTurnNative(
 				continue
 			}
 		}
+		// A participant that spent its rounds and still answered with a call
+		// only (or nothing) gets one tool-free closing round — otherwise its
+		// voice reaches the panel as an empty answer.
+		if strings.TrimSpace(resp.Content) == "" {
+			return cli.moaToolFreeAnswer(ctx, tac, ref, prompt, history)
+		}
 		return resp.Content, nil
 	}
+}
+
+// moaToolFreeAnswer runs the closing tool-free round for one participant and
+// books its usage against the participant's own provider+model.
+func (cli *ChatCLI) moaToolFreeAnswer(ctx context.Context, c moa.Client, ref moa.Ref, prompt string, history []models.Message) (string, error) {
+	out, sent, err := toolFreeAnswer(ctx, c, prompt, history, 0, nil)
+	if err != nil {
+		return "", err
+	}
+	cli.recordMoaUsage(ref, c, sent, history, out)
+	return out, nil
 }
 
 // runMoaTurnXML is the same loop for providers WITHOUT native tools: the
@@ -229,6 +246,9 @@ func (cli *ChatCLI) runMoaTurnXML(
 	if ts.memory {
 		instruction += moaMemoryXMLInstruction()
 	}
+	// pending is the prompt without the injected call formats, kept for the
+	// closing tool-free round.
+	pending := prompt
 	prompt += instruction
 
 	rec := cli.newOverflowRecovery("moa", nil)
@@ -263,29 +283,26 @@ func (cli *ChatCLI) runMoaTurnXML(
 		// The continuation prompt re-pins the call formats for the next round.
 		if round < moaToolMaxRounds {
 			if kbArgs != "" {
-				history, prompt = appendMoaToolRound(history, prompt, "knowledge", kbArgs, cli.runChatKnowledge(ctx, kbArgs))
-				prompt += instruction
+				history, pending = appendMoaToolRound(history, prompt, "knowledge", kbArgs, cli.runChatKnowledge(ctx, kbArgs))
+				prompt = pending + instruction
 				continue
 			}
 			if rcArgs != "" {
-				history, prompt = appendMoaToolRound(history, prompt, "recall", rcArgs, runMoaRecall(ctx, rcArgs))
-				prompt += instruction
+				history, pending = appendMoaToolRound(history, prompt, "recall", rcArgs, runMoaRecall(ctx, rcArgs))
+				prompt = pending + instruction
 				continue
 			}
 			if memArgs != "" {
-				history, prompt = appendMoaToolRound(history, prompt, "memory", memArgs, runMoaMemory(ctx, memArgs))
-				prompt += instruction
+				history, pending = appendMoaToolRound(history, prompt, "memory", memArgs, runMoaMemory(ctx, memArgs))
+				prompt = pending + instruction
 				continue
 			}
 		}
 
-		clean := resp
-		for _, tc := range calls {
-			if tc.Raw != "" {
-				clean = strings.ReplaceAll(clean, tc.Raw, "")
-			}
+		if clean := stripToolCallMarkup(resp); clean != "" {
+			return clean, nil
 		}
-		return strings.TrimSpace(clean), nil
+		return cli.moaToolFreeAnswer(ctx, c, ref, pending, history)
 	}
 }
 
