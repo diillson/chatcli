@@ -222,9 +222,10 @@ func (ch *CommandHandler) buildRoutes() {
 			fmt.Println(i18n.T("session.new_session_started"))
 			return false
 		},
-		"/reset":  ch.resetTerminal,
-		"/redraw": ch.resetTerminal,
-		"/clear":  func(ctx context.Context, _ string) bool { c.clearConversation(ctx); return false },
+		"/restart": c.handleRestartCommand,
+		"/reset":   ch.resetTerminal,
+		"/redraw":  ch.resetTerminal,
+		"/clear":   func(ctx context.Context, _ string) bool { c.clearConversation(ctx); return false },
 	}
 
 	// Order preserved from the historical switch. word=true entries match

@@ -95,7 +95,7 @@ chatcli                                            # interativo
   > /dash                                          # acompanhe tudo ao vivo
 ```
 
-O ChatCLI se mantém atualizado com `/update` (Homebrew, `go install` ou auto-substituição com assinatura verificada). [Guia de instalação →](https://chatcli.edilsonfreitas.com/pt/start/installation)
+O ChatCLI se mantém atualizado com `/update` (Homebrew, `go install` ou auto-substituição com assinatura verificada), e o `/restart` reabre na versão nova sem perder a conversa. [Guia de instalação →](https://chatcli.edilsonfreitas.com/pt/start/installation)
 
 ## Destaques
 
