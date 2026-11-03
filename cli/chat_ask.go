@@ -142,9 +142,9 @@ func (cli *ChatCLI) executeChatAskNative(
 	// OpenAI-compat providers reject the request with a 400.
 	history, _ := agent.EnsureToolResultPairing(tempHistory, cli.logger)
 	cli.notePrefixShape(history, tools)
-	gvDone := false
+	var budget chatToolBudget
 
-	for round := 0; ; round++ {
+	for {
 		resp, err := tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
 		if err != nil && cli.refreshClientOnAuthError(err) {
 			resp, err = tac.SendPromptWithTools(ctx, prompt, history, tools, effectiveMaxTokens)
@@ -173,7 +173,7 @@ func (cli *ChatCLI) executeChatAskNative(
 		}
 
 		// Knowledge pull: execute, fold into the conversation, decide again.
-		if calls.kb != "" && round < chatKnowledgeMaxRounds {
+		if calls.kb != "" && budget.takeKnowledge() {
 			result := cli.runChatKnowledge(ctx, calls.kb)
 			history, prompt = appendKnowledgeRound(history, prompt, calls.kb, result)
 			continue
@@ -181,7 +181,7 @@ func (cli *ChatCLI) executeChatAskNative(
 
 		// Memory write/read: execute, fold the result in, decide again — the
 		// model may chain recall → update → verify before confirming.
-		if calls.mem != "" && round < chatMemoryMaxRounds {
+		if calls.mem != "" && budget.takeMemory() {
 			result := cli.runChatMemory(ctx, calls.mem)
 			history, prompt = appendMemoryRound(history, prompt, calls.mem, result)
 			continue
@@ -189,29 +189,35 @@ func (cli *ChatCLI) executeChatAskNative(
 
 		// Graph render: a one-shot action — render once, fold the result in, and
 		// let the next round produce the natural-language confirmation.
-		if calls.gv != "" && !gvDone {
+		if calls.gv != "" && budget.takeGraphView() {
 			result := cli.runChatGraphView(ctx, calls.gv)
 			history, prompt = appendGraphViewRound(history, prompt, calls.gv, result)
-			gvDone = true
 			continue
 		}
 
 		// Context recovery: hand back the material curated out of the prompt
 		// and decide again. This is what makes the curation lossless — a
 		// deferred skill body or the full MCP catalog is one round away.
-		if calls.pull != "" && round < chatContextPullMaxRounds {
+		if calls.pull != "" && budget.takeContextPull() {
 			result := cli.runChatContextPull(calls.pull)
 			history, prompt = appendContextPullRound(history, prompt, calls.pull, result)
 			continue
 		}
 
-		// No ask: the buffered content is the answer.
+		// No ask: the buffered content is the answer. A reply with no text —
+		// a tool call past its budget, a call to a tool not offered, or an
+		// empty completion — gets one tool-free closing round instead of
+		// reaching the user as a blank answer.
 		if calls.ask == "" {
-			cli.finishSpinner(stopSpinner)
+			answer := ""
 			if resp != nil {
-				return resp.Content, nil
+				answer = resp.Content
 			}
-			return "", nil
+			if strings.TrimSpace(answer) == "" {
+				answer, err = cli.chatToolFreeAnswer(ctx, activeClient, prompt, history, effectiveMaxTokens, resolution)
+			}
+			cli.finishSpinner(stopSpinner)
+			return answer, err
 		}
 
 		// Ask: stop the spinner, render the overlay, then buffered follow-up.
@@ -294,12 +300,15 @@ func (cli *ChatCLI) executeChatAskXML(
 	if on.pull {
 		instruction += chatContextPullXMLInstruction()
 	}
-	prompt := userInput + additionalContext + instruction
+	// pending is the prompt without the injected call formats: the closing
+	// tool-free round must not re-advertise the tools it forbids.
+	pending := userInput + additionalContext
+	prompt := pending + instruction
 	history := tempHistory
 	cli.notePrefixShape(history, nil)
-	gvDone := false
+	var budget chatToolBudget
 
-	for round := 0; ; round++ {
+	for {
 		resp, err := activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
 		if cli.refreshClientOnAuthError(err) {
 			resp, err = activeClient.SendPrompt(ctx, prompt, history, effectiveMaxTokens)
@@ -320,50 +329,51 @@ func (cli *ChatCLI) executeChatAskXML(
 
 		// Knowledge pull: execute, fold into the conversation, decide again.
 		// The continuation prompt re-pins the call format for the next round.
-		if calls.kb != "" && round < chatKnowledgeMaxRounds {
+		if calls.kb != "" && budget.takeKnowledge() {
 			result := cli.runChatKnowledge(ctx, calls.kb)
-			history, prompt = appendKnowledgeRound(history, prompt, calls.kb, result)
-			prompt += chatKnowledgeXMLInstruction()
+			history, pending = appendKnowledgeRound(history, prompt, calls.kb, result)
+			prompt = pending + chatKnowledgeXMLInstruction()
 			continue
 		}
 
 		// Memory write/read: execute, fold the result in, decide again — the
 		// continuation prompt re-pins the call format for the next round.
-		if calls.mem != "" && round < chatMemoryMaxRounds {
+		if calls.mem != "" && budget.takeMemory() {
 			result := cli.runChatMemory(ctx, calls.mem)
-			history, prompt = appendMemoryRound(history, prompt, calls.mem, result)
-			prompt += chatMemoryXMLInstruction()
+			history, pending = appendMemoryRound(history, prompt, calls.mem, result)
+			prompt = pending + chatMemoryXMLInstruction()
 			continue
 		}
 
 		// Graph render: one-shot — render once, fold in the result, then let the
 		// next round produce the natural-language confirmation.
-		if calls.gv != "" && !gvDone {
+		if calls.gv != "" && budget.takeGraphView() {
 			result := cli.runChatGraphView(ctx, calls.gv)
-			history, prompt = appendGraphViewRound(history, prompt, calls.gv, result)
-			gvDone = true
+			history, pending = appendGraphViewRound(history, prompt, calls.gv, result)
+			prompt = pending
 			continue
 		}
 
 		// Context recovery: same contract as the native path, with the call
 		// format re-pinned for the next round.
-		if calls.pull != "" && round < chatContextPullMaxRounds {
+		if calls.pull != "" && budget.takeContextPull() {
 			result := cli.runChatContextPull(calls.pull)
-			history, prompt = appendContextPullRound(history, prompt, calls.pull, result)
-			prompt += chatContextPullXMLInstruction()
+			history, pending = appendContextPullRound(history, prompt, calls.pull, result)
+			prompt = pending + chatContextPullXMLInstruction()
 			continue
 		}
 
-		// No ask: the buffered text is the answer, minus any stray tool-call markup.
+		// No ask: the buffered text is the answer, minus any stray tool-call
+		// markup. A reply that was ONLY markup — a call past its budget or to
+		// a tool not offered — or nothing at all gets one tool-free closing
+		// round instead of reaching the user as a blank answer.
 		if calls.ask == "" {
-			cli.finishSpinner(stopSpinner)
-			clean := resp
-			for _, tc := range parsed {
-				if tc.Raw != "" {
-					clean = strings.ReplaceAll(clean, tc.Raw, "")
-				}
+			answer := stripToolCallMarkup(resp)
+			if answer == "" {
+				answer, err = cli.chatToolFreeAnswer(ctx, activeClient, pending, history, effectiveMaxTokens, resolution)
 			}
-			return strings.TrimSpace(clean), nil
+			cli.finishSpinner(stopSpinner)
+			return answer, err
 		}
 
 		cli.finishSpinner(stopSpinner)
