@@ -269,8 +269,7 @@ func openAIPricing(model string) (float64, float64, bool) {
 // pricing, Aug 2026). Ordering: tags específicas antes das genéricas —
 // "gemini-3" (Pro/preview) por último no bloco 3.x porque é substring de
 // todos os ids 3.x; "gemini-2.5-flash-lite" antes de "gemini-2.5-flash".
-// 3.8/3.7/3.6-flash usam o preço introdutório vigente ($0.75/$3.75 até
-// 31/Dez/2026; dobra a partir de Jan/2027 — revisar na virada).
+// 3.8/3.7/3.6-flash: preço com data de virada (geminiFlashRates).
 func googlePricing(model string) (float64, float64, bool) {
 	switch {
 	case strings.Contains(model, "gemini-4-argon"):
@@ -278,8 +277,10 @@ func googlePricing(model string) (float64, float64, bool) {
 		return in, out, true
 	case strings.Contains(model, "gemini-3.8-flash"), strings.Contains(model, "gemini-3.7-flash"),
 		strings.Contains(model, "gemini-3.6-flash"):
-		// 3.8-flash (GA 02/Set/2026) entrou no mesmo tier introdutório.
-		return 0.75, 3.75, true
+		// 3.8-flash (GA 02/Set/2026) entrou no mesmo tier; 3.7-flash é
+		// roteado pelo Google para o 3.8 e cobra igual.
+		in, out := geminiFlashRates(now())
+		return in, out, true
 	case strings.Contains(model, "gemini-3.5-flash-lite"):
 		return 0.30, 2.50, true
 	case strings.Contains(model, "gemini-3.5-flash"):
@@ -742,4 +743,26 @@ func geminiArgonRates(t time.Time) (in, out float64) {
 		return 2.0, 10.0
 	}
 	return 4.0, 20.0
+}
+
+// geminiFlashIntroEnd is when the Gemini 3.6/3.7/3.8 Flash lower price
+// ends: Google lists it "through December 31, 2026" and the standard price
+// from "January 1, 2027" (ai.google.dev/gemini-api/docs/pricing, Nov 2026).
+// Midnight Pacific, the time zone Google bills the Gemini API in.
+var geminiFlashIntroEnd = time.Date(2027, time.January, 1, 0, 0, 0, 0, time.FixedZone("PST", -8*60*60))
+
+// GeminiFlashIntroEnd returns when the Gemini 3.6/3.7/3.8 Flash lower
+// price ends. Explicit-cache storage, priced outside this package, flips on
+// the same day.
+func GeminiFlashIntroEnd() time.Time { return geminiFlashIntroEnd }
+
+// geminiFlashRates is the Gemini 3.6/3.7/3.8 Flash input and output price
+// per million tokens at t: $0.75/$3.75 through 2026, $1.50/$7.50 from
+// 2027. Output includes thinking tokens. Cached reads stay at 10% of input
+// ($0.075, then $0.15), which the generic Gemini cache rate already gives.
+func geminiFlashRates(t time.Time) (in, out float64) {
+	if t.Before(geminiFlashIntroEnd) {
+		return 0.75, 3.75
+	}
+	return 1.50, 7.50
 }
