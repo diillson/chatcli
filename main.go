@@ -349,6 +349,10 @@ func forceExit(logger *zap.Logger, tty *term.State, reason string) {
 }
 
 func main() {
+	// Registered first so it runs last: after every other deferred shutdown
+	// step, /restart replaces this process with the installed chatcli.
+	defer cli.ExecPendingRestart()
+
 	// Opt the legacy Windows console into ANSI/VT processing before anything
 	// prints (spinners, colors, \r repaints). No-op elsewhere and on handles
 	// that are not a console.

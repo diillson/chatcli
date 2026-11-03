@@ -412,6 +412,7 @@ func (cli *ChatCLI) GetInternalCommands() []prompt.Suggest {
 		{Text: "/newsession", Description: i18n.T("complete.root.newsession")},
 		{Text: "/version", Description: i18n.T("complete.root.version")},
 		{Text: "/update", Description: i18n.T("complete.root.update")},
+		{Text: "/restart", Description: i18n.T("complete.root.restart")},
 		{Text: "/nextchunk", Description: i18n.T("complete.root.nextchunk")},
 		{Text: "/retry", Description: i18n.T("complete.root.retry")},
 		{Text: "/retryall", Description: i18n.T("complete.root.retryall")},

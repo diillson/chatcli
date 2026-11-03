@@ -93,6 +93,7 @@ var rootCommands = []RootCommand{
 	{"/reload", CatCore, "complete.root.reload", ""},
 	{"/version", CatCore, "complete.root.version", ""},
 	{"/update", CatCore, "complete.root.update", ""},
+	{"/restart", CatCore, "complete.root.restart", ""},
 	{"/cost", CatCore, "complete.root.cost", ""},
 	{"/storage", CatCore, "complete.root.storage", ""},
 	{"/metrics", CatCore, "complete.root.metrics", ""},
