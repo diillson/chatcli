@@ -1,0 +1,12 @@
+{
+  "update.retry.notice": "%s failed (attempt %d of %d): %v — retrying in %s.",
+  "update.retry.step.check": "Checking the latest version",
+  "update.retry.step.checksums": "Downloading checksums.txt",
+  "update.retry.step.signature": "Downloading the checksums.txt signature",
+  "update.retry.step.download": "Downloading the binary",
+  "update.retry.step.brew": "brew upgrade",
+  "update.retry.step.go-install": "go install",
+  "update.retry.gave_up": "No luck after %d attempts. If a corporate proxy sits in the path, check HTTPS_PROXY/NO_PROXY and, if it inspects TLS, point CHATCLI_CA_BUNDLE at its CA.",
+  "cfg.kv.update.retries": "Update retries",
+  "cfg.val.update_retries": "%d, %s apart"
+}

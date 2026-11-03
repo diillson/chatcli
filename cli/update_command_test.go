@@ -13,7 +13,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/update"
 	"github.com/diillson/chatcli/version"
 )
@@ -27,6 +29,8 @@ func withUpdateSeams(t *testing.T, method update.Method, current, latest string,
 
 	origDetect, origApply := detectInstallFn, applyUpdateFn
 	origBuild, origFetch := version.GetBuildInfoImpl, version.FetchLatestReleaseImpl
+	t.Setenv("CHATCLI_UPDATE_RETRY_DELAY", "0")
+	t.Setenv("CHATCLI_UPDATE_RETRIES", "")
 	t.Cleanup(func() {
 		detectInstallFn, applyUpdateFn = origDetect, origApply
 		version.GetBuildInfoImpl, version.FetchLatestReleaseImpl = origBuild, origFetch
@@ -153,6 +157,55 @@ func TestHandleUpdateCommandReportsCheckFailure(t *testing.T) {
 	if !strings.Contains(out, "github fora do ar") {
 		t.Fatalf("falha de checagem deve ser reportada, saída: %q", out)
 	}
+	// Every attempt failed: each retry was announced and the closing line
+	// points at the proxy settings.
+	if n := strings.Count(out, i18n.T("update.retry.step.check")); n != update.DefaultRetryAttempts {
+		t.Fatalf("want %d retry notices for the check, got %d: %q", update.DefaultRetryAttempts, n, out)
+	}
+	if !strings.Contains(out, "HTTPS_PROXY") {
+		t.Fatalf("a check that failed every attempt must point at the proxy settings: %q", out)
+	}
+}
+
+// A proxy that drops the first two release checks: the third answers, the
+// update goes on, and the user saw both retries.
+func TestHandleUpdateCommandRetriesTheReleaseCheck(t *testing.T) {
+	cli := minimalCLI(t)
+	applied := withUpdateSeams(t, update.MethodHomebrew, "1.5.0", "1.6.0", nil)
+	calls := 0
+	version.FetchLatestReleaseImpl = func(_ context.Context) (version.ReleaseInfo, error) {
+		calls++
+		if calls < 3 {
+			return version.ReleaseInfo{}, errors.New("proxyconnect tcp: connection reset by peer")
+		}
+		return version.ReleaseInfo{TagName: "v1.6.0", PublishedAt: "2026-07-24T00:00:00Z"}, nil
+	}
+
+	out := captureStdout(t, func() { cli.handleUpdateCommand(context.Background(), "/update") })
+
+	if calls != 3 || applied.Load() != 1 {
+		t.Fatalf("checks=%d applied=%d, want 3 and 1: %q", calls, applied.Load(), out)
+	}
+	if n := strings.Count(out, "connection reset by peer"); n != 2 {
+		t.Fatalf("want 2 retry notices, got %d: %q", n, out)
+	}
+	if strings.Contains(out, "HTTPS_PROXY") {
+		t.Fatalf("a check that recovered must not print the give-up hint: %q", out)
+	}
+}
+
+// The retries Apply makes reach the user through the notifier /update
+// passes, with the step, the attempt count and the pause.
+func TestUpdateNotifierPrintsRetries(t *testing.T) {
+	out := captureStdout(t, func() {
+		updateNotifier{}.NotifyRetry(update.RetryNotice{Step: "download", Attempt: 1, Max: 4, Delay: 5 * time.Second, Err: errors.New("unexpected EOF")})
+	})
+	for _, want := range []string{i18n.T("update.retry.step.download"), "1", "4", "unexpected EOF", "5s"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("retry notice missing %q: %q", want, out)
+		}
+	}
+	var _ update.RetryNotifier = updateNotifier{}
 }
 
 func TestHandleUpdateCommandWithVersionCheckDisabled(t *testing.T) {
@@ -433,4 +486,53 @@ func TestWelcomeAnnouncesStagedUpdateOnce(t *testing.T) {
 	if strings.Contains(out, "Auto-updated") {
 		t.Fatalf("anúncio de staging deve ser único, saída: %q", out)
 	}
+}
+
+// A 404 on the release check is GitHub's answer, not the network's: it is
+// shown at once, with no retries and no proxy hint; an intermittent 403 is
+// retried and the user sees the real status in every notice.
+func TestHandleUpdateCommandCheckStatuses(t *testing.T) {
+	t.Run("404 stops at once", func(t *testing.T) {
+		cli := minimalCLI(t)
+		withUpdateSeams(t, update.MethodHomebrew, "1.5.0", "1.6.0", nil)
+		calls := 0
+		version.FetchLatestReleaseImpl = func(_ context.Context) (version.ReleaseInfo, error) {
+			calls++
+			return version.ReleaseInfo{}, &version.ReleaseStatusError{StatusCode: 404}
+		}
+		out := captureStdout(t, func() { cli.handleUpdateCommand(context.Background(), "/update") })
+		if calls != 1 || !strings.Contains(out, "status 404") || strings.Contains(out, "HTTPS_PROXY") {
+			t.Fatalf("calls=%d out=%q", calls, out)
+		}
+	})
+	t.Run("intermittent 403 is retried", func(t *testing.T) {
+		cli := minimalCLI(t)
+		applied := withUpdateSeams(t, update.MethodHomebrew, "1.5.0", "1.6.0", nil)
+		calls := 0
+		version.FetchLatestReleaseImpl = func(_ context.Context) (version.ReleaseInfo, error) {
+			calls++
+			if calls == 1 {
+				return version.ReleaseInfo{}, &version.ReleaseStatusError{StatusCode: 403}
+			}
+			return version.ReleaseInfo{TagName: "v1.6.0", PublishedAt: "2026-07-24T00:00:00Z"}, nil
+		}
+		out := captureStdout(t, func() { cli.handleUpdateCommand(context.Background(), "/update") })
+		if calls != 2 || applied.Load() != 1 || !strings.Contains(out, "status 403") {
+			t.Fatalf("calls=%d applied=%d out=%q", calls, applied.Load(), out)
+		}
+	})
+	t.Run("CHATCLI_UPDATE_RETRIES=0 tries once", func(t *testing.T) {
+		cli := minimalCLI(t)
+		withUpdateSeams(t, update.MethodHomebrew, "1.5.0", "1.6.0", nil)
+		t.Setenv("CHATCLI_UPDATE_RETRIES", "0")
+		calls := 0
+		version.FetchLatestReleaseImpl = func(_ context.Context) (version.ReleaseInfo, error) {
+			calls++
+			return version.ReleaseInfo{}, errors.New("connection reset by peer")
+		}
+		_ = captureStdout(t, func() { cli.handleUpdateCommand(context.Background(), "/update") })
+		if calls != 1 {
+			t.Fatalf("calls=%d, want 1", calls)
+		}
+	})
 }

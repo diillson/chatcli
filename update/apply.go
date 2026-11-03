@@ -162,7 +162,7 @@ var lookPathFn = exec.LookPath
 
 // selfReplaceFn — seam para testes exercitarem os caminhos que terminam em
 // self-replace sem baixar uma release de verdade.
-var selfReplaceFn = SelfReplace
+var selfReplaceFn = selfReplaceWithOptions
 
 // goInstallDirectiveRefusal detecta a recusa do `go install module@version`
 // para tags cujo go.mod carrega diretivas replace/exclude. O texto vem do
@@ -185,11 +185,13 @@ func goInstallDirectiveRefusal(stderr string) bool {
 func Apply(ctx context.Context, info Info, latestTag string, opts Options) error {
 	switch info.Method {
 	case MethodHomebrew:
-		return runTool(ctx, opts, BrewUpgradeArgs())
+		return Retry(ctx, opts.Notify, "brew", func() error {
+			return runTool(ctx, opts, BrewUpgradeArgs())
+		})
 	case MethodGoInstall:
 		return applyGoInstall(ctx, info, latestTag, opts)
 	case MethodReleaseBinary:
-		return selfReplaceFn(ctx, info.ExecPath, latestTag)
+		return selfReplaceFn(ctx, info.ExecPath, latestTag, opts)
 	default:
 		return ErrManualMethod
 	}
@@ -210,7 +212,16 @@ func applyGoInstall(ctx context.Context, info Info, latestTag string, opts Optio
 		teed.Stderr = &stderrTail
 	}
 
-	err := runTool(ctx, teed, GoInstallArgsVersion(latestTag))
+	// Each attempt reads only its own stderr; the directive refusal is
+	// decided by the tag's go.mod, so it is never retried.
+	err := Retry(ctx, opts.Notify, "go-install", func() error {
+		stderrTail.Reset()
+		err := runTool(ctx, teed, GoInstallArgsVersion(latestTag))
+		if err != nil && goInstallDirectiveRefusal(stderrTail.String()) {
+			return permanent(err)
+		}
+		return err
+	})
 	if err == nil {
 		return nil
 	}
@@ -220,7 +231,7 @@ func applyGoInstall(ctx context.Context, info Info, latestTag string, opts Optio
 	if opts.Notify != nil {
 		opts.Notify.Notify(NoticeGoInstallDirectiveFallback)
 	}
-	return selfReplaceFn(ctx, info.ExecPath, latestTag)
+	return selfReplaceFn(ctx, info.ExecPath, latestTag, opts)
 }
 
 // runTool valida a presença da ferramenta e executa o comando do canal.

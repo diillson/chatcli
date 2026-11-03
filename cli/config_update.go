@@ -34,12 +34,16 @@ func (cli *ChatCLI) showConfigUpdate() {
 	if rep.NeedsUpdate {
 		kv(p, i18n.T("cfg.kv.update.status"), i18n.T("cfg.val.update_available"))
 	}
+	retries, delay := update.RetryPolicy()
+	kv(p, i18n.T("cfg.kv.update.retries"), i18n.T("cfg.val.update_retries", retries, delay))
 
 	fmt.Println(p)
 	subheader(p, "cfg.sub.update.env")
 	kv(p, "CHATCLI_AUTO_UPDATE", envOr("CHATCLI_AUTO_UPDATE"))
 	kv(p, "CHATCLI_DISABLE_VERSION_CHECK", envBool("CHATCLI_DISABLE_VERSION_CHECK"))
 	kv(p, "CHATCLI_LATEST_VERSION_URL", envOr("CHATCLI_LATEST_VERSION_URL"))
+	kv(p, "CHATCLI_UPDATE_RETRIES", envOr("CHATCLI_UPDATE_RETRIES"))
+	kv(p, "CHATCLI_UPDATE_RETRY_DELAY", envOr("CHATCLI_UPDATE_RETRY_DELAY"))
 
 	sectionEnd(ColorCyan)
 }

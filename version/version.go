@@ -41,6 +41,18 @@ func versionCheckDisabled() bool {
 	return strings.EqualFold(os.Getenv("CHATCLI_DISABLE_VERSION_CHECK"), "true")
 }
 
+// ReleaseStatusError is the release check's answer other than 200 (403
+// from a blocking proxy or the API rate limit, 5xx from a busy one), so the
+// caller can tell a status worth retrying from a refusal. Its message is
+// the one the check always printed.
+type ReleaseStatusError struct {
+	StatusCode int
+}
+
+func (e *ReleaseStatusError) Error() string {
+	return fmt.Sprintf("erro ao verificar versão: status %d", e.StatusCode)
+}
+
 // FetchLatestReleaseImpl é a implementação injetável da consulta à release
 // mais recente (o único seam de rede deste pacote; testes o substituem ou
 // apontam CHATCLI_LATEST_VERSION_URL para um servidor de teste).
@@ -73,7 +85,7 @@ var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return ReleaseInfo{}, fmt.Errorf("erro ao verificar versão: status %d", resp.StatusCode)
+		return ReleaseInfo{}, &ReleaseStatusError{StatusCode: resp.StatusCode}
 	}
 
 	return decodeReleaseInfo(resp.Body)

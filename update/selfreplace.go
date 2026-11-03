@@ -66,6 +66,13 @@ func assetNameFor(goos, goarch string) (string, error) {
 // .sig, com assinatura inválida, sem checksums.txt ou com tag fora do semver
 // estrito a instalação é recusada.
 func SelfReplace(ctx context.Context, execPath, tag string) error {
+	return selfReplaceWithOptions(ctx, execPath, tag, Options{})
+}
+
+// selfReplaceWithOptions is SelfReplace with the caller's Options: each network step
+// (checksums.txt, its signature, the binary) is retried with the update's
+// policy and every retry reaches opts.Notify.
+func selfReplaceWithOptions(ctx context.Context, execPath, tag string, opts Options) error {
 	if execPath == "" {
 		return fmt.Errorf("update: executable path unresolved")
 	}
@@ -88,7 +95,7 @@ func SelfReplace(ctx context.Context, execPath, tag string) error {
 	// real size: the body is counted as it is read, never buffered.
 	client := &http.Client{Timeout: downloadTimeout, Transport: pulse.MeterTransport(nil)}
 
-	expected, err := fetchExpectedChecksum(ctx, client, tag, asset, keys)
+	expected, err := fetchExpectedChecksum(ctx, client, tag, asset, keys, opts.Notify)
 	if err != nil {
 		return err
 	}
@@ -107,7 +114,20 @@ func SelfReplace(ctx context.Context, execPath, tag string) error {
 		_ = os.Remove(tmpName)
 	}
 
-	actual, err := downloadWithChecksum(ctx, client, tag, asset, tmp)
+	// A failed attempt may have written part of the binary: every new one
+	// starts from an empty staging file.
+	var actual string
+	err = Retry(ctx, opts.Notify, "download", func() error {
+		if err := tmp.Truncate(0); err != nil {
+			return permanent(fmt.Errorf("update: resetting staging file: %w", err))
+		}
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return permanent(fmt.Errorf("update: resetting staging file: %w", err))
+		}
+		var derr error
+		actual, derr = downloadWithChecksum(ctx, client, tag, asset, tmp)
+		return derr
+	})
 	if err != nil {
 		cleanup()
 		return err
@@ -138,27 +158,40 @@ func SelfReplace(ctx context.Context, execPath, tag string) error {
 // hash do asset desta plataforma. 404 no checksums.txt vira
 // ChecksumsUnavailableError; 404 no .sig vira SignatureUnavailableError —
 // em nenhum dos casos há instalação não verificada.
-func fetchExpectedChecksum(ctx context.Context, client *http.Client, tag, asset string, keys []ed25519.PublicKey) (string, error) {
-	body, status, err := httpGet(ctx, client, releaseAssetURL(tag, "checksums.txt"))
+func fetchExpectedChecksum(ctx context.Context, client *http.Client, tag, asset string, keys []ed25519.PublicKey, notify Notifier) (string, error) {
+	var body, sig []byte
+	err := Retry(ctx, notify, "checksums", func() error {
+		b, status, err := httpGet(ctx, client, releaseAssetURL(tag, "checksums.txt"))
+		switch {
+		case err != nil:
+			return fmt.Errorf("update: fetching checksums.txt: %w", err)
+		case status == http.StatusNotFound:
+			return &ChecksumsUnavailableError{Tag: tag}
+		case status != http.StatusOK:
+			return statusFailure("checksums.txt", status)
+		}
+		body = b
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("update: fetching checksums.txt: %w", err)
-	}
-	if status == http.StatusNotFound {
-		return "", &ChecksumsUnavailableError{Tag: tag}
-	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("update: fetching checksums.txt: status %d", status)
+		return "", err
 	}
 
-	sig, status, err := httpGet(ctx, client, releaseAssetURL(tag, "checksums.txt.sig"))
+	err = Retry(ctx, notify, "signature", func() error {
+		b, status, err := httpGet(ctx, client, releaseAssetURL(tag, "checksums.txt.sig"))
+		switch {
+		case err != nil:
+			return fmt.Errorf("update: fetching checksums.txt.sig: %w", err)
+		case status == http.StatusNotFound:
+			return &SignatureUnavailableError{Tag: tag}
+		case status != http.StatusOK:
+			return statusFailure("checksums.txt.sig", status)
+		}
+		sig = b
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("update: fetching checksums.txt.sig: %w", err)
-	}
-	if status == http.StatusNotFound {
-		return "", &SignatureUnavailableError{Tag: tag}
-	}
-	if status != http.StatusOK {
-		return "", fmt.Errorf("update: fetching checksums.txt.sig: status %d", status)
+		return "", err
 	}
 	if err := verifyReleaseSignature(body, sig, keys); err != nil {
 		return "", &SignatureInvalidError{Tag: tag}
@@ -181,7 +214,7 @@ func downloadWithChecksum(ctx context.Context, client *http.Client, tag, asset s
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("update: downloading %s: status %d", asset, resp.StatusCode)
+		return "", statusFailure(asset, resp.StatusCode)
 	}
 
 	hasher := sha256.New()
@@ -190,7 +223,7 @@ func downloadWithChecksum(ctx context.Context, client *http.Client, tag, asset s
 		return "", fmt.Errorf("update: downloading %s: %w", asset, err)
 	}
 	if n > maxAssetSize {
-		return "", fmt.Errorf("update: asset %s exceeds size limit", asset)
+		return "", permanent(fmt.Errorf("update: asset %s exceeds size limit", asset))
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
