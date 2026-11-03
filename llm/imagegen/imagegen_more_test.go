@@ -139,7 +139,7 @@ func TestFactory_ResponsesSelection(t *testing.T) {
 func TestParseBedrockImages(t *testing.T) {
 	imgs, err := parseBedrockImages([]byte(`{"images":["UE5HREFUQQ=="]}`)) // PNGDATA
 	if err != nil || len(imgs) != 1 || string(imgs[0].Data) != "PNGDATA" {
-		t.Fatalf("nova/titan parse: %v err=%v", imgs, err)
+		t.Fatalf("stability parse: %v err=%v", imgs, err)
 	}
 	if _, err := parseBedrockImages([]byte(`{"error":"content filtered"}`)); err == nil {
 		t.Fatal("expected error when bedrock returns error field")
@@ -178,13 +178,13 @@ func TestKnownModels_NewIDs(t *testing.T) {
 }
 
 func TestBuildBedrockRequest(t *testing.T) {
-	nova := string(buildBedrockRequest("amazon.nova-canvas-v1:0", "a fox", Options{Size: "1024x1024"}))
-	if !strings.Contains(nova, "TEXT_IMAGE") || !strings.Contains(nova, "a fox") {
-		t.Fatalf("nova body wrong: %s", nova)
-	}
-	stab := string(buildBedrockRequest("stability.sd3-5-large-v1:0", "a fox", Options{Size: "1920x1080"}))
-	if strings.Contains(stab, `"mode"`) || !strings.Contains(stab, "16:9") {
+	stab := string(buildBedrockRequest("a fox", Options{Size: "1920x1080"}))
+	if strings.Contains(stab, `"mode"`) || !strings.Contains(stab, "16:9") || !strings.Contains(stab, "a fox") {
 		t.Fatalf("stability body wrong: %s", stab)
+	}
+	// The Amazon TEXT_IMAGE shape left with Nova Canvas and Titan.
+	if strings.Contains(stab, "TEXT_IMAGE") || strings.Contains(stab, "taskType") {
+		t.Fatalf("stability body carries the retired Amazon task: %s", stab)
 	}
 }
 

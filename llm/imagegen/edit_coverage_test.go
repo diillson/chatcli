@@ -86,21 +86,6 @@ func TestBuildBedrockEditRequest(t *testing.T) {
 	if st["strength"].(float64) != 0.5 {
 		t.Errorf("strength = %v, want 0.5", st["strength"])
 	}
-
-	// Amazon Nova / Titan → IMAGE_VARIATION task.
-	body = buildBedrockEditRequest("amazon.nova-canvas-v1:0", "winter", img, EditOptions{})
-	var nv map[string]interface{}
-	_ = json.Unmarshal(body, &nv)
-	if nv["taskType"] != "IMAGE_VARIATION" {
-		t.Errorf("amazon taskType = %v, want IMAGE_VARIATION", nv["taskType"])
-	}
-	params := nv["imageVariationParams"].(map[string]interface{})
-	if params["text"] != "winter" {
-		t.Error("variation text not set")
-	}
-	if imgs := params["images"].([]interface{}); len(imgs) != 1 {
-		t.Error("variation images not set")
-	}
 }
 
 func TestPartContentType(t *testing.T) {

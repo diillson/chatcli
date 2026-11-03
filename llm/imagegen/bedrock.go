@@ -6,9 +6,9 @@
  * Bedrock generates images through its dedicated image models via bedrock-runtime
  * InvokeModel (AWS SigV4), NOT through the OpenAI shape and NOT through the
  * chat/gpt models. Two request families are covered: the current Stability AI
- * models (Stable Image Core/Ultra, SD3.5 Large) use a text-to-image shape, while
- * the legacy Amazon models (Nova Canvas, Titan Image Generator) share the
- * TEXT_IMAGE shape. Both return {"images":["<b64>"]}. Credentials reuse the same
+ * models (Stable Image Core/Ultra, SD3.5 Large) use a text-to-image shape and
+ * return {"images":["<b64>"]}; the Amazon first-party image models (Nova
+ * Canvas, Titan Image Generator) are shut down. Credentials reuse the same
  * chain as the chat provider (llm/bedrock.LoadBedrockRuntime: env / shared
  * profile / IAM role).
  */
@@ -102,7 +102,6 @@ const (
 	bedrockEditNone          = ""
 	bedrockEditSD35          = "sd35"         // mode "image-to-image" + image + strength
 	bedrockEditUltra         = "ultra"        // image + strength, no mode
-	bedrockEditAmazon        = "amazon"       // IMAGE_VARIATION (Nova Canvas / Titan)
 	bedrockEditInpaint       = "inpaint"      // image + prompt + optional mask
 	bedrockEditErase         = "erase"        // image + optional mask
 	bedrockEditRemoveBG      = "remove-bg"    // image
@@ -135,8 +134,6 @@ func bedrockEditFamily(model string) string {
 		return bedrockEditUpscalePrompt
 	case strings.Contains(m, "stability.stable-fast-upscale"):
 		return bedrockEditFastUpscale
-	case strings.Contains(m, "amazon.nova-canvas"), strings.Contains(m, "amazon.titan-image"):
-		return bedrockEditAmazon
 	}
 	return bedrockEditNone
 }
@@ -145,7 +142,7 @@ func bedrockEditFamily(model string) string {
 // Services): it cannot generate from text alone.
 func bedrockEditOnly(model string) bool {
 	switch bedrockEditFamily(model) {
-	case bedrockEditNone, bedrockEditSD35, bedrockEditUltra, bedrockEditAmazon:
+	case bedrockEditNone, bedrockEditSD35, bedrockEditUltra:
 		return false
 	}
 	return true
@@ -163,8 +160,7 @@ func bedrockNeedsPrompt(family string) bool {
 // supportsEdit reports whether the configured model edits images.
 func (b *Bedrock) supportsEdit() bool { return bedrockEditFamily(b.model) != bedrockEditNone }
 
-// Generate invokes the configured Bedrock image model (Stability text-to-image
-// or the legacy Amazon TEXT_IMAGE task, selected per model family).
+// Generate invokes the configured Bedrock image model (Stability text-to-image).
 func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("imagegen: empty prompt")
@@ -172,7 +168,7 @@ func (b *Bedrock) Generate(ctx context.Context, prompt string, opts Options) ([]
 	if bedrockEditOnly(b.model) {
 		return nil, fmt.Errorf("imagegen: bedrock model %s only transforms an input image; use @image edit, or a generation model such as %s", b.model, defaultBedrockImageModel)
 	}
-	return b.invokeModel(ctx, buildBedrockRequest(b.model, prompt, opts))
+	return b.invokeModel(ctx, buildBedrockRequest(prompt, opts))
 }
 
 // Edit transforms an input image, in the request shape of the configured
@@ -233,8 +229,7 @@ func explainBedrockInvokeError(model, region string, err error) error {
 // buildBedrockEditRequest builds the InvokeModel body for the model's edit
 // family. SD3.5 Large: mode "image-to-image" with the base64 image +
 // strength. Stable Image Ultra: image + strength without mode. Image
-// Services: the image plus the fields each one takes. Amazon (Nova Canvas /
-// Titan): IMAGE_VARIATION conditioned on the input image.
+// Services: the image plus the fields each one takes.
 func buildBedrockEditRequest(model, prompt string, img []byte, opts EditOptions) []byte {
 	b64 := base64.StdEncoding.EncodeToString(img)
 	req := map[string]interface{}{"image": b64, "output_format": "png"}
@@ -275,72 +270,28 @@ func buildBedrockEditRequest(model, prompt string, img []byte, opts EditOptions)
 		}
 	case bedrockEditRemoveBG, bedrockEditFastUpscale:
 		// image only
-	default:
-		return buildBedrockVariationRequest(prompt, b64, opts)
 	}
 	body, _ := json.Marshal(req)
 	return body
 }
 
-// buildBedrockVariationRequest is the Amazon IMAGE_VARIATION body.
-func buildBedrockVariationRequest(prompt, b64 string, opts EditOptions) []byte {
-	// Amazon Nova Canvas / Titan IMAGE_VARIATION. similarityStrength (0.2–1.0):
-	// higher keeps the result closer to the source; 0.7 preserves composition
-	// while letting the prompt steer the change.
-	sim := opts.Strength
-	if sim < 0.2 || sim > 1.0 {
-		sim = 0.7
-	}
+// buildBedrockRequest builds the Stability text-to-image InvokeModel body: the
+// prompt and an aspect ratio. Every Stability model returns one image per
+// call, so opts.N does not apply.
+func buildBedrockRequest(prompt string, opts Options) []byte {
 	w, h := parseSize(opts.Size)
+	// No "mode": text-to-image is every Stability model's default, and only
+	// SD3.5 Large documents the field.
 	body, _ := json.Marshal(map[string]interface{}{
-		"taskType": "IMAGE_VARIATION",
-		"imageVariationParams": map[string]interface{}{
-			"text":               prompt,
-			"images":             []string{b64},
-			"similarityStrength": sim,
-		},
-		"imageGenerationConfig": map[string]interface{}{
-			"numberOfImages": 1,
-			"width":          w,
-			"height":         h,
-		},
-	})
-	return body
-}
-
-// buildBedrockRequest builds the InvokeModel body per model family. Nova Canvas
-// and Titan share the TEXT_IMAGE shape; Stability models use a text-to-image
-// shape with an aspect ratio. The {"images":["<b64>"]} response is shared.
-func buildBedrockRequest(model, prompt string, opts Options) []byte {
-	w, h := parseSize(opts.Size)
-	n := opts.N
-	if n <= 0 {
-		n = 1
-	}
-	if strings.HasPrefix(strings.ToLower(model), "stability.") {
-		// No "mode": text-to-image is every Stability model's default, and
-		// only SD3.5 Large documents the field.
-		body, _ := json.Marshal(map[string]interface{}{
-			"prompt":        prompt,
-			"aspect_ratio":  aspectRatio(w, h),
-			"output_format": "png",
-		})
-		return body
-	}
-	body, _ := json.Marshal(map[string]interface{}{
-		"taskType":          "TEXT_IMAGE",
-		"textToImageParams": map[string]interface{}{"text": prompt},
-		"imageGenerationConfig": map[string]interface{}{
-			"numberOfImages": n,
-			"width":          w,
-			"height":         h,
-		},
+		"prompt":        prompt,
+		"aspect_ratio":  aspectRatio(w, h),
+		"output_format": "png",
 	})
 	return body
 }
 
 // parseBedrockImages decodes the {"images":["<b64>"]} response shared by the
-// Stability text-to-image models and the legacy Amazon Nova Canvas / Titan ones.
+// Stability text-to-image models.
 func parseBedrockImages(raw []byte) ([]Image, error) {
 	var out struct {
 		Images []string `json:"images"`

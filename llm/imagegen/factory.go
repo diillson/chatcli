@@ -73,6 +73,11 @@ func NewFromEnvContext(ctx context.Context, logger *zap.Logger) Provider {
 	}
 	url := strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL"))
 	model := strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_MODEL"))
+	// A model past its shutdown date never reaches a backend: the provider
+	// would only answer with an opaque error.
+	if p := retiredOrNil(model); p != nil {
+		return p
+	}
 
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_PROVIDER"))) {
 	case "sdwebui", "automatic1111", "sd":
@@ -234,6 +239,9 @@ func pinnedEditProvider() string {
 // CHATCLI_IMAGE_EDIT_PROVIDER pin. An empty model takes each backend's own
 // default; a backend whose credential is missing yields Null (not an editor).
 func buildEditProvider(ctx context.Context, name, model string, logger *zap.Logger) Provider {
+	if p := retiredOrNil(model); p != nil {
+		return p
+	}
 	switch name {
 	case "sdwebui", "automatic1111", "sd":
 		return sdOrNull(strings.TrimSpace(os.Getenv("CHATCLI_IMAGE_URL")), logger)
@@ -265,7 +273,7 @@ func buildEditProvider(ctx context.Context, name, model string, logger *zap.Logg
 	return nil
 }
 
-// bedrockOrNull builds the AWS Bedrock image backend (Nova Canvas / Titan),
+// bedrockOrNull builds the AWS Bedrock image backend (Stability AI models),
 // loading credentials from the standard AWS chain.
 func bedrockOrNull(ctx context.Context, model string, logger *zap.Logger) Provider {
 	p, err := NewBedrock(ctx, bedrockImageRegion(), bedrockImageProfile(), model, logger)
