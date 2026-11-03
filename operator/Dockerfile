@@ -37,7 +37,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 # needs git to clone and sync application repositories, and the ssh client
 # for repositories with authType ssh.
 # Pinned to exact patch version; Dependabot keeps this updated.
-FROM alpine:3.24.2 AS runtime
+FROM alpine:3.24.3 AS runtime
 RUN apk update && apk upgrade --no-cache && \
     apk add --no-cache \
         "libcrypto3>=3.5.8-r0" \

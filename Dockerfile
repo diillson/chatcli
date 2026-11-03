@@ -27,8 +27,11 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -o chatcli .
 
 # --- Runtime stage ---
-# Distroless static image: zero OS packages, zero CVEs, nonroot by default.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Distroless static image: no shell or package manager, nonroot by default;
+# it only carries ca-certificates, tzdata and base-files. Debian 13 (trixie):
+# the debian12 variant is LTS-only upstream and stopped picking up the
+# ca-certificates/tzdata DLAs, so it is no longer rebuilt clean.
+FROM gcr.io/distroless/static-debian13:nonroot
 
 COPY --from=builder /app/chatcli /usr/local/bin/chatcli
 
