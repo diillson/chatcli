@@ -287,20 +287,6 @@ func requireGit(t *testing.T) {
 	}
 }
 
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	full := append([]string{
-		"-C", dir,
-		"-c", "user.name=test",
-		"-c", "user.email=test@example.com",
-		"-c", "protocol.file.allow=always",
-	}, args...)
-	cmd := exec.Command("git", full...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
-
 func testSignature() *object.Signature {
 	return &object.Signature{Name: "test", Email: "test@example.com", When: time.Now()}
 }
