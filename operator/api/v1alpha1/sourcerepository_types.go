@@ -42,7 +42,9 @@ type SourceRepositorySpec struct {
 	// SecretRef references a Secret containing auth credentials.
 	// For token: key "token". For basic: keys "username" and "password". For ssh: key "ssh-key",
 	// plus "known_hosts" (the git server's host keys, e.g. from ssh-keyscan).
-	// Credentials are handed to git per command and never written to the clone's .git/config.
+	// An optional "ca.crt" key holds PEM certificates of a private CA that signed the git
+	// server's HTTPS certificate; it is read for every authType, including none.
+	// Credentials stay in memory for the sync and are never written to the clone's .git/config.
 	// +optional
 	SecretRef string `json:"secretRef,omitempty"`
 

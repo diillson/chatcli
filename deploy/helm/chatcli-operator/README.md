@@ -358,7 +358,7 @@ The default pod and container security contexts satisfy the `restricted` Pod Sec
 | `extraEnv` | Extra environment variables for the operator container | `[]` |
 | `extraVolumes` | Extra pod volumes (e.g. the Secrets behind `security.apiTLS.*` / `security.grpcTLS.*`) | `[]` |
 | `extraVolumeMounts` | Extra volume mounts for the operator container | `[]` |
-| `tmpVolume.sizeLimit` | Size limit of the writable `/tmp` emptyDir (the root filesystem is read-only); SourceRepository clones and per-sync git credential files live there | `1Gi` |
+| `tmpVolume.sizeLimit` | Size limit of the writable `/tmp` emptyDir (the root filesystem is read-only); SourceRepository clones and their `known_hosts` files live there | `1Gi` |
 
 **Example: REST API over TLS and an operator-wide CA**
 
@@ -673,7 +673,7 @@ spec:
     namespace: production
 ```
 
-Credentials come from the Secret named by `secretRef` in the same namespace: `token` (authType `token`), `username` and `password` (authType `basic`), or `ssh-key` plus `known_hosts` (authType `ssh`). They are handed to git for each command and never written to the clone's `.git/config`; clones made by earlier versions, which kept the token in the origin URL, are cleaned on their next sync. An ssh repository checks the server's host key against `known_hosts`; without that key the sync fails unless `spec.sshHostKeyPolicy: acceptNew` trusts the first key the host presents (and rejects a different one afterwards):
+Credentials come from the Secret named by `secretRef` in the same namespace: `token` (authType `token`), `username` and `password` (authType `basic`), or `ssh-key` plus `known_hosts` (authType `ssh`). They stay in memory for the sync and are never written to the clone's `.git/config`; clones made by earlier versions, which kept the token in the origin URL, are cleaned on their next sync. An optional `ca.crt` key holds the PEM chain of a private CA that signed the git server's HTTPS certificate, with any `authType`. Clones run in-process (go-git): the image carries no git or ssh binaries. An ssh repository checks the server's host key against `known_hosts`; without that key the sync fails unless `spec.sshHostKeyPolicy: acceptNew` trusts the first key the host presents (and rejects a different one afterwards):
 
 ```bash
 ssh-keyscan github.com > known_hosts

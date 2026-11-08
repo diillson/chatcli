@@ -3,16 +3,21 @@ package controllers
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -26,7 +31,11 @@ import (
 const (
 	sourceRepoBaseDir     = "/tmp/chatcli-repos"
 	maxRecentCommits      = 20
+	maxFilesPerCommit     = 20
 	maxSourceContextChars = 5000
+	// gitCloneDepth bounds the history a clone and its fetches carry:
+	// enough for the recent-commit window, not the whole repository.
+	gitCloneDepth = 50
 )
 
 // SourceRepositoryReconciler reconciles SourceRepository objects.
@@ -49,7 +58,7 @@ func (r *SourceRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	var repo platformv1alpha1.SourceRepository
 	if err := r.Get(ctx, req.NamespacedName, &repo); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// Clean up local clone if the CR was deleted
 			localPath := filepath.Join(r.baseDir(), req.Namespace, req.Name)
 			if rmErr := os.RemoveAll(localPath); rmErr != nil {
@@ -127,13 +136,14 @@ func (r *SourceRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 }
 
 // gitBranchPattern allows the conservative charset git branch names use in
-// practice; crucially it rejects a leading "-", which git would otherwise
-// parse as an option (e.g. --upload-pack=cmd runs an arbitrary binary).
+// practice, and rejects a leading "-" and anything a ref name cannot hold.
 var gitBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
-// validateGitInputs guards the git invocations against argument injection.
-// SourceRepository objects are namespace-scoped and may be authored by
-// tenants, so the URL and branch are treated as untrusted input.
+// validateGitInputs is the policy on what a SourceRepository may point at:
+// a remote over HTTPS or SSH, on a plainly named branch. SourceRepository
+// objects are namespace-scoped and may be authored by tenants, so the URL
+// and branch are treated as untrusted input; local paths, file:// and
+// git's ext:: helper are refused.
 func validateGitInputs(repoURL, branch string) error {
 	if strings.HasPrefix(repoURL, "-") || strings.Contains(repoURL, "ext::") {
 		return fmt.Errorf("unsupported repository URL %q", repoURL)
@@ -147,51 +157,109 @@ func validateGitInputs(repoURL, branch string) error {
 	return nil
 }
 
-// cloneRepo performs a shallow clone of the repository. The origin URL is
-// the plain spec URL: credentials come from auth, per command.
+// trackedBranch is the branch a SourceRepository follows.
+func trackedBranch(repo *platformv1alpha1.SourceRepository) string {
+	if repo.Spec.Branch == "" {
+		return "main"
+	}
+	return repo.Spec.Branch
+}
+
+// cloneRepo performs a shallow, single-branch clone of the repository.
+// The origin URL is the plain spec URL: credentials come from auth, per
+// connection, and are never written to the clone.
 func (r *SourceRepositoryReconciler) cloneRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, auth *gitAuth) error {
 	if err := os.MkdirAll(filepath.Dir(localPath), 0750); err != nil {
 		return fmt.Errorf("creating clone parent dir: %w", err)
 	}
 
-	branch := repo.Spec.Branch
-	if branch == "" {
-		branch = "main"
-	}
+	branch := trackedBranch(repo)
 	if err := validateGitInputs(repo.Spec.URL, branch); err != nil {
 		return err
 	}
 
-	output, err := gitCommand(ctx, auth, "clone", "--depth", "50", "--single-branch", "--branch", branch, "--", repo.Spec.URL, localPath).CombinedOutput()
+	_, err := git.PlainCloneContext(ctx, localPath, false, &git.CloneOptions{
+		URL:           repo.Spec.URL,
+		Auth:          auth.authMethod(),
+		CABundle:      auth.ca(),
+		ReferenceName: plumbing.NewBranchReferenceName(branch),
+		SingleBranch:  true,
+		Depth:         gitCloneDepth,
+		Tags:          git.NoTags,
+	})
 	if err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", redactURLCredentials(string(output)), err)
+		// A failed clone leaves no half-initialized .git behind, so the
+		// next sync clones again instead of fetching into it.
+		_ = os.RemoveAll(localPath)
+		return fmt.Errorf("git clone failed: %s", redactURLCredentials(err.Error()))
 	}
 	return nil
 }
 
-// pullRepo fetches latest changes.
+// pullRepo fetches the tracked branch and resets the work tree to it, the
+// equivalent of fetch --depth followed by reset --hard origin/<branch>.
 func (r *SourceRepositoryReconciler) pullRepo(ctx context.Context, repo *platformv1alpha1.SourceRepository, localPath string, auth *gitAuth) error {
-	branch := repo.Spec.Branch
-	if branch == "" {
-		branch = "main"
-	}
+	branch := trackedBranch(repo)
 	if err := validateGitInputs(repo.Spec.URL, branch); err != nil {
 		return err
 	}
 
-	if err := scrubOriginURL(ctx, localPath); err != nil {
+	clone, err := git.PlainOpen(localPath)
+	if err != nil {
+		return fmt.Errorf("git fetch: opening clone: %w", err)
+	}
+	if err := scrubOriginURL(clone, localPath); err != nil {
 		return fmt.Errorf("git fetch: %w", err)
 	}
 
-	if output, err := gitCommand(ctx, auth, "-C", localPath, "fetch", "--depth", "50", "origin").CombinedOutput(); err != nil {
-		return fmt.Errorf("git fetch: %s: %w", redactURLCredentials(string(output)), err)
+	remoteRef := plumbing.NewRemoteReferenceName(git.DefaultRemoteName, branch)
+	err = clone.FetchContext(ctx, &git.FetchOptions{
+		RemoteName: git.DefaultRemoteName,
+		Auth:       auth.authMethod(),
+		CABundle:   auth.ca(),
+		RefSpecs: []config.RefSpec{
+			config.RefSpec("+" + plumbing.NewBranchReferenceName(branch).String() + ":" + remoteRef.String()),
+		},
+		Depth: gitCloneDepth,
+		Tags:  git.NoTags,
+		Force: true,
+	})
+	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return fmt.Errorf("git fetch: %s", redactURLCredentials(err.Error()))
 	}
 
-	if output, err := gitCommand(ctx, nil, "-C", localPath, "reset", "--hard", fmt.Sprintf("origin/%s", branch)).CombinedOutput(); err != nil {
-		return fmt.Errorf("git reset: %s: %w", string(output), err)
+	ref, err := clone.Reference(remoteRef, true)
+	if err != nil {
+		return fmt.Errorf("git reset: resolving %s: %w", remoteRef.Short(), err)
 	}
-
+	if err := bringHEADToLife(clone, ref.Hash()); err != nil {
+		return fmt.Errorf("git reset: %w", err)
+	}
+	worktree, err := clone.Worktree()
+	if err != nil {
+		return fmt.Errorf("git reset: %w", err)
+	}
+	if err := worktree.Reset(&git.ResetOptions{Commit: ref.Hash(), Mode: git.HardReset}); err != nil {
+		return fmt.Errorf("git reset: %w", err)
+	}
 	return nil
+}
+
+// bringHEADToLife points an unborn branch (HEAD of a repository that was
+// initialized but never committed to) at commit, which is what git reset
+// --hard does there; go-git's Reset needs the branch to exist first.
+func bringHEADToLife(clone *git.Repository, commit plumbing.Hash) error {
+	head, err := clone.Reference(plumbing.HEAD, false)
+	if err != nil {
+		return err
+	}
+	if head.Type() != plumbing.SymbolicReference {
+		return nil
+	}
+	if _, err := clone.Reference(head.Target(), false); !errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return err
+	}
+	return clone.Storer.SetReference(plumbing.NewHashReference(head.Target(), commit))
 }
 
 // indexRepo indexes the repository contents and populates status fields.
@@ -218,57 +286,83 @@ func (r *SourceRepositoryReconciler) indexRepo(ctx context.Context, repo *platfo
 	return nil
 }
 
-// getRecentCommits retrieves the last N commits with file change info.
+// getRecentCommits retrieves the last N commits with file change info,
+// newest first, the way git log --name-only reports them.
 func (r *SourceRepositoryReconciler) getRecentCommits(ctx context.Context, localPath string) ([]platformv1alpha1.GitCommitInfo, error) {
-	// git log with format: SHA|author|timestamp|message
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "log", // #nosec G204 -- fixed git binary and flags; localPath derived from k8s object names
-		fmt.Sprintf("-%d", maxRecentCommits),
-		"--format=%H|%an|%aI|%s",
-		"--name-only")
-
-	output, err := cmd.Output()
+	clone, err := git.PlainOpen(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("git log: opening clone: %w", err)
+	}
+	head, err := clone.Head()
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}
+	iter, err := clone.Log(&git.LogOptions{From: head.Hash(), Order: git.LogOrderCommitterTime})
+	if err != nil {
+		return nil, fmt.Errorf("git log: %w", err)
+	}
+	defer iter.Close()
 
 	var commits []platformv1alpha1.GitCommitInfo
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-
-	var current *platformv1alpha1.GitCommitInfo
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if current != nil {
-				commits = append(commits, *current)
-				current = nil
-			}
-			continue
+	for len(commits) < maxRecentCommits {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("git log: %w", err)
 		}
-
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) == 4 && len(parts[0]) == 40 { // SHA is 40 chars
-			if current != nil {
-				commits = append(commits, *current)
-			}
-			ts, _ := time.Parse(time.RFC3339, parts[2])
-			current = &platformv1alpha1.GitCommitInfo{
-				SHA:       parts[0],
-				Author:    parts[1],
-				Timestamp: metav1.Time{Time: ts},
-				Message:   parts[3],
-			}
-		} else if current != nil && line != "" {
-			// This is a changed file name
-			if len(current.FilesChanged) < 20 { // limit files per commit
-				current.FilesChanged = append(current.FilesChanged, line)
-			}
+		commit, err := iter.Next()
+		if errors.Is(err, io.EOF) {
+			break
 		}
+		if err != nil {
+			return nil, fmt.Errorf("git log: %w", err)
+		}
+		commits = append(commits, platformv1alpha1.GitCommitInfo{
+			SHA:          commit.Hash.String(),
+			Author:       commit.Author.Name,
+			Timestamp:    metav1.NewTime(commit.Author.When),
+			Message:      commitSubject(commit.Message),
+			FilesChanged: changedFiles(ctx, commit),
+		})
 	}
-	if current != nil {
-		commits = append(commits, *current)
-	}
-
 	return commits, nil
+}
+
+// commitSubject is git's %s: the first line of the message.
+func commitSubject(message string) string {
+	subject, _, _ := strings.Cut(message, "\n")
+	return strings.TrimSpace(subject)
+}
+
+// changedFiles lists the paths a commit touched against its first parent,
+// capped at maxFilesPerCommit. A root commit, or the boundary commit of a
+// shallow clone whose parent was not fetched, is compared with the empty
+// tree, which is what git log shows for it.
+func changedFiles(ctx context.Context, commit *object.Commit) []string {
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil
+	}
+	var parentTree *object.Tree
+	if commit.NumParents() > 0 {
+		if parent, err := commit.Parent(0); err == nil {
+			parentTree, _ = parent.Tree()
+		}
+	}
+	changes, err := object.DiffTreeWithOptions(ctx, parentTree, tree, object.DefaultDiffTreeOptions)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, change := range changes {
+		if len(files) == maxFilesPerCommit {
+			break
+		}
+		name := change.To.Name
+		if name == "" {
+			name = change.From.Name
+		}
+		files = append(files, name)
+	}
+	return files
 }
 
 // detectLanguages identifies programming languages used in the repository.
