@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.228.1](https://github.com/diillson/chatcli/compare/v1.228.0...v1.228.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **operator:** clone repositories with go-git on a distroless image ([#1935](https://github.com/diillson/chatcli/issues/1935)) ([3a38d57](https://github.com/diillson/chatcli/commit/3a38d57b4c630f9b8ee55498881c90310690ddcf))
+
 ## [1.228.0](https://github.com/diillson/chatcli/compare/v1.227.0...v1.228.0) (2026-11-03)
 
 
