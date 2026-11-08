@@ -272,8 +272,8 @@ extraVolumeMounts: []
 #          security.apiTLS.keyFile:  /etc/chatcli-operator/api-tls/tls.key
 
 # Writable /tmp for the operator pod (emptyDir; the root filesystem is
-# read-only). SourceRepository clones (shallow, depth 50) and the per-sync
-# git credential files live there; raise the limit for large repositories.
+# read-only). SourceRepository clones (shallow, depth 50) and their
+# known_hosts files live there; raise the limit for large repositories.
 tmpVolume:
   sizeLimit: 1Gi
 

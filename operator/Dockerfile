@@ -33,23 +33,14 @@ WORKDIR /workspace/operator
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -o manager main.go
 
-# Runtime — Alpine is required because the SourceRepository controller
-# needs git to clone and sync application repositories, and the ssh client
-# for repositories with authType ssh.
-# Pinned to exact patch version; Dependabot keeps this updated.
-FROM alpine:3.24.3 AS runtime
-RUN apk update && apk upgrade --no-cache && \
-    apk add --no-cache \
-        "libcrypto3>=3.5.8-r0" \
-        "libssl3>=3.5.8-r0" \
-        "libexpat>=2.8.4-r0" \
-        "openssh-client-default>=10.3_p1-r1" \
-        "pcre2>=10.49-r0" \
-        "nghttp2-libs>=1.70.0-r0" \
-        git ca-certificates tzdata && \
-    adduser -D -u 65532 -g 65532 nonroot
-WORKDIR /
-COPY --from=builder /workspace/operator/manager .
-USER 65532:65532
+# --- Runtime stage ---
+# The same distroless static image as the server: no shell, no package
+# manager, nonroot by default; it only carries ca-certificates, tzdata and
+# base-files. The SourceRepository controller clones over HTTPS and SSH
+# in-process (go-git), so the image needs no git or ssh binaries and the
+# only thing in it to patch is the manager.
+FROM gcr.io/distroless/static-debian13:nonroot
+
+COPY --from=builder /workspace/operator/manager /manager
 
 ENTRYPOINT ["/manager"]
