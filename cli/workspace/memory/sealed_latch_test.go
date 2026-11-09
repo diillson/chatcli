@@ -166,11 +166,20 @@ func TestMultiProcessMerge_WorksOnSealedStores(t *testing.T) {
 // never rebuilt.
 func TestRollup_DeferredWhileASourceNoteIsSealed(t *testing.T) {
 	dir := t.TempDir()
+	// Pick a closed week whose Monday and Tuesday share a month, so the
+	// monthly assertion below has exactly one month in play whatever today
+	// is (a Monday on the 31st would put the sealed Tuesday in the next month).
 	monday := startOfISOWeek(time.Now().AddDate(0, 0, -70))
+	if monday.Month() != monday.AddDate(0, 0, 1).Month() {
+		monday = monday.AddDate(0, 0, -7)
+	}
 	writeDailyNoteAt(t, dir, monday, "plain day")
 	t.Setenv(atrest.EnvKey, "rollup-key-rollup-key-rollup-key-00")
 	sealedDay := monday.AddDate(0, 0, 1)
 	path := filepath.Join(dir, sealedDay.Format("200601"), sealedDay.Format("20060102")+".md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	if err := atomicWriteFile(path, []byte("## 10:00\n\n- sealed day\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
