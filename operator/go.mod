@@ -9,7 +9,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.25.0
-	github.com/skeema/knownhosts v1.3.1
+	github.com/skeema/knownhosts v1.3.3
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/net v0.62.0
