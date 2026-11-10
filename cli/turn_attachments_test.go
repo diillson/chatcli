@@ -183,8 +183,8 @@ func TestRunChatTurnRPC_VisionGateJudgesTheRoutedModel(t *testing.T) {
 		t.Fatal("the turn never reached the model")
 		return 0
 	}
-	assert.Equal(t, 1, sentImages("o3-mini", "gpt-4o"), "routed to a vision model: the image goes native")
-	assert.Equal(t, 0, sentImages("gpt-4o", "o3-mini"), "routed to a text model: no raw image")
+	assert.Equal(t, 1, sentImages("gpt-5.3-codex", "gpt-4o"), "routed to a vision model: the image goes native")
+	assert.Equal(t, 0, sentImages("gpt-4o", "gpt-5.3-codex"), "routed to a text model: no raw image")
 }
 
 // The attachments store follows the session TTL, on demand and at boot.

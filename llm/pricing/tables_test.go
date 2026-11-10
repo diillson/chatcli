@@ -251,10 +251,11 @@ func TestListPrice_DevinPrecedence(t *testing.T) {
 
 	// Static table when the account listing never ran.
 	assertPrices(t, []priceCase{
-		{"DEVIN", "gpt-5.6-sol", 1.2, 6, true},
+		{"DEVIN", "gpt-5.6-sol", 4, 20, true},
 		{"DEVIN", "claude-opus-5-5-medium-fast", 8, 40, true},
+		{"DEVIN", "claude-fable-5-2-high", 8, 40, true},
 		// An unlisted family is known-zero, never guessed from vendor tables.
-		{"DEVIN", "claude-fable-5-1", 0, 0, true},
+		{"DEVIN", "swe-2-flash-high", 0, 0, true},
 	})
 
 	// The account's own listing outranks the static table.

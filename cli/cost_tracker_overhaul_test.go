@@ -24,8 +24,9 @@ func TestLookupModelPricingKnownFlag(t *testing.T) {
 		{"DEEPSEEK", "deepseek-reasoner", true, 0.55}, // API alias of R1 — not the $0.27 generic tier
 		{"OLLAMA", "llama3.3", true, 0},               // unmetered by design
 		{"STACKSPOT", "stackspot-ai", true, 0},
-		{"DEVIN", "gpt-5.6-sol", true, 1.2},    // Devin short-circuit beats model heuristics: Cognition's rate, not OpenAI's $4
-		{"DEVIN", "claude-fable-5.1", true, 0}, // never listed with a price: known-zero, surfaced by /cost
+		{"DEVIN", "gpt-5.4", true, 2.5},        // Devin short-circuit: Cognition's table answers, not the vendor heuristics
+		{"DEVIN", "claude-fable-5.2", true, 8}, // priced in Cognition's Nov 2026 table
+		{"DEVIN", "swe-2-flash", true, 0},      // never listed with a stable price: known-zero, surfaced by /cost
 		{"UNKNOWN", "no-such-model", false, 0},
 		{"OPENROUTER", "some/very-obscure-model", false, 0},
 	}

@@ -213,12 +213,12 @@ func TestMoonshotCatalogEntries(t *testing.T) {
 		assert.False(t, ok, "%s was retired by Moonshot and must not resolve", id)
 		assert.Equal(t, 262144, GetContextWindow(ProviderMoonshot, id), "%s fallback window", id)
 	}
-	// The registry must hold exactly the four ids Moonshot still serves.
+	// The registry must hold exactly the ids Moonshot still serves.
 	var ids []string
 	for _, m := range ListByProvider(ProviderMoonshot) {
 		ids = append(ids, m.ID)
 	}
-	assert.ElementsMatch(t, []string{"kimi-k3", "kimi-k2.7-code-highspeed", "kimi-k2.7-code", "kimi-k2.6"}, ids)
+	assert.ElementsMatch(t, []string{"kimi-k3.1-pro-highspeed", "kimi-k3.1-pro", "kimi-k3", "kimi-k2.7-code-highspeed", "kimi-k2.7-code", "kimi-k2.6"}, ids)
 }
 
 func TestGetPreferredAPI(t *testing.T) {
@@ -247,10 +247,10 @@ func TestGetPreferredAPI(t *testing.T) {
 // TestClaudeFable51Specs pins Fable 5.1 (Sep 1 2026): same 1M / 128K
 // profile and capability flags as Fable 5, listed AHEAD of it because
 // "fable-5" is a prefix of "fable-5-1" in Resolve's alias pass. The bare
-// "fable" shortcut now tracks 5.1 (the newest Fable), while "fable-5"
-// stays pinned on the legacy entry.
+// "fable" shortcut moved on to Fable 5.2 (TestNov2026_Fable52), while
+// "fable-5" stays pinned on the legacy entry.
 func TestClaudeFable51Specs(t *testing.T) {
-	for _, id := range []string{"claude-fable-5-1", "fable-5-1", "claude-fable-5.1", "fable-5.1", "fable"} {
+	for _, id := range []string{"claude-fable-5-1", "fable-5-1", "claude-fable-5.1", "fable-5.1"} {
 		meta, ok := Resolve(ProviderClaudeAI, id)
 		if !assert.True(t, ok, "expected %s to resolve on ProviderClaudeAI", id) {
 			continue

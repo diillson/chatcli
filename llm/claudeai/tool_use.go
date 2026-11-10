@@ -39,6 +39,24 @@ func (c *ClaudeClient) SupportsNativeTools() bool {
 
 // SendPromptWithTools sends a prompt with tool definitions via Anthropic's native tool use API.
 func (c *ClaudeClient) SendPromptWithTools(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
+	// Reasoning blocks are replayed on this path, and from Fable 5.2 on the
+	// API refuses one whose preceding conversation changed. The refused
+	// blocks are dropped and the request is sent once more.
+	var resp *models.LLMResponse
+	dropped, err := c.staleThinking.Heal(history, func(h []models.Message) (sendErr error) {
+		resp, sendErr = c.sendToolRequest(ctx, prompt, h, tools, maxTokens)
+		return sendErr
+	})
+	if dropped {
+		c.logger.Warn("claudeai: the API refused reasoning blocks bound to an earlier version of the conversation; dropped them and resent",
+			zap.String("model", c.model), zap.Bool("recovered", err == nil))
+	}
+	return resp, err
+}
+
+// sendToolRequest is one SendPromptWithTools request over the history
+// it is given.
+func (c *ClaudeClient) sendToolRequest(ctx context.Context, prompt string, history []models.Message, tools []models.ToolDefinition, maxTokens int) (*models.LLMResponse, error) {
 	// Clear per-instance usage so a call that reports none falls back to
 	// estimation instead of re-counting the previous call's tokens.
 	c.resetUsage()

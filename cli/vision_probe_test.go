@@ -214,9 +214,13 @@ func invokableVisionListing(t *testing.T) []client.ModelInfo {
 		if !metaHasVision(meta) {
 			continue
 		}
-		id := "us." + meta.ID
-		if r, ok := catalog.Resolve("BEDROCK", id); !ok || !metaHasVision(r) {
-			id = meta.ID
+		// An entry whose canonical id already is a profile ("global.…")
+		// is listed as it stands; a bare id is listed under its us. profile.
+		id := meta.ID
+		if !strings.HasPrefix(id, "global.") {
+			if r, ok := catalog.Resolve("BEDROCK", "us."+id); ok && metaHasVision(r) {
+				id = "us." + id
+			}
 		}
 		return []client.ModelInfo{{ID: id, Source: client.ModelSourceAPI}}
 	}

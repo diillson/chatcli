@@ -205,7 +205,8 @@ func TestGetModelPricing(t *testing.T) {
 		// espelhada da listagem), nunca a da API direta do vendor.
 		{"devin static claude", "DEVIN", "claude-sonnet-4.6", 3.0, 15.0},
 		{"devin static swe", "DEVIN", "swe-1.7-lightning", 2.5, 12.5},
-		{"devin never listed stays zero", "DEVIN", "claude-fable-5.1", 0.0, 0.0},
+		{"devin static fable 5.2", "DEVIN", "claude-fable-5.2", 8.0, 40.0},
+		{"devin never listed stays zero", "DEVIN", "swe-2-flash", 0.0, 0.0},
 		{"stackspot zero", "STACKSPOT", "stackspotai", 0.0, 0.0},
 
 		// Unknown provider+model defaults to zero.
@@ -284,12 +285,12 @@ func TestLookupModelPricing_DevinListedRates(t *testing.T) {
 	in, _, _ = lookupModelPricing("DEVIN", "claude-opus-5-xhigh")
 	assert.Equal(t, 6.0, in)
 
-	// A routed claude-* id never falls through to the direct-API table:
-	// Cognition's rate for sonnet 4.6 happens to match Anthropic's, so
-	// prove it on sol, where they differ ($1.2 here, $4 direct).
-	in, _, known = lookupModelPricing("DEVIN", "gpt-5.6-sol")
+	// A routed id never falls through to the direct-API table: Cognition's
+	// rate for sonnet 4.6 happens to match Anthropic's, so prove it on
+	// Kimi K2.6, where they differ ($0.80 here, $0.95 direct).
+	in, _, known = lookupModelPricing("DEVIN", "kimi-k2.6")
 	assert.True(t, known)
-	assert.Equal(t, 1.2, in)
+	assert.Equal(t, 0.8, in)
 
 	// The routing tier follows the listed rate instead of "unmetered".
 	tier, _, _ := modelRoutingTier("DEVIN", "claude-opus-5")

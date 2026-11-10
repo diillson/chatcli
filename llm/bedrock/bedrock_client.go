@@ -248,6 +248,10 @@ type BedrockClient struct {
 	// so embedding it by value would make BedrockClient incomparable and
 	// break the contract documented above.
 	thinking *client.ThinkingState
+	// staleThinking remembers the reasoning blocks the model refused to
+	// take back because the conversation before them changed (see
+	// client.StaleThinking). Behind a pointer for the same reason.
+	staleThinking *client.StaleThinking
 }
 
 // LastThinking implements client.ThinkingAwareClient.
@@ -276,13 +280,14 @@ func NewBedrockClient(model, region, profile string, logger *zap.Logger, maxAtte
 		model = normalized
 	}
 	return &BedrockClient{
-		model:       model,
-		region:      region,
-		profile:     profile,
-		logger:      logger,
-		maxAttempts: maxAttempts,
-		backoff:     backoff,
-		thinking:    &client.ThinkingState{},
+		model:         model,
+		region:        region,
+		profile:       profile,
+		logger:        logger,
+		maxAttempts:   maxAttempts,
+		backoff:       backoff,
+		thinking:      &client.ThinkingState{},
+		staleThinking: &client.StaleThinking{},
 	}
 }
 
@@ -462,34 +467,54 @@ func (c *BedrockClient) sendPromptDispatch(ctx context.Context, prompt string, h
 	case familyConverse:
 		return c.sendPromptConverse(ctx, prompt, history, maxTokens)
 	default:
-		if usesMantleEndpoint(c.model) {
-			resp, err := c.sendPromptAnthropicMantle(ctx, prompt, history, maxTokens)
-			if err == nil || resolveAnthropicEndpointMode() != endpointModeAuto || ctx.Err() != nil {
-				// Success, operator-pinned "mantle", or the caller is gone:
-				// nothing to fall back to.
-				return resp, err
-			}
-			// Auto mode: the Mantle surface failed after its own retries —
-			// re-route the same request through the legacy InvokeModel
-			// runtime under an inference-profile id. Same Messages payload,
-			// different endpoint; regional outages, VPC gaps and account-
-			// level Mantle restrictions recover here. Genuinely invalid
-			// requests fail again on the runtime side and surface that
-			// error (annotated with the original Mantle failure).
-			fallbackModel := invokeFallbackModelID(c.model)
-			c.logger.Warn(i18n.T("llm.bedrock.mantle_fallback_invoke", c.model, fallbackModel), zap.Error(err))
-			resp, invokeErr := c.sendPromptAnthropicModel(ctx, fallbackModel, prompt, history, maxTokens)
-			if invokeErr != nil {
-				// Both chains stay inspectable (%w twice): errors.As walks
-				// invokeErr first, so payload-recovery reads the InvokeModel
-				// request size, while the Mantle failure stays visible for
-				// WAF/proxy classification.
-				return "", fmt.Errorf("%w (bedrock-mantle previously failed: %w)", invokeErr, err)
-			}
-			return resp, nil
+		// Reasoning blocks are replayed on the Anthropic paths, and from
+		// Fable 5.2 on the model refuses one whose preceding conversation
+		// changed. The refused blocks are dropped and the request is sent
+		// once more.
+		var resp string
+		dropped, err := c.staleThinking.Heal(history, func(h []models.Message) (sendErr error) {
+			resp, sendErr = c.sendPromptAnthropicRouted(ctx, prompt, h, maxTokens)
+			return sendErr
+		})
+		if dropped {
+			c.logger.Warn("bedrock: the model refused reasoning blocks bound to an earlier version of the conversation; dropped them and resent",
+				zap.String("model", c.model), zap.Bool("recovered", err == nil))
 		}
-		return c.sendPromptAnthropic(ctx, prompt, history, maxTokens)
+		return resp, err
 	}
+}
+
+// sendPromptAnthropicRouted sends one Anthropic-family request through the
+// endpoint the model is served on: the Messages endpoint with the
+// InvokeModel fallback, or InvokeModel directly.
+func (c *BedrockClient) sendPromptAnthropicRouted(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
+	if usesMantleEndpoint(c.model) {
+		resp, err := c.sendPromptAnthropicMantle(ctx, prompt, history, maxTokens)
+		if err == nil || resolveAnthropicEndpointMode() != endpointModeAuto || ctx.Err() != nil {
+			// Success, operator-pinned "mantle", or the caller is gone:
+			// nothing to fall back to.
+			return resp, err
+		}
+		// Auto mode: the Mantle surface failed after its own retries —
+		// re-route the same request through the legacy InvokeModel
+		// runtime under an inference-profile id. Same Messages payload,
+		// different endpoint; regional outages, VPC gaps and account-
+		// level Mantle restrictions recover here. Genuinely invalid
+		// requests fail again on the runtime side and surface that
+		// error (annotated with the original Mantle failure).
+		fallbackModel := invokeFallbackModelID(c.model)
+		c.logger.Warn(i18n.T("llm.bedrock.mantle_fallback_invoke", c.model, fallbackModel), zap.Error(err))
+		resp, invokeErr := c.sendPromptAnthropicModel(ctx, fallbackModel, prompt, history, maxTokens)
+		if invokeErr != nil {
+			// Both chains stay inspectable (%w twice): errors.As walks
+			// invokeErr first, so payload-recovery reads the InvokeModel
+			// request size, while the Mantle failure stays visible for
+			// WAF/proxy classification.
+			return "", fmt.Errorf("%w (bedrock-mantle previously failed: %w)", invokeErr, err)
+		}
+		return resp, nil
+	}
+	return c.sendPromptAnthropic(ctx, prompt, history, maxTokens)
 }
 
 // sendPromptAnthropic uses the Anthropic Messages body schema on Bedrock.

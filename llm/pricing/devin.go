@@ -23,15 +23,18 @@ type devinRate struct {
 
 // devinStaticRates mirrors the cost_summary column of `devin models list`
 // as an account listed it on 2 Sep 2026 (the fixture in
-// llm/devincli/testdata/models_list.json is that listing). It is the
+// llm/devincli/testdata/models_list.json is that listing), extended on
+// 10 Nov 2026 with the families Cognition's public table has priced since
+// (docs.devin.ai/desktop/models, Enterprise tier). It is the
 // fallback for a deployment whose CLI lists models WITHOUT cost_summary —
 // enterprise builds do — so /cost still estimates instead of reporting
 // zero. Precedence in lookupModelPricing: CHATCLI_MODEL_PRICING, then the
 // rate the account itself lists, then this table. These are Cognition's
-// rates, not the vendors' list prices: gpt-5.6-sol is $1.2/$6 here
-// against OpenAI's own card, so borrowing the direct-API tables would be
-// wrong, which is why families the listing never carried (fable, grok,
-// adaptive) stay unpriced rather than guessed.
+// rates, not the vendors' list prices — Cognition runs its own promotions
+// and cut-over dates — so borrowing the direct-API tables would be wrong,
+// which is why a family Cognition has not priced, or prices with a dated
+// promotion (adaptive, SWE-2, Gemini 4 Argon), stays unpriced rather than
+// guessed.
 //
 // Keys are family slugs with dots; lookups normalize "-" and "." so the
 // CLI's hyphenated variant uids (claude-opus-4-8-medium-fast) hit the same
@@ -42,6 +45,15 @@ var devinStaticRates = map[string]devinRate{
 	// longest-key match stops billing it as Opus 5: the vendor list price
 	// ($4/$20, fast $8/$40) until Cognition's listing carries it — the
 	// listing wins over this table whenever the account has the model.
+	// Rows added from Cognition's public table (docs.devin.ai/desktop/
+	// models, "as of November 9, 2026", Enterprise tier): Fable 5.2 /
+	// 5.1 / 5 (listed as claude-5-fable), Sonnet 5.5 and Haiku 5.5.
+	"claude-fable-5.2":  {8, 40, 16, 80},
+	"claude-fable-5.1":  {10, 50, 0, 0},
+	"claude-fable-5":    {10, 50, 0, 0},
+	"claude-5-fable":    {10, 50, 0, 0},
+	"claude-sonnet-5.5": {2, 10, 0, 0},
+	"claude-haiku-5.5":  {0.1, 0.5, 0, 0},
 	"claude-opus-5.5":   {4, 20, 8, 40},
 	"claude-opus-5":     {5, 25, 10, 50},
 	"claude-sonnet-5":   {2, 10, 0, 0},
@@ -53,7 +65,14 @@ var devinStaticRates = map[string]devinRate{
 	"claude-sonnet-4.5": {3, 15, 0, 0},
 	"claude-haiku-4.5":  {1, 5, 0, 0},
 	// OpenAI family ("-priority" is the listing's spelling of fast).
-	"gpt-5.6-sol":   {1.2, 6, 8, 40},
+	// GPT-6 rows and gpt-5.6-sol's $4/$20 are the Nov 9 2026 public
+	// table; Cognition announces $5/$30 for 5.6 Sol from Nov 21 2026.
+	"gpt-6.1-terra": {1, 5, 2, 10},
+	"gpt-6.1-sol":   {2, 10, 4, 20},
+	"gpt-6-astra":   {10, 50, 20, 100},
+	"gpt-6-sol":     {2, 10, 4, 20},
+	"gpt-6-luna":    {0.1, 0.5, 0.2, 1},
+	"gpt-5.6-sol":   {4, 20, 8, 40},
 	"gpt-5.6-terra": {2, 12, 4, 24},
 	"gpt-5.6-luna":  {0.2, 1.2, 0.4, 2.4},
 	"gpt-5.5":       {5, 30, 12.5, 75},
@@ -73,11 +92,15 @@ var devinStaticRates = map[string]devinRate{
 	"glm-5.3-flash":     {0.15, 0.5, 0, 0},
 	"glm-5.3":           {1.4, 4.4, 0, 0},
 	"glm-5.2":           {1.4, 4.4, 0, 0},
+	"kimi-k3.1-pro":     {2, 10, 0, 0},
 	"kimi-k3":           {3, 15, 0, 0},
 	"kimi-k2.7":         {0.95, 4, 0, 0},
 	"kimi-k2.6":         {0.8, 2, 0, 0},
 	"deepseek-v4-pro":   {1.32, 3.96, 0, 0},
 	"deepseek-v4-flash": {0.14, 0.28, 0, 0},
+	// xAI (Nov 9 2026 public table).
+	"grok-4.7": {2, 6, 0, 0},
+	"grok-4.6": {2, 6, 0, 0},
 	// Cognition in-house. swe-1.6-fast is a family of its own at the base
 	// rate, not a fast variant of swe-1.6 — hence its own row.
 	"swe-1.7-lightning": {2.5, 12.5, 0, 0},

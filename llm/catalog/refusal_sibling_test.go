@@ -21,9 +21,14 @@ func TestRefusalSibling_WalksTheFamilyOnTheSameProvider(t *testing.T) {
 		"Sonnet 5.5 steps down to Haiku, never back to its predecessor")
 	assert.Equal(t, "CLAUDEAI:claude-haiku-4-5-20251001", RefusalSibling("CLAUDEAI", "claude-haiku-5-5"))
 	assert.Empty(t, RefusalSibling("CLAUDEAI", "claude-haiku-4-5-20251001"), "no sibling below Haiku 4.5")
-	// A provider without the 5.5 entries keeps the older sibling: DEVIN
-	// carries claude-sonnet-5 but no Sonnet 5.5.
-	assert.Equal(t, "DEVIN:claude-sonnet-5", RefusalSibling("DEVIN", "claude-opus-5"))
+	// DEVIN carries Sonnet 5.5 since the Nov 2026 table: the dashed
+	// sibling matches the dotted Devin slug.
+	assert.Equal(t, "DEVIN:claude-sonnet-5.5", RefusalSibling("DEVIN", "claude-opus-5"))
+	// A provider without the 5.5 entry keeps the older sibling: OPENROUTER
+	// lists Opus 5.5 but, for Fable, the walk stops at the first one it has.
+	assert.Equal(t, "CLAUDEAI:claude-opus-5-5", RefusalSibling("CLAUDEAI", "claude-fable-5-2"))
+	assert.Equal(t, "DEVIN:claude-opus-5.5", RefusalSibling("DEVIN", "claude-fable-5.2"))
+	assert.Equal(t, "BEDROCK:anthropic.claude-opus-5-5", RefusalSibling("BEDROCK", "global.anthropic.claude-fable-5-2"))
 	// Fable on DEVIN: the dashed sibling matches the dotted Devin slug and
 	// the handle carries the provider's own spelling.
 	assert.Equal(t, "DEVIN:claude-opus-5.5", RefusalSibling("DEVIN", "claude-fable-5.1"))

@@ -76,6 +76,11 @@ type ClaudeClient struct {
 	// type into an incomparable one — breaking for anyone comparing
 	// client values.
 	thinking *client.ThinkingState
+
+	// staleThinking remembers the reasoning blocks the API refused to take
+	// back because the conversation before them changed (see
+	// client.StaleThinking). Behind a pointer for the same reason.
+	staleThinking *client.StaleThinking
 }
 
 // LastThinking implements client.ThinkingAwareClient.
@@ -185,14 +190,15 @@ func NewClaudeClient(provider auth.TokenProvider, model string, logger *zap.Logg
 	}
 
 	return &ClaudeClient{
-		provider:    provider,
-		model:       strings.ToLower(model),
-		logger:      logger,
-		client:      httpClient,
-		maxAttempts: maxAttempts,
-		backoff:     backoff,
-		apiURL:      apiURL,
-		thinking:    &client.ThinkingState{},
+		provider:      provider,
+		model:         strings.ToLower(model),
+		logger:        logger,
+		client:        httpClient,
+		maxAttempts:   maxAttempts,
+		backoff:       backoff,
+		apiURL:        apiURL,
+		thinking:      &client.ThinkingState{},
+		staleThinking: &client.StaleThinking{},
 	}
 }
 

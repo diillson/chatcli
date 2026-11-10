@@ -259,7 +259,8 @@ const (
 //   - OpenAI GPT-6 / 5.6 / 5.5 / 5.4: 2x input, 1.5x output above 272K
 //     input (developers.openai.com/api/docs/pricing, Oct 2026), on the
 //     direct API and the Bedrock global profile alike.
-//   - MiniMax-M3: 2x on both above 512K (pricing-paygo, Oct 2026).
+//   - MiniMax-M3: 2x on both above 512K (pricing-paygo, Oct 2026);
+//     M3.1 Flash has a single tier.
 //
 // 1/1 elsewhere. A provider-billed call (usage.cost, e.g. OpenRouter) is
 // never re-tiered — tieredCallCost checks that before calling here.
@@ -287,6 +288,9 @@ func LongContextMultipliers(provider, model string, promptTokens int) (in, out f
 		if promptTokens > longContextOpenAITokens {
 			return longContextMultiplierDouble, 1.5
 		}
+	case strings.Contains(m, "minimax-m3.1"):
+		// M3.1 Flash is flat-priced; the case keeps it out of M3's tier,
+		// whose id is a prefix of this one.
 	case strings.Contains(m, "minimax-m3"):
 		if promptTokens > longContextMiniMaxM3Tokens {
 			return longContextMultiplierDouble, longContextMultiplierDouble

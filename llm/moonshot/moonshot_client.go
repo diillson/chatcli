@@ -34,7 +34,7 @@ import (
 //     entre o modo "Thinking" (reasoning explícito) e o modo "Instant".
 //   - cache automático de contexto (cache_hit reflete no preço, não no payload).
 //
-// Modelo default: kimi-k2.6 (256K contexto, multimodal, thinking).
+// Modelo default: kimi-k3.1-pro (1M contexto, multimodal, thinking sempre ligado).
 type MoonshotClient struct {
 	provider     auth.TokenProvider
 	model        string
