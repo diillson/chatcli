@@ -88,9 +88,29 @@ const CapabilityNoExplicitCache = "no_explicit_cache"
 // block for the same reason.
 var registry = []ModelMeta{
 	// ── OpenAI GPT-6 ─────────────────────────────────────────────────
+	// gpt-6.1-terra (Oct 26 2026, developers.openai.com/api/docs/models/
+	// gpt-6.1-terra): the mid tier of the 6.1 refresh, at half of Sol's
+	// price — $1/$5 with cached input at $0.05 (5%) and cache writes at
+	// $1.25; above 272K input the request bills 2x input/cache and 1.5x
+	// output (llm/pricing models both). 1,050,000 context (922K
+	// addressable as input), 128,000 max output, Jun 1 2026 cutoff.
+	// reasoning_effort takes none|low|medium(default)|high|xhigh|max —
+	// unlike 6.1 Sol, "none" is accepted. Tool calling needs the Responses
+	// API. MUST precede 6.1 Sol: Sol's loose "gpt-6.1" family alias is a
+	// prefix of this id and would resolve a dated Terra snapshot to Sol.
+	{
+		ID:              "gpt-6.1-terra",
+		Aliases:         []string{"gpt-6.1-terra", "gpt-6-1-terra"},
+		DisplayName:     "GPT-6.1 Terra",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	// gpt-6.1-sol (GA Sep 29 2026, developers.openai.com/api/docs/models/
-	// gpt-6.1-sol): the refreshed Sol tier — there is no 6.1 Astra, Terra
-	// or Luna, and no -pro on the platform API (the "-pro" slugs exist on
+	// gpt-6.1-sol): the refreshed Sol tier — there is no 6.1 Astra or
+	// Luna (Terra followed on Oct 26), and no -pro on the platform API (the "-pro" slugs exist on
 	// OpenRouter only). 1,050,000 context (922K addressable as input),
 	// 128,000 max output, Apr 30 2026 cutoff. reasoning_effort takes low|
 	// medium(default)|high|xhigh|max — "none" and "minimal" are gone, so
@@ -545,6 +565,40 @@ var registry = []ModelMeta{
 		},
 	},
 	{
+		// Fable 5.2 (claude-fable-5-2, Nov 9 2026; platform.claude.com/docs/
+		// en/models/fable-5-2/overview + whats-new-fable-5-2 + migration-
+		// guide): successor to Fable 5.1 and the first Fable cheaper than
+		// its predecessor — $8/$40 per MTok, cache reads at $0.20 (the same
+		// 2.5% of input as 5.1), writes $10 (5m) / $16 (1h). 1M context,
+		// 128K max output, Jun 2026 cutoff, 512-token cacheable minimum.
+		// Same surface as 5.1: adaptive thinking always on (disabled and
+		// budget_tokens return 400), effort low..max with API default high,
+		// forced tool_choice returns 400, no temperature/top_p/top_k,
+		// task_budget in beta, 30-day data retention required. fast_mode is
+		// served ($16/$80, speed:"fast", no beta header). What changed:
+		// the thinking-block prefix check now applies to EVERY account — a
+		// replayed block whose preceding system/tools/messages changed is a
+		// 400 ("bound to a different conversation"); the clients drop the
+		// refused blocks and resend (client.StaleThinking.Heal). 5.2
+		// blocks are readable only by Fable/Mythos 5.2. Through OAuth it
+		// needs Claude Code >= 2.1.321 (auth.ClaudeCodeVersion).
+		// Listed BEFORE Fable 5.1 and Fable 5 — "fable-5" is a prefix of
+		// this id. The bare "fable" shortcut tracks the newest Fable.
+		ID:              "claude-fable-5-2",
+		Aliases:         []string{"claude-fable-5-2", "fable-5-2", "claude-fable-5.2", "fable-5.2", "fable"},
+		DisplayName:     "Claude Fable 5.2 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities: []string{
+			"vision",
+			"json_mode", "tools",
+			"adaptive_thinking", "output_effort", "task_budget", "fast_mode", "mid_conversation_system",
+		},
+	},
+	{
 		// Fable 5.1 (claude-fable-5-1, Sep 1 2026): successor to Fable 5 in
 		// the same tier above Opus, same $10/$50 per MTok, but cache reads
 		// at $0.25/MTok (2.5% of input instead of the usual 10% — see
@@ -560,9 +614,10 @@ var registry = []ModelMeta{
 		// invalidates thinking blocks. mid_conversation_system is served
 		// (same as Fable 5 / Opus 5). No fast_mode, no Priority Tier.
 		// Requires 30-day data retention (ZDR orgs get 400).
-		// The bare "fable" shortcut tracks the newest Fable release.
+		// Legacy since Fable 5.2 (Nov 9 2026), which took the bare "fable"
+		// shortcut; retirement not before Sep 1 2027.
 		ID:              "claude-fable-5-1",
-		Aliases:         []string{"claude-fable-5-1", "fable-5-1", "claude-fable-5.1", "fable-5.1", "fable"},
+		Aliases:         []string{"claude-fable-5-1", "fable-5-1", "claude-fable-5.1", "fable-5.1"},
 		DisplayName:     "Claude Fable 5.1 (1M context)",
 		Provider:        ProviderClaudeAI,
 		ContextWindow:   1000000,
@@ -588,7 +643,7 @@ var registry = []ModelMeta{
 		// routing fires, and adaptive_thinking routes that to
 		// {type:"adaptive"}. No fast_mode: the speed parameter is not
 		// documented for Fable 5. "fable-5" stays pinned here; the bare
-		// "fable" shortcut moved to 5.1.
+		// "fable" shortcut tracks the newest Fable (5.2).
 		ID:              "claude-fable-5",
 		Aliases:         []string{"claude-fable-5", "fable-5"},
 		DisplayName:     "Claude Fable 5 (1M context)",
@@ -782,6 +837,25 @@ var registry = []ModelMeta{
 	// 1,048,576 / 65,536 profile. Newest first so generic alias prefixes
 	// don't shadow the more specific ids.
 	{
+		// gemini-4-carbon (Stable, Nov 10 2026, aistudio.google.com/docs/
+		// models/gemini-4-carbon): the Gemini 4 model Google positions for
+		// complex software engineering, multimodal and scientific work —
+		// Argon is the faster, lower-spend sibling. Same profile as Argon:
+		// text, image, video, audio and PDF in; text out; 1,048,576-token
+		// window shared by input and output, 65,536 output tokens on a
+		// synchronous call; thinking levels low|medium|high (default
+		// medium); implicit caching only. Same dated price as Argon:
+		// llm/pricing geminiArgonRates.
+		ID:              "gemini-4-carbon",
+		Aliases:         []string{"gemini-4-carbon"},
+		DisplayName:     "Gemini 4 Carbon",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution", CapabilityNoExplicitCache},
+	},
+	{
 		// gemini-4-argon (Stable, Oct 2026, ai.google.dev/gemini-api/docs/
 		// models/gemini-4-argon): Google's flagship reasoning model. Text,
 		// image, video, audio and PDF in; text out. 1,048,576-token window
@@ -967,6 +1041,45 @@ var registry = []ModelMeta{
 		Provider:        ProviderCopilot,
 		ContextWindow:   1050000,
 		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	// GA in Copilot since the Oct 8 refresh (github/docs data tables
+	// model-release-status / models-and-pricing, checked Nov 10 2026):
+	// Claude Fable 5.2 (Nov 9; Pro+, Max, Business, Enterprise — policy
+	// off by default), GPT-6.1 Terra (Oct 26; every paid plan) and Gemini
+	// 4 Argon (Oct 13; Pro+ and up). New models bill at the provider's
+	// list price under usage-based billing — no premium multiplier.
+	// GitHub publishes display names only; the slugs follow the vendor-
+	// slug convention of the entries below. Fable 5.2 precedes nothing it
+	// could shadow (Copilot has no other Fable row here).
+	{
+		ID:              "claude-fable-5.2",
+		Aliases:         []string{"copilot-claude-fable-5.2", "copilot-claude-fable-5-2", "claude-fable-5-2"},
+		DisplayName:     "Claude Fable 5.2 (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode", "adaptive_thinking"},
+	},
+	{
+		ID:              "gpt-6.1-terra",
+		Aliases:         []string{"copilot-gpt-6.1-terra", "copilot-gpt-6-1-terra", "gpt-6-1-terra"},
+		DisplayName:     "GPT-6.1 Terra (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-4-argon",
+		Aliases:         []string{"copilot-gemini-4-argon"},
+		DisplayName:     "Gemini 4 Argon (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
@@ -1165,6 +1278,21 @@ var registry = []ModelMeta{
 	// so generic alias prefixes ("glm-5") don't shadow the more specific
 	// "glm-5.1" / "glm-5-turbo" tags.
 	{
+		// GLM-5.3-FlashX-Legal (listed Nov 2026, docs.z.ai/guides/vlm/
+		// glm-5.3-flash "Model Code" + pricing page): the legal-domain
+		// variant of FlashX, same 1M / 128K profile and the same price
+		// ($0.37/$1.25, cached $0.075). Ahead of glm-5.3-flashx, which is
+		// its prefix.
+		ID:              "glm-5.3-flashx-legal",
+		Aliases:         []string{"glm-5.3-flashx-legal", "glm-5-3-flashx-legal"},
+		DisplayName:     "GLM-5.3 FlashX Legal",
+		Provider:        ProviderZAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "json_mode", "vision"},
+	},
+	{
 		// GLM-5.3-FlashX (Sep 18 2026, docs.z.ai/guides/overview/pricing):
 		// the high-speed serving tier of GLM-5.3-Flash — same weights, same
 		// 1M / 128K profile and multimodal input, ~2.5x the price
@@ -1327,11 +1455,31 @@ var registry = []ModelMeta{
 
 	// MiniMax Models
 	{
+		// MiniMax-M3.1-Flash (Oct 19 2026, platform.minimax.io release
+		// notes + guides/text-generation): the fast open-weight tier and
+		// MiniMax's own replacement for M2.5/M2.7, which retire on Nov 18
+		// 2026 (plan requests for them already route here). 1,000,000
+		// context; max_completion_tokens recommended 131,072 (ceiling
+		// 524,288). Text, image and video in. It always thinks —
+		// thinking.type=disabled and reasoning_effort=none return 400 (this
+		// client sends neither); effort low..max, default max. Flat
+		// $0.15/$0.60 per MTok, cache reads $0.015, no long-context tier.
+		// Ahead of MiniMax-M3: "minimax-m3" is a prefix of this id.
+		ID:              "MiniMax-M3.1-Flash",
+		Aliases:         []string{"minimax-m3.1-flash", "minimax-m3-1-flash", "m3.1-flash", "m3.1"},
+		DisplayName:     "MiniMax M3.1 Flash",
+		Provider:        ProviderMiniMax,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision"},
+	},
+	{
 		// MiniMax-M3 (Jun 1 2026, platform.minimax.io release notes): the
 		// current M-series flagship — agentic reasoning, tool use, coding,
-		// multimodal chat input and long context (1,048,576 tokens; the
-		// output cap follows the M2.7 convention below, MiniMax publishes
-		// none). Pay-as-you-go $0.30/$1.20 per MTok up to 512K of context
+		// multimodal chat input and long context (1,048,576 tokens;
+		// max_completion_tokens recommended 131,072, ceiling 524,288 per
+		// api-reference/text-chat-openai). Pay-as-you-go $0.30/$1.20 per MTok up to 512K of context
 		// (2x above), cache reads $0.06. Was missing from the catalog
 		// since launch — an M3 session sized at the M2.x window.
 		ID:              "MiniMax-M3",
@@ -1411,6 +1559,40 @@ var registry = []ModelMeta{
 	// tags — "kimi-k2.7-code-highspeed" MUST precede "kimi-k2.7-code",
 	// whose alias set would otherwise swallow it (Resolve matches aliases
 	// by prefix/contains in registry order).
+	// Kimi K3.1 Pro (Oct 2026, platform.kimi.ai/docs/models + guide/
+	// kimi-k3-1-pro-quickstart): the current flagship, cheaper than K3 —
+	// $2/$10 with cached input at $0.20; the highspeed tier ("same
+	// intelligence, 2-3x the speed") is $4/$20 with the same $0.20 cached
+	// input. There is no plain "kimi-k3.1" id. 1,048,576 context;
+	// max_completion_tokens defaults to 131,072. Thinking is always on
+	// (reasoning_effort low|high|max, default max) — hence no "thinking"
+	// capability, which is the on/off toggle MOONSHOT_THINKING drives and
+	// K3.1 has none of; image and video in;
+	// temperature/top_p are fixed and must be omitted (this client sends
+	// neither). Both MUST precede kimi-k3, whose "kimi-k3"/"k3" aliases
+	// are substrings of these ids; highspeed first for the same reason.
+	// The whole K2 line is closed to accounts created from Nov 1 2026 and
+	// retires at the end of Dec 2026.
+	{
+		ID:              "kimi-k3.1-pro-highspeed",
+		Aliases:         []string{"kimi-k3.1-pro-highspeed", "kimi-k3-1-pro-highspeed"},
+		DisplayName:     "Kimi K3.1 Pro (highspeed)",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
+		ID:              "kimi-k3.1-pro",
+		Aliases:         []string{"kimi-k3.1-pro", "kimi-k3-1-pro", "kimi-k3.1", "kimi-k3-1", "k3.1", "k3-1"},
+		DisplayName:     "Kimi K3.1 Pro",
+		Provider:        ProviderMoonshot,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
 	{
 		ID:              "kimi-k3",
 		Aliases:         []string{"kimi-k3", "kimi-k-3", "k3", "k-3"},
@@ -1462,6 +1644,81 @@ var registry = []ModelMeta{
 	// OpenRouter Models (multi-provider gateway)
 	// Models use provider/model-name format. Only popular defaults are listed;
 	// the full catalog is fetched dynamically via ListModels.
+	// Listed on OpenRouter since the Oct 8 refresh (openrouter.ai/api/v1/
+	// models, Nov 10 2026). Prices are OpenRouter's (it bills usage.cost
+	// itself); the ":batch" and "-pro" siblings stay out. Listing max
+	// outputs of 0.9x the context are an artifact — the vendor cap is used.
+	{
+		// anthropic/claude-fable-5.2 (Nov 9 2026): 1M ctx, 128K out, $8/$40,
+		// cache read $0.20. Ahead of the Fable 5.1 and Fable 5 slugs, both
+		// prefixes of nothing here but kept newest-first.
+		ID:              "anthropic/claude-fable-5.2",
+		Aliases:         []string{"openrouter-claude-fable-5.2", "openrouter-claude-fable-5-2", "anthropic/claude-fable-5-2"},
+		DisplayName:     "Claude Fable 5.2 (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		// openai/gpt-6.1-terra (Oct 26 2026): 1.05M ctx, 128K out, $1/$5,
+		// cache read $0.05, cache write $1.25.
+		ID:              "openai/gpt-6.1-terra",
+		Aliases:         []string{"openrouter-gpt-6.1-terra", "openrouter-gpt-6-1-terra", "openai/gpt-6-1-terra"},
+		DisplayName:     "GPT-6.1 Terra (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		// google/gemini-4-carbon (Nov 10 2026) and google/gemini-4-argon
+		// (Oct 13 2026): 1,048,576 ctx, $2/$10, cache read $0.10.
+		ID:              "google/gemini-4-carbon",
+		Aliases:         []string{"openrouter-gemini-4-carbon"},
+		DisplayName:     "Gemini 4 Carbon (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "google/gemini-4-argon",
+		Aliases:         []string{"openrouter-gemini-4-argon"},
+		DisplayName:     "Gemini 4 Argon (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		// moonshotai/kimi-k3.1-pro (Oct 23 2026): 1,048,576 ctx, $2/$10,
+		// cache read $0.20; highspeed is an endpoint tag, not a slug.
+		ID:              "moonshotai/kimi-k3.1-pro",
+		Aliases:         []string{"openrouter-kimi-k3.1-pro", "openrouter-kimi-k3-1-pro"},
+		DisplayName:     "Kimi K3.1 Pro (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		// minimax/minimax-m3.1-flash (Oct 19 2026): 1,048,576 ctx on the
+		// listing, MiniMax's 131,072 recommended output.
+		ID:              "minimax/minimax-m3.1-flash",
+		Aliases:         []string{"openrouter-minimax-m3.1-flash", "openrouter-minimax-m3-1-flash"},
+		DisplayName:     "MiniMax M3.1 Flash (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools"},
+	},
 	{
 		// openrouter.ai/openai/gpt-6.1-sol (listed Sep 29 2026: 1.05M ctx,
 		// 128K out, $2/$10, cache read $0.10, cache write $2.50). The
@@ -1713,6 +1970,31 @@ var registry = []ModelMeta{
 	// supported for Claude on Bedrock; only the top-level automatic cache
 	// parameter is first-party-only, and this client never emits it.
 
+	// Fable 5.2 (Nov 9 2026, Bedrock model card anthropic-claude-fable-5-2
+	// + AWS ML blog "Introducing Claude Fable 5.2 on AWS"). Unlike Fable 5
+	// and 5.1, the card lists bedrock-runtime only (Messages via Invoke,
+	// plus Converse) — no Mantle row — so no bedrock_mantle_only here.
+	// US Geo and Global cross-region profiles only, no In-Region option,
+	// which is why the canonical id is the global. profile (the bare
+	// anthropic.claude-fable-5-2 id and the first-party spellings stay as
+	// aliases, as on Sonnet 5.5). The account must set the aws_review
+	// data-retention mode before invoking. 1M / 128K, $8/$40 with $0.20
+	// cache reads on global (US profile +10%), cache TTL 5m and 1h;
+	// adaptive thinking always on, temperature 1.0 or unset. task_budget
+	// and fast mode are not served on Bedrock. The thinking prefix check
+	// applies here too (client.StaleThinking.Heal). MUST precede the
+	// Fable 5.1 and Fable 5 entries: "claude-fable-5" is a prefix of this
+	// id in the tier-2 alias pass, and both of those are Mantle-routed.
+	{
+		ID:              "global.anthropic.claude-fable-5-2",
+		Aliases:         []string{"bedrock-fable-5-2", "bedrock-fable-5.2", "anthropic.claude-fable-5-2", "us.anthropic.claude-fable-5-2", "claude-fable-5-2", "fable-5-2", "claude-fable-5.2", "fable-5.2"},
+		DisplayName:     "Claude Fable 5.2 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "mid_conversation_system"},
+	},
 	// Fable 5.1 (Sep 1 2026, AWS what's-new 2026/09 + Bedrock model card
 	// anthropic-claude-fable-5-1). Same shape as Fable 5: dateless id,
 	// us./global. profiles only, 1M / 128K, $10/$50 with $0.25 cache
@@ -2067,6 +2349,22 @@ var registry = []ModelMeta{
 	// (it matches OpenAI's short-context pricing tier, not an AWS limit),
 	// so this entry keeps the family convention the 5.6 rows established.
 	{
+		// GPT-6.1 Terra (Oct 26 2026, model-card-openai-gpt-6-1-terra):
+		// same shape as 6.1 Sol — runtime through the us./global. profiles
+		// only, the bare openai.gpt-6.1-terra id is the Mantle in-region
+		// form. 1,050,000 context, 128,000 max output; $1/$5 with cache
+		// write $1.25 and read $0.05 on global (US profile +10%), 2x/1.5x
+		// above 272K input. Converse takes text and image blocks only.
+		ID:              "global.openai.gpt-6.1-terra",
+		Aliases:         []string{"bedrock-gpt-6.1-terra", "bedrock-gpt-6-1-terra", "openai.gpt-6.1-terra", "us.openai.gpt-6.1-terra"},
+		DisplayName:     "GPT-6.1 Terra (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+	{
 		// GPT-6.1 Sol (Sep 29 2026) is the first GPT-6.x with a published
 		// Bedrock card (model-card-openai-gpt-6-1-sol): runtime only through
 		// the us./global. profiles (Responses, Chat Completions, Converse,
@@ -2268,6 +2566,26 @@ var registry = []ModelMeta{
 	// AWS's post-Sep-7 lifecycle policy, which allows a 45-day legacy
 	// notice — re-check the lifecycle page on each refresh.
 	{
+		// Kimi K3.1 Pro - Highspeed (Nov 4 2026, model card
+		// moonshot-ai-kimi-k3-1-highspeed): Bedrock serves only the
+		// highspeed variant, under the id "moonshotai.kimi-k3.1" —
+		// us./in./global. profiles, no in-region access. 1M context (the
+		// card states no output cap; the K3 family's 131,072 is used).
+		// $4/$20 with $0.20 cache reads and $5 cache writes on global
+		// (US/India +10%). Images in, no video; Converse rejects PDF/HTML
+		// documents and, like K3, fails when earlier reasoning blocks are
+		// replayed — this client never replays them on Converse. MUST
+		// precede Kimi K3: "moonshotai.kimi-k3" is a prefix of this id.
+		ID:              "global.moonshotai.kimi-k3.1",
+		Aliases:         []string{"bedrock-kimi-k3.1", "bedrock-kimi-k3-1", "moonshotai.kimi-k3.1", "us.moonshotai.kimi-k3.1", "in.moonshotai.kimi-k3.1"},
+		DisplayName:     "Kimi K3.1 Pro Highspeed (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 131072,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode"},
+	},
+	{
 		ID:              "global.moonshotai.kimi-k3",
 		Aliases:         []string{"bedrock-kimi-k3", "moonshotai.kimi-k3", "us.moonshotai.kimi-k3", "in.moonshotai.kimi-k3"},
 		DisplayName:     "Kimi K3 (Bedrock, global)",
@@ -2343,17 +2661,25 @@ func Resolve(provider, model string) (ModelMeta, bool) {
 		}
 	}
 
-	// 2b) match por provedor + aliases (contém/prefixo)
+	// 2b) match por provedor + id ou alias contido no id pedido. O nome
+	// MAIS LONGO vence — é o mais específico: "claude-fable-5-1-20260901"
+	// contém o atalho "fable" (da Fable mais nova) e também
+	// "claude-fable-5-1", e é este que diz de qual modelo se trata. No
+	// empate vale a ordem do registro (mais novo primeiro), como antes.
+	var best ModelMeta
+	bestLen := 0
 	for _, meta := range registry {
 		if meta.Provider != "" && meta.Provider != p {
 			continue
 		}
-		for _, alias := range meta.Aliases {
-			a := strings.ToLower(alias)
-			if strings.HasPrefix(m, a) || strings.Contains(m, a) {
-				return meta, true
+		for _, name := range append([]string{meta.ID}, meta.Aliases...) {
+			if len(name) > bestLen && containsName(m, strings.ToLower(name)) {
+				best, bestLen = meta, len(name)
 			}
 		}
+	}
+	if bestLen > 0 {
+		return best, true
 	}
 
 	// 3) match por provedor + prefixo do ID
@@ -2368,6 +2694,31 @@ func Resolve(provider, model string) (ModelMeta, bool) {
 
 	return ModelMeta{}, false
 }
+
+// containsName reports whether the requested id m contains the catalog
+// name (an id or alias, both lowercase) as a whole number: a name that ends
+// in a digit does not match where another digit follows it.
+// "claude-fable-5-20260101" is Fable 5 with a date stamp, not
+// "claude-fable-5-2" followed by "0260101".
+func containsName(m, name string) bool {
+	if name == "" {
+		return false
+	}
+	endsInDigit := isDigit(name[len(name)-1])
+	for from := 0; ; {
+		i := strings.Index(m[from:], name)
+		if i < 0 {
+			return false
+		}
+		end := from + i + len(name)
+		if !endsInDigit || end == len(m) || !isDigit(m[end]) {
+			return true
+		}
+		from += i + 1
+	}
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // GetMaxTokens sugere maxTokens com prioridade:
 // 1) override > 0
@@ -2469,10 +2820,17 @@ func GetAnthropicAPIVersion(model string) string {
 	return config.ClaudeAIAPIVersionDefault
 }
 
-// GetDisplayName tenta retornar um nome amigável a partir do registry.
-// Se não houver match, retorna o próprio model ID.
+// GetDisplayName returns the friendly name of a model the registry knows
+// by its exact id or alias, and the model id itself otherwise.
+//
+// A display name is a claim of identity, so only an exact match earns it.
+// Resolve's loose passes exist to lend a sibling's limits and capabilities
+// to an id the catalog does not list yet — a reasonable guess for sizing a
+// request, a false statement as a label: before Fable 5.2 had its entry,
+// "claude-fable-5-2" resolved loosely to Fable 5.1 and every reply was
+// signed "Claude Fable 5.1". An unlisted id now shows as what it is.
 func GetDisplayName(provider, model string) string {
-	if meta, ok := Resolve(provider, model); ok && meta.DisplayName != "" {
+	if meta, ok := ResolveExact(provider, model); ok && meta.DisplayName != "" {
 		return meta.DisplayName
 	}
 	return model

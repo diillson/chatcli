@@ -100,8 +100,17 @@ func claudePricing(model string) (float64, float64, bool) {
 		return 0, 0, false
 	}
 	switch {
+	case strings.Contains(model, "fable-5-2"), strings.Contains(model, "fable-5.2"):
+		// Fable 5.2 (Nov 9 2026): $8/$40 per MTok — the first Fable
+		// cheaper than its predecessor (platform.claude.com/docs/en/
+		// about-claude/pricing). Must match BEFORE the generic "fable"
+		// case, which would bill it at the $10/$50 of Fable 5 / 5.1. Both
+		// spellings cover the Bedrock (anthropic.claude-fable-5-2),
+		// OpenRouter and Copilot (claude-fable-5.2) ids. Fast mode
+		// ($16/$80) is not modeled.
+		return 8.0, 40.0, true
 	case strings.Contains(model, "fable"):
-		// Fable 5: $10/$50 per MTok (tier above Opus).
+		// Fable 5 and 5.1: $10/$50 per MTok (tier above Opus).
 		return 10.0, 50.0, true
 	case strings.Contains(model, "opus-5-5"), strings.Contains(model, "opus-5.5"):
 		// Opus 5.5 (Sep 22 2026): $4/$20 per MTok — the first Opus cheaper
@@ -172,6 +181,12 @@ func openAIFrontierPricing(model string) (float64, float64, bool) {
 	// Bedrock (openai.gpt-6.1-sol) e o slug do OpenRouter.
 	case strings.Contains(model, "gpt-6.1-sol"):
 		return 2.0, 10.0, true
+	// gpt-6.1-terra (26/Out/2026): $1/$5, cached input a $0,05 (5%) e
+	// cache write a $1,25 — mesmo caso do 6.1-Sol no getCachePricing.
+	// Cobre o id do Bedrock (openai.gpt-6.1-terra) e os slugs do
+	// OpenRouter e do Copilot.
+	case strings.Contains(model, "gpt-6.1-terra"):
+		return 1.0, 5.0, true
 	// gpt-6-sol / gpt-6-luna (GA 22/Set/2026, developers.openai.com/api/
 	// docs/pricing): $2/$10 e $0,10/$0,50 no tier curto; acima de 272K de
 	// input, 2x no input e 1,5x no output (LongContextMultipliers).
@@ -184,8 +199,9 @@ func openAIFrontierPricing(model string) (float64, float64, bool) {
 		return 0.10, 0.50, true
 	// gpt-5.6 (Jul 2026): preços de lista da API por tier
 	// (developers.openai.com/api/docs/pricing, Set/2026): terra e luna
-	// desde o corte de 30/Jul; Sol caiu para $4/$20 em 21/Ago ("pelo
-	// menos até 21/Nov/2026" — revisar na virada). O caso genérico
+	// desde o corte de 30/Jul; Sol caiu para $4/$20 em 21/Ago (preço
+	// em promoção "até 30/Nov/2026" na página, Nov/2026; o valor
+	// pós-promoção não está publicado — revisar na virada). O caso genérico
 	// "gpt-5.6" cobre o alias de família (que o catálogo resolve para
 	// Sol) e precisa vir depois dos tiers específicos. O surcharge de
 	// long-context (>272K input = 2×/1,5×) é aplicado por chamada pelo
@@ -272,7 +288,10 @@ func openAIPricing(model string) (float64, float64, bool) {
 // 3.8/3.7/3.6-flash: preço com data de virada (geminiFlashRates).
 func googlePricing(model string) (float64, float64, bool) {
 	switch {
-	case strings.Contains(model, "gemini-4-argon"):
+	case strings.Contains(model, "gemini-4-argon"), strings.Contains(model, "gemini-4-carbon"):
+		// Carbon (GA Nov 10 2026) is listed at Argon's price in every
+		// tier, with the same Dec 1 2026 step (aistudio.google.com/docs/
+		// pricing, Nov 2026).
 		in, out := geminiArgonRates(now())
 		return in, out, true
 	case strings.Contains(model, "gemini-3.8-flash"), strings.Contains(model, "gemini-3.7-flash"),
@@ -462,6 +481,10 @@ func devinListedPricing(model string) (float64, float64, bool) {
 // tier so old session logs still price instead of reporting zero.
 func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "minimax-m3.1-flash"):
+		// MiniMax-M3.1-Flash (pricing-paygo, Nov 2026): flat $0.15/$0.60,
+		// no long-context tier. Before M3, which is its prefix.
+		return 0.15, 0.60, true
 	case strings.Contains(model, "minimax-m3"):
 		// MiniMax-M3 (platform.minimax.io pricing-paygo, Set/2026): $0.30/
 		// $1.20 até 512K de contexto (2x acima — LongContextMultipliers), cache read
@@ -479,6 +502,15 @@ func providerFallbackPricing(provider, model string) (float64, float64, bool) {
 		return 0.20, 1.10, true
 	case strings.Contains(provider, "zai"), strings.Contains(model, "glm"):
 		return 0.50, 0.50, true
+	case strings.Contains(model, "kimi-k3.1-pro-highspeed"), strings.Contains(model, "moonshotai.kimi-k3.1"):
+		// Kimi K3.1 Pro highspeed: $4/$20 (platform.kimi.ai/docs/pricing/
+		// chat, Nov 2026). Bedrock serves only this variant, as
+		// moonshotai.kimi-k3.1, at the same rate on the global profile.
+		// Before the K3.1 Pro and K3 cases, both substrings of these ids.
+		return 4.00, 20.00, true
+	case strings.Contains(model, "kimi-k3.1"):
+		// Kimi K3.1 Pro: $2/$10 — cheaper than K3. Before "kimi-k3".
+		return 2.00, 10.00, true
 	case strings.Contains(model, "kimi-k3"):
 		// Contains, not HasPrefix: the Bedrock id is
 		// global.moonshotai.kimi-k3 (same $3/$15 on the global profile).
@@ -550,10 +582,11 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 	}
 
 	switch {
-	case strings.Contains(model, "fable-5-1"), strings.Contains(model, "fable-5.1"):
-		// Fable 5.1: cache reads at $0.25/MTok = 2.5% of the $10 input
-		// price (platform.claude.com/docs/en/models/fable-5-1/overview);
-		// writes keep the 1.25x rule ($12.50). Must precede the generic
+	case strings.Contains(model, "fable-5-1"), strings.Contains(model, "fable-5.1"),
+		strings.Contains(model, "fable-5-2"), strings.Contains(model, "fable-5.2"):
+		// Fable 5.1 and 5.2: cache reads at 2.5% of input — $0.25 on the
+		// $10 of 5.1, $0.20 on the $8 of 5.2 (platform.claude.com/docs/en/
+		// about-claude/pricing); writes keep the 1.25x rule ($12.50 / $10). Must precede the generic
 		// Claude case, which would bill reads at 10% ($1).
 		return inputCost * 1.25, inputCost * 0.025
 	case strings.Contains(model, "opus-5-5"), strings.Contains(model, "opus-5.5"),
@@ -578,8 +611,8 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 			return 0, inputCost * 0.15
 		}
 		return 0, inputCost * 0.16
-	case strings.Contains(model, "gemini-4-argon"):
-		// Gemini 4 Argon: implicit caching only, cached input at 5% of
+	case strings.Contains(model, "gemini-4-argon"), strings.Contains(model, "gemini-4-carbon"):
+		// Gemini 4 Argon and Carbon: implicit caching only, cached input at 5% of
 		// input — $0.10 on the $2 introductory price, $0.20 on $4 from
 		// Dec 1 2026 (ai.google.dev/gemini-api/docs/pricing, Oct 2026).
 		// Must precede the generic Gemini case, which bills reads at 10%.
@@ -591,9 +624,10 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// resources add storage per token-hour, priced separately from
 		// lifecycle events (cli/cost_cache_resources.go).
 		return 0, inputCost * 0.10
-	case strings.Contains(model, "gpt-6.1-sol"):
-		// gpt-6.1-sol: cached input a $0,10 = 5% do input (metade do
-		// 6-Sol) e cache write a $2,50 = 1,25x (developers.openai.com/api/
+	case strings.Contains(model, "gpt-6.1-sol"), strings.Contains(model, "gpt-6.1-terra"):
+		// gpt-6.1-sol e gpt-6.1-terra: cached input a 5% do input ($0,10 /
+		// $0,05 — metade da razão do 6-Sol) e cache write a 1,25x ($2,50 /
+		// $1,25) (developers.openai.com/api/
 		// docs/pricing, Out/2026; o card do Bedrock repete os valores).
 		// Antes do caso "gpt-6", que cobraria a leitura a 10%.
 		return inputCost * 1.25, inputCost * 0.05
@@ -626,7 +660,16 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 	case strings.Contains(model, "deepseek"):
 		// DeepSeek cache hit ≈ 25% of the miss price.
 		return 0, inputCost * 0.25
+	case strings.Contains(model, "moonshotai.kimi-k3.1"):
+		// Bedrock's Kimi K3.1 Pro highspeed: cache read $0.20 on $4 = 5%,
+		// cache write $5 = 1.25x (model card, Nov 2026).
+		return inputCost * 1.25, inputCost * 0.05
+	case strings.Contains(model, "kimi-k3.1-pro-highspeed"):
+		// First-party highspeed: cached input stays at $0.20 on the $4
+		// price = 5%; a 5-minute write costs the plain input price.
+		return 0, inputCost * 0.05
 	case strings.Contains(model, "kimi-k3"):
+		// Kimi K3.1 Pro: cache hit $0.20 on $2 — the same 10% as K3.
 		// Kimi K3: cache hit $0.30 on the $3 miss price = 10% (platform.
 		// kimi.ai/docs/pricing/chat, Oct 2026; the Bedrock card bills the
 		// same ratio). Writes cost the plain input price ($3, 5-min TTL),
@@ -645,9 +688,11 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// a published cache price (turbo, older GLM-4.x) bill cached
 		// tokens at the input price, as before.
 		return 0, zaiCacheReadPerMTok(model)
-	case strings.Contains(model, "minimax-m2.7-highspeed"):
-		// MiniMax pay-as-you-go (platform.minimax.io pricing-paygo, Oct
-		// 2026): cache read $0.06 on the $0.60 highspeed input = 10%.
+	case strings.Contains(model, "minimax-m2.7-highspeed"), strings.Contains(model, "minimax-m3.1-flash"):
+		// MiniMax pay-as-you-go (platform.minimax.io pricing-paygo, Nov
+		// 2026): cache read at 10% of input — $0.06 on the $0.60 M2.7
+		// highspeed, $0.015 on the $0.15 M3.1 Flash. Before the M3 case,
+		// a prefix of the M3.1 id.
 		return 0, inputCost * 0.10
 	case strings.Contains(model, "minimax-m3"), strings.Contains(model, "minimax-m2.7"):
 		// MiniMax-M3 and M2.7: cache read $0.06 on $0.30 = 20%.
@@ -729,13 +774,14 @@ func cacheWrite1hCost(provider, model string, write5m float64) float64 {
 // now is the clock dated prices are read against; tests replace it.
 var now = time.Now
 
-// geminiArgonIntroEnd is when Gemini 4 Argon's introductory price ends:
+// geminiArgonIntroEnd is when the introductory price of Gemini 4 Argon —
+// and of Carbon, which shares its price list — ends:
 // Google lists it "through Nov 30, 2026" and the standard price "from Dec
 // 1, 2026" (ai.google.dev/gemini-api/docs/pricing, Oct 2026). Midnight
 // Pacific, the time zone Google bills the Gemini API in.
 var geminiArgonIntroEnd = time.Date(2026, time.December, 1, 0, 0, 0, 0, time.FixedZone("PST", -8*60*60))
 
-// geminiArgonRates is Gemini 4 Argon's input and output price per million
+// geminiArgonRates is the Gemini 4 Argon/Carbon input and output price per million
 // tokens at t: $2/$10 introductory, $4/$20 standard. Output includes
 // thinking tokens; there is no long-context tier.
 func geminiArgonRates(t time.Time) (in, out float64) {

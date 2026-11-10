@@ -67,12 +67,18 @@ const (
 	DefaultZAIJWTTTL = 30 * time.Minute // JWT token validity for ZAI auth
 
 	// Valores padrão para MiniMax
-	DefaultMiniMaxModel    = "MiniMax-M2.7"
+	// MiniMax-M3.1-Flash: MiniMax retires the M2.5/M2.7 families on Nov 18
+	// 2026 and already routes plan requests for them to M3.1 Flash, the
+	// replacement it names (platform.minimax.io/docs/faq/models).
+	DefaultMiniMaxModel    = "MiniMax-M3.1-Flash"
 	MiniMaxAPIURL          = "https://api.minimax.io/v1/text/chatcompletion_v2"
 	MiniMaxAnthropicAPIURL = "https://api.minimax.io/anthropic/v1/messages"
 
 	// Valores padrão para Moonshot (Kimi)
-	DefaultMoonshotModel = "kimi-k2.6"
+	// kimi-k3.1-pro: the K2 line (the previous default was kimi-k2.6) is
+	// closed to accounts created from Nov 1 2026 and retires at the end of
+	// Dec 2026 (platform.kimi.ai/docs/models).
+	DefaultMoonshotModel = "kimi-k3.1-pro"
 	MoonshotAPIURL       = "https://api.moonshot.ai/v1/chat/completions"
 
 	// Valores padrão para GitHub Copilot

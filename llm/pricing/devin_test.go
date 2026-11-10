@@ -41,9 +41,27 @@ func TestDevinStaticRate(t *testing.T) {
 		{"swe-1.6-fast", 0.5, 2.5, true},
 		{"swe-1.7-lightning", 2.5, 12.5, true},
 		{"  SWE-1.7  ", 0.5, 2.5, true},
-		// Never listed with a price: unknown, not guessed.
-		{"claude-fable-5-1", 0, 0, false},
-		{"grok-4.7", 0, 0, false},
+		// Families Cognition's public table priced by Nov 9 2026.
+		{"claude-fable-5-2-high", 8, 40, true},
+		{"claude-fable-5-2-high-fast", 16, 80, true},
+		{"claude-fable-5-1", 10, 50, true},
+		{"claude-5-fable-high", 10, 50, true},
+		{"claude-sonnet-5-5-low", 2, 10, true},
+		{"claude-sonnet-5", 2, 10, true},
+		{"claude-haiku-5-5-high", 0.1, 0.5, true},
+		{"gpt-6-1-terra-medium", 1, 5, true},
+		{"gpt-6-1-terra-medium-priority", 2, 10, true},
+		{"gpt-6-1-sol-high", 2, 10, true},
+		{"gpt-6-astra-max-priority", 20, 100, true},
+		{"gpt-6-luna", 0.1, 0.5, true},
+		{"gpt-5.6-sol", 4, 20, true},
+		{"kimi-k3-1-pro-high", 2, 10, true},
+		{"kimi-k3", 3, 15, true},
+		{"grok-4.7", 2, 6, true},
+		// Never listed with a stable price: unknown, not guessed.
+		{"swe-2-flash-high", 0, 0, false},
+		{"gemini-4-argon-high", 0, 0, false},
+		{"adaptive", 0, 0, false},
 		{"", 0, 0, false},
 	} {
 		in, out, ok := DevinStaticRate(tc.model)

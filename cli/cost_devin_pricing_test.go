@@ -32,7 +32,7 @@ func TestDevinStaticPricing(t *testing.T) {
 		{"claude-opus-5-xhigh", 5, 25, true},
 		{"claude-opus-5-max-fast", 10, 50, true},
 		{"claude-sonnet-5-fast", 2, 10, true}, // no fast variant listed: base rate
-		{"gpt-5.6-sol", 1.2, 6, true},
+		{"gpt-5.6-sol", 4, 20, true},
 		{"gpt-5-6-sol-high-priority", 8, 40, true},
 		{"gpt-5.6-luna-none-priority", 0.4, 2.4, true},
 		{"gpt-5.4", 2.5, 15, true},
@@ -50,9 +50,12 @@ func TestDevinStaticPricing(t *testing.T) {
 		{"swe-1.6-fast", 0.5, 2.5, true}, // a family of its own, not a fast variant
 		{"gemini-3-flash", 0.5, 3, true},
 		{"gemini-3.5-flash", 1.5, 9, true},
-		// Never listed with a price: stays unknown rather than guessed.
-		{"claude-fable-5.1", 0, 0, false},
-		{"grok-4.6", 0, 0, false},
+		// Families Cognition's public table priced by Nov 9 2026.
+		{"claude-fable-5.2", 8, 40, true},
+		{"claude-fable-5.1", 10, 50, true},
+		{"grok-4.6", 2, 6, true},
+		// Never listed with a stable price: stays unknown rather than guessed.
+		{"swe-2", 0, 0, false},
 		{"adaptive", 0, 0, false},
 		{"gpt-5.5x", 0, 0, false}, // a longer id must continue with a separator
 	}
@@ -114,7 +117,7 @@ func TestLookupModelPricing_Precedence(t *testing.T) {
 	// Without any source a never-priced Devin family is known-zero, which
 	// /cost surfaces as "no rate known" instead of a silent free.
 	t.Setenv(pricing.OverrideEnv, "")
-	in, out, known = lookupModelPricing("DEVIN", "claude-fable-5.1")
+	in, out, known = lookupModelPricing("DEVIN", "swe-2-flash")
 	assert.True(t, known)
 	assert.Zero(t, in)
 	assert.Zero(t, out)
@@ -179,7 +182,7 @@ func TestRecordRealUsage_EnterpriseDevinClaudeTurnIsBilledOnce(t *testing.T) {
 func TestUnmeteredModelsLocked(t *testing.T) {
 	t.Setenv(pricing.OverrideEnv, "")
 	ct := NewCostTrackerAt(t.TempDir())
-	ct.RecordRealUsage("DEVIN", "claude-fable-5.1", &models.UsageInfo{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11, InputTokensTotal: 10, IsReal: true})
+	ct.RecordRealUsage("DEVIN", "swe-2-flash", &models.UsageInfo{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11, InputTokensTotal: 10, IsReal: true})
 	ct.RecordRealUsage("DEVIN", "claude-sonnet-4.6", &models.UsageInfo{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11, InputTokensTotal: 10, IsReal: true})
 	ct.RecordRealUsage("OLLAMA", "llama3", &models.UsageInfo{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11, InputTokensTotal: 10, IsReal: true})
 	ct.RecordRealUsage("COPILOT", "gpt-4o", &models.UsageInfo{PromptTokens: 10, CompletionTokens: 1, TotalTokens: 11, InputTokensTotal: 10, IsReal: true})
@@ -187,7 +190,7 @@ func TestUnmeteredModelsLocked(t *testing.T) {
 	ct.mu.RLock()
 	got := unmeteredModelsLocked(ct)
 	ct.mu.RUnlock()
-	assert.Equal(t, []string{"COPILOT/gpt-4o", "DEVIN/claude-fable-5.1"}, got,
+	assert.Equal(t, []string{"COPILOT/gpt-4o", "DEVIN/swe-2-flash"}, got,
 		"priced and local-free models are not listed; unknown-rate ones are")
 
 	t.Setenv(pricing.OverrideEnv, "DEVIN:*=1/5")
