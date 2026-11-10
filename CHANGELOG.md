@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.229.0](https://github.com/diillson/chatcli/compare/v1.228.1...v1.229.0) (2026-11-10)
+
+
+### Features
+
+* **catalog:** Fable 5.2, Gemini 4 Carbon, GPT-6.1 Terra, Kimi K3.1 Pro and MiniMax M3.1 Flash across providers ([#1951](https://github.com/diillson/chatcli/issues/1951)) ([3debc6c](https://github.com/diillson/chatcli/commit/3debc6c60a56803daaff99dea119d76b5d35a461))
+
 ## [1.228.1](https://github.com/diillson/chatcli/compare/v1.228.0...v1.228.1) (2026-11-08)
 
 
