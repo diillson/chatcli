@@ -222,7 +222,7 @@ func TestNov2026_RetiredModelsLeftTheRegistry(t *testing.T) {
 			assert.Equal(t, id, GetDisplayName(provider, id), "%s is shown as itself", id)
 		}
 	}
-	// Their neighbours stay.
+	// The models next to them stay.
 	for provider, id := range map[string]string{
 		ProviderOpenAI:     "o3",
 		ProviderOpenRouter: "anthropic/claude-sonnet-5",
