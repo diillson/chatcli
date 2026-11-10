@@ -201,3 +201,34 @@ func TestContainsName(t *testing.T) {
 	assert.True(t, containsName("m-25-m-2", "m-2"))
 	assert.False(t, containsName("anything", ""))
 }
+
+// Models the vendors stopped serving are gone from the registry: OpenAI
+// shut down o3-mini, o4-mini and gpt-4.1-nano on Oct 23 2026, Bedrock's
+// Claude Sonnet 4 reached EOL on Oct 14 2026, and OpenRouter answers 404
+// "no longer available" for the three slugs below.
+func TestNov2026_RetiredModelsLeftTheRegistry(t *testing.T) {
+	for provider, ids := range map[string][]string{
+		ProviderOpenAI:     {"o3-mini", "o4-mini", "gpt-4.1-nano"},
+		ProviderOpenRouter: {"anthropic/claude-sonnet-4", "anthropic/claude-opus-4", "deepseek/deepseek-r1"},
+		ProviderBedrock: {
+			"global.anthropic.claude-sonnet-4-20250514-v1:0",
+			"us.anthropic.claude-sonnet-4-20250514-v1:0",
+			"eu.anthropic.claude-sonnet-4-20250514-v1:0",
+		},
+	} {
+		for _, id := range ids {
+			_, ok := ResolveExact(provider, id)
+			assert.False(t, ok, "%s %s was retired and must not be listed", provider, id)
+			assert.Equal(t, id, GetDisplayName(provider, id), "%s is shown as itself", id)
+		}
+	}
+	// Their neighbours stay.
+	for provider, id := range map[string]string{
+		ProviderOpenAI:     "o3",
+		ProviderOpenRouter: "anthropic/claude-sonnet-5",
+		ProviderBedrock:    "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+	} {
+		_, ok := ResolveExact(provider, id)
+		assert.True(t, ok, "%s %s", provider, id)
+	}
+}

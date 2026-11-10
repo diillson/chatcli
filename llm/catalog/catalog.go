@@ -341,34 +341,18 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"json_mode", "tools", "vision"},
 	},
 	// ── OpenAI o-series reasoning models ──────────────────────────
-	// o3-mini, o4-mini and gpt-4.1-nano shut down Oct 23 2026; the
-	// dated o3/gpt-5 snapshots on Dec 11 2026 (the bare o3 and gpt-5
-	// aliases are not on the list). They stay until the date passes —
-	// removing a model that still serves would only mis-size live calls.
+	// o3-mini, o4-mini and gpt-4.1-nano were shut down by OpenAI on Oct
+	// 23 2026 (developers.openai.com/api/docs/deprecations) and removed
+	// here on Nov 10 2026; llm/pricing keeps their rates so old session
+	// logs still price. The dated o3/gpt-5 snapshots follow on Dec 11
+	// 2026 (the bare o3 and gpt-5 aliases are not on the list), and the
+	// remaining GPT-4o / GPT-4.1 snapshots on Jan 14 2027 — those stay
+	// until the date passes: removing a model that still serves would
+	// only mis-size live calls.
 	{
 		ID:              "o3",
 		Aliases:         []string{"o3"},
 		DisplayName:     "o3",
-		Provider:        ProviderOpenAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 100000,
-		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"vision", "reasoning", "tools", "json_mode"},
-	},
-	{
-		ID:              "o3-mini",
-		Aliases:         []string{"o3-mini"},
-		DisplayName:     "o3 mini",
-		Provider:        ProviderOpenAI,
-		ContextWindow:   200000,
-		MaxOutputTokens: 100000,
-		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"reasoning", "tools", "json_mode"},
-	},
-	{
-		ID:              "o4-mini",
-		Aliases:         []string{"o4-mini"},
-		DisplayName:     "o4 mini",
 		Provider:        ProviderOpenAI,
 		ContextWindow:   200000,
 		MaxOutputTokens: 100000,
@@ -393,16 +377,6 @@ var registry = []ModelMeta{
 		Provider:        ProviderOpenAI,
 		ContextWindow:   1047576,
 		MaxOutputTokens: 32768,
-		PreferredAPI:    APIResponses,
-		Capabilities:    []string{"vision", "tools", "json_mode"},
-	},
-	{
-		ID:              "gpt-4.1-nano",
-		Aliases:         []string{"gpt-4.1-nano"},
-		DisplayName:     "GPT-4.1 nano",
-		Provider:        ProviderOpenAI,
-		ContextWindow:   1047576,
-		MaxOutputTokens: 16384,
 		PreferredAPI:    APIResponses,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
@@ -1876,26 +1850,6 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
 	{
-		ID:              "anthropic/claude-sonnet-4",
-		Aliases:         []string{"openrouter-claude-sonnet-4"},
-		DisplayName:     "Claude Sonnet 4 (OpenRouter)",
-		Provider:        ProviderOpenRouter,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "json_mode", "extended_thinking"},
-	},
-	{
-		ID:              "anthropic/claude-opus-4",
-		Aliases:         []string{"openrouter-claude-opus-4"},
-		DisplayName:     "Claude Opus 4 (OpenRouter)",
-		Provider:        ProviderOpenRouter,
-		ContextWindow:   200000,
-		MaxOutputTokens: 32000,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "json_mode", "extended_thinking"},
-	},
-	{
 		ID:              "google/gemini-2.5-pro",
 		Aliases:         []string{"openrouter-gemini-2.5-pro"},
 		DisplayName:     "Gemini 2.5 Pro (OpenRouter)",
@@ -1915,6 +1869,10 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
+	// Removed on Nov 10 2026: anthropic/claude-sonnet-4, anthropic/
+	// claude-opus-4 and deepseek/deepseek-r1 — OpenRouter answers 404
+	// "no longer available on OpenRouter: no provider serves this model
+	// anymore" for all three (only deepseek/deepseek-r1-0528 remains).
 	{
 		ID:              "meta-llama/llama-4-maverick",
 		Aliases:         []string{"openrouter-llama-4-maverick"},
@@ -1924,21 +1882,6 @@ var registry = []ModelMeta{
 		MaxOutputTokens: 65536,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools"},
-	},
-	{
-		// DeepSeek R1 via OpenRouter: served at 64K context per the
-		// OpenRouter model card. R1 was deprecated upstream by DeepSeek
-		// (replaced by deepseek-v4-flash / -pro at 1M); the entry is
-		// kept for callers still pinning the old ID. Output ceiling
-		// follows DeepSeek's published R1 spec (8K typical).
-		ID:              "deepseek/deepseek-r1",
-		Aliases:         []string{"openrouter-deepseek-r1"},
-		DisplayName:     "DeepSeek R1 (OpenRouter, deprecated)",
-		Provider:        ProviderOpenRouter,
-		ContextWindow:   64000,
-		MaxOutputTokens: 8192,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools"},
 	},
 	{
 		ID:              "mistralai/mistral-large",
@@ -2245,47 +2188,14 @@ var registry = []ModelMeta{
 		Capabilities:    []string{"tools", "vision", "json_mode", "extended_thinking"},
 	},
 
-	// Claude 4 / 4.1. Sonnet 4 has a real global. inference profile (AWS
-	// launched global cross-region inference with it, Sep 2025) — canonical
-	// goes global so /switch works from any region; the us./eu. regional
-	// profiles stay as their own entries for operators pinning geography.
-	// Opus 4 and 4.1 have NO global profile on AWS — us. remains the
-	// broadest invokable spelling for them.
-	{
-		ID:              "global.anthropic.claude-sonnet-4-20250514-v1:0",
-		Aliases:         []string{"bedrock-sonnet-4", "anthropic.claude-sonnet-4-20250514-v1:0", "claude-sonnet-4"},
-		DisplayName:     "Claude Sonnet 4 (Bedrock, global)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "extended_thinking"},
-	},
-	{
-		ID:              "us.anthropic.claude-sonnet-4-20250514-v1:0",
-		Aliases:         []string{"bedrock-sonnet-4-us"},
-		DisplayName:     "Claude Sonnet 4 (Bedrock, us)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "extended_thinking"},
-	},
-	{
-		ID:              "eu.anthropic.claude-sonnet-4-20250514-v1:0",
-		Aliases:         []string{"bedrock-sonnet-4-eu"},
-		DisplayName:     "Claude Sonnet 4 (Bedrock, eu)",
-		Provider:        ProviderBedrock,
-		ContextWindow:   200000,
-		MaxOutputTokens: 64000,
-		PreferredAPI:    APIAnthropicMessages,
-		Capabilities:    []string{"tools", "vision", "json_mode", "extended_thinking"},
-	},
+	// Claude 4.1. Opus 4.1 has NO global profile on AWS — us. remains the
+	// broadest invokable spelling for it.
 	// Bedrock lifecycle (docs.aws.amazon.com/bedrock/latest/userguide/
-	// model-lifecycle.html, Sep 2 2026): Sonnet 4 is Legacy with EOL Oct
-	// 14 2026 and Opus 4.1 is Legacy with EOL Jan 8 2027 — both still
-	// invokable today, so they stay. Opus 4 is retired on Bedrock and was
-	// removed.
+	// model-lifecycle-legacy.html, Nov 10 2026): Opus 4.1 is in extended
+	// access with EOL Jan 8 2027 — still invokable, so it stays. Sonnet 4
+	// reached EOL on Oct 14 2026 (its global./us./eu. entries were removed
+	// on Nov 10 2026) and Opus 4 was retired earlier. Sonnet 4.5 is Legacy
+	// since Oct 8 2026 with EOL Apr 8 2027.
 	{
 		ID:              "us.anthropic.claude-opus-4-1-20250805-v1:0",
 		Aliases:         []string{"bedrock-opus-4-1", "anthropic.claude-opus-4-1-20250805-v1:0", "claude-opus-4-1"},
