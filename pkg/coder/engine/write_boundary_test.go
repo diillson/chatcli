@@ -2,6 +2,7 @@ package engine
 
 import (
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -101,5 +102,65 @@ func TestResolveThroughExistingAncestorFallsBackToTheInput(t *testing.T) {
 	}
 	if !filepath.IsAbs(got) {
 		t.Errorf("resolution must stay absolute, got %q", got)
+	}
+}
+
+// A tool the system links out of its binary directory is still a system
+// binary: on distributions where /usr/bin/env is a link to a multi-call
+// binary elsewhere, the resolved path alone refused it.
+func TestSystemBinaryRecognizedByRequestedPath(t *testing.T) {
+	if !underSystemBin("/usr/bin/env") || !underSystemBin("/opt/homebrew/bin/python3") {
+		t.Fatal("a path in a system binary directory is not recognized")
+	}
+	for _, p := range []string{"/usr/lib/cargo/bin/coreutils/env", "/home/user/bin/tool", "/usr/binary", "/tmp/usr/bin/env"} {
+		if underSystemBin(p) {
+			t.Errorf("%s is not in a system binary directory", p)
+		}
+	}
+	// Writing through such a path stays refused, whatever it resolves to.
+	e := NewEngine(io.Discard, io.Discard, t.TempDir())
+	if err := e.validateWritePath("/usr/bin/env"); err == nil {
+		t.Fatal("writing a system binary must be refused")
+	}
+}
+
+// The situation on such a distribution, built for real: a binary directory
+// whose entry is a link to a file outside every binary directory.
+func TestReadFollowsALinkOutOfABinaryDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir, libDir := filepath.Join(root, "bin"), filepath.Join(root, "lib")
+	for _, d := range []string{binDir, libDir} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	real := filepath.Join(libDir, "multicall")
+	if err := os.WriteFile(real, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(binDir, "env")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	prev := systemBinPaths
+	systemBinPaths = append(append([]string(nil), prev...), binDir+"/")
+	t.Cleanup(func() { systemBinPaths = prev })
+
+	e := NewEngine(io.Discard, io.Discard, t.TempDir())
+	if err := e.validatePath(link); err != nil {
+		t.Fatalf("reading a linked system binary must stay allowed: %v", err)
+	}
+	// The target itself, asked for directly, is outside the workspace.
+	if err := e.validatePath(real); err == nil {
+		t.Fatal("a file outside the workspace and the binary directories was allowed")
+	}
+	if err := e.validateWritePath(link); err == nil {
+		t.Fatal("writing through a system binary link must be refused")
 	}
 }
