@@ -141,6 +141,20 @@ func (c *RemoteClient) Snapshot(ctx context.Context) error {
 	return err
 }
 
+// Prune drops the terminal jobs matching filter from the daemon's history
+// and returns their IDs. A daemon older than this request answers with an
+// "unknown kind" error, which the caller reports as is.
+func (c *RemoteClient) Prune(ctx context.Context, owner Owner, filter PruneFilter) ([]JobID, error) {
+	raw, _ := json.Marshal(filter)
+	reply, err := c.call(ctx, Frame{Kind: KindPrune, Owner: &owner, Input: raw})
+	if err != nil {
+		return nil, err
+	}
+	var out PruneResult
+	_ = json.Unmarshal(reply.Result, &out)
+	return out.Removed, nil
+}
+
 // Stats returns the daemon's current runtime stats.
 func (c *RemoteClient) Stats(ctx context.Context) (DaemonStats, error) {
 	reply, err := c.call(ctx, Frame{Kind: KindStats})

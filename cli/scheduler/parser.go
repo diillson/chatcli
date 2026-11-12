@@ -80,7 +80,7 @@ func ParseScheduleDSL(input string) (Schedule, error) {
 
 	// Relative: "in 5m", "+5m", "after 10s".
 	if strings.HasPrefix(in, "+") {
-		d, err := time.ParseDuration(strings.TrimPrefix(in, "+"))
+		d, err := ParseLooseDuration(strings.TrimPrefix(in, "+"))
 		if err != nil {
 			return Schedule{}, fmt.Errorf("schedule: invalid duration %q: %w", in, err)
 		}
@@ -88,7 +88,7 @@ func ParseScheduleDSL(input string) (Schedule, error) {
 	}
 	for _, prefix := range []string{"in ", "after "} {
 		if strings.HasPrefix(lower, prefix) {
-			d, err := time.ParseDuration(strings.TrimSpace(in[len(prefix):]))
+			d, err := ParseLooseDuration(in[len(prefix):])
 			if err != nil {
 				return Schedule{}, fmt.Errorf("schedule: invalid duration: %w", err)
 			}
@@ -98,7 +98,7 @@ func ParseScheduleDSL(input string) (Schedule, error) {
 
 	// Interval: "every 30s".
 	if strings.HasPrefix(lower, "every ") {
-		d, err := time.ParseDuration(strings.TrimSpace(in[len("every "):]))
+		d, err := ParseLooseDuration(in[len("every "):])
 		if err != nil {
 			return Schedule{}, fmt.Errorf("schedule: invalid interval: %w", err)
 		}
@@ -113,7 +113,7 @@ func ParseScheduleDSL(input string) (Schedule, error) {
 	}
 
 	// Last resort — naked duration?
-	if d, err := time.ParseDuration(in); err == nil {
+	if d, err := ParseLooseDuration(in); err == nil {
 		return Schedule{Kind: ScheduleRelative, Relative: d}, nil
 	}
 	return Schedule{}, fmt.Errorf("schedule: cannot parse %q", in)

@@ -41,8 +41,9 @@ func CommandSuggestions(command string) []Suggestion {
 			{Text: "--every", Description: "Poll interval (default 5s)"},
 			{Text: "--timeout", Description: "Max wait duration (default 30m)"},
 			{Text: "--max-polls", Description: "Max poll count"},
-			{Text: "--async", Description: "Do not block; return job id"},
-			{Text: "--on-timeout", Description: "fail | fire_anyway | fallback"},
+			{Text: "--block", Description: "Hold the prompt until the wait ends (default: background)"},
+			{Text: "--quiet", Description: "Do not announce the end of the wait"},
+			{Text: "--on-timeout", Description: "fail | fire_anyway"},
 		}
 	case "/jobs", "jobs":
 		return []Suggestion{
@@ -53,6 +54,7 @@ func CommandSuggestions(command string) []Suggestion {
 			{Text: "pause", Description: "Pause a pending job"},
 			{Text: "resume", Description: "Resume a paused job"},
 			{Text: "logs", Description: "Tail a job's execution history"},
+			{Text: "wait", Description: "Hold the prompt until a job ends"},
 			{Text: "history", Description: "Show terminal jobs"},
 			{Text: "daemon", Description: "Daemon control: start|stop|status"},
 			{Text: "gc", Description: "Trigger on-demand garbage collection"},

@@ -623,6 +623,50 @@ func (s *Scheduler) FindByName(name string) (*Job, bool) {
 	return j.Clone(), true
 }
 
+// ResolveRef turns a job reference — an ID, a job name, or the start of an
+// ID — into the job's ID. A name several jobs carried resolves to the live
+// one, else to the most recently finished. IDs are opaque hashes, so both
+// people and models reach for the name they chose.
+func (s *Scheduler) ResolveRef(ref string) (JobID, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", ErrJobNotFound
+	}
+	s.mu.RLock()
+	_, isID := s.jobs[JobID(ref)]
+	s.mu.RUnlock()
+	if isID {
+		return JobID(ref), nil
+	}
+	return MatchJobRef(s.List(ListFilter{IncludeTerminal: true}), ref)
+}
+
+// MatchJobRef resolves ref against summaries ordered as List returns them
+// (live jobs first, then finished ones newest first): an exact name wins,
+// then an ID prefix of at least four characters that only one job has.
+func MatchJobRef(summaries []JobSummary, ref string) (JobID, error) {
+	for _, sum := range summaries {
+		if string(sum.ID) == ref || sum.Name == ref {
+			return sum.ID, nil
+		}
+	}
+	var hits []string
+	if len(ref) >= 4 {
+		for _, sum := range summaries {
+			if strings.HasPrefix(string(sum.ID), ref) {
+				hits = append(hits, string(sum.ID))
+			}
+		}
+	}
+	switch len(hits) {
+	case 0:
+		return "", fmt.Errorf("%w: %q matches no job ID or name", ErrJobNotFound, ref)
+	case 1:
+		return JobID(hits[0]), nil
+	}
+	return "", fmt.Errorf("%w: %q matches %s", ErrJobAmbiguous, ref, strings.Join(hits, ", "))
+}
+
 // ListFilter is an OR-of-conjunctions filter for List.
 type ListFilter struct {
 	Owner           *Owner
