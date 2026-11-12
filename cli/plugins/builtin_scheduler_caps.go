@@ -64,6 +64,8 @@ func (p *BuiltinSchedulerPlugin) DescribeCall(args []string) string {
 		}
 	case "list":
 		return i18n.T("plugins.scheduler.describe.list")
+	case "clear":
+		return i18n.T("plugins.scheduler.describe.clear")
 	}
 	if sub != "" {
 		return i18n.T("plugins.scheduler.describe.generic", sub)

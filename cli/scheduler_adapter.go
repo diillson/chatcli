@@ -140,6 +140,100 @@ func (a *schedulerPluginAdapter) ResumeJob(ctx context.Context, owner plugins.Sc
 	})
 }
 
+// remoteEnqueue creates a schedule or wait job through the daemon. A
+// synchronous wait then holds the caller until the job ends, as the
+// in-process adapter does: it used to return as soon as the job was
+// queued, which a model read as the condition holding.
+func (a *schedulerPluginAdapter) remoteEnqueue(ctx context.Context, c *scheduler.RemoteClient, owner scheduler.Owner, op string, in scheduler.ToolInput) (*scheduler.ToolOutput, error) {
+	if op == "wait" {
+		// The daemon admits jobs through schedule_job, which wants a
+		// schedule and an action. The in-process wait fills both in;
+		// without the same here a bare wait (no then=) was rejected.
+		if in.When == "" && in.Schedule == nil {
+			in.When = "when-ready"
+		}
+		if in.Do == "" && in.Action == nil {
+			in.Do = "noop"
+		}
+	}
+	o, err := c.Enqueue(ctx, owner, in)
+	if err != nil {
+		return nil, err
+	}
+	if op == "wait" && !in.Async && o.OK {
+		return a.remoteAwait(ctx, c, o, in.MaxBlock), nil
+	}
+	return o, nil
+}
+
+// resolveRemoteJobRef turns a job ID, name or ID prefix into the job's ID
+// through the daemon, as the in-process adapter does.
+func resolveRemoteJobRef(ctx context.Context, c *scheduler.RemoteClient, op, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("scheduler %s: id is required", op)
+	}
+	if _, err := c.Query(ctx, scheduler.JobID(ref)); err == nil {
+		return ref, nil
+	}
+	all, err := c.List(ctx, scheduler.ListFilter{IncludeTerminal: true})
+	if err != nil {
+		return ref, err
+	}
+	id, err := scheduler.MatchJobRef(all, ref)
+	if err != nil {
+		return ref, fmt.Errorf("scheduler %s: %w", op, err)
+	}
+	return string(id), nil
+}
+
+// remoteAwaitPoll paces remoteAwait's lookups.
+const remoteAwaitPoll = 500 * time.Millisecond
+
+// remoteAwait polls the daemon until the job ends, the caller cancels, or
+// the hold budget (max_block, else 31 minutes) runs out — in which case
+// the reply says the job keeps running and how to pick it up.
+func (a *schedulerPluginAdapter) remoteAwait(ctx context.Context, c *scheduler.RemoteClient, queued *scheduler.ToolOutput, maxBlock string) *scheduler.ToolOutput {
+	hold := 31 * time.Minute
+	if d, err := scheduler.ParseLooseDuration(maxBlock); err == nil && d > 0 && d < hold {
+		hold = d
+	}
+	deadline := time.Now().Add(hold)
+	tick := time.NewTicker(remoteAwaitPoll)
+	defer tick.Stop()
+	status := queued.Status
+	for {
+		if j, err := c.Query(ctx, queued.JobID); err == nil {
+			status = j.Status
+			if j.Status.IsTerminal() {
+				out := &scheduler.ToolOutput{OK: j.Status == scheduler.StatusCompleted, JobID: j.ID, Status: j.Status, Job: j}
+				if j.LastResult != nil {
+					out.Outcome = j.LastResult.Outcome
+					out.Details = j.LastResult.Output
+				}
+				return out
+			}
+		}
+		if time.Now().After(deadline) {
+			return &scheduler.ToolOutput{OK: false, JobID: queued.JobID, Status: status, Error: fmt.Sprintf(
+				"wait_until: gave up waiting after %s; job %s is still %s and KEEPS RUNNING in background. Check it later with query {\"id\":%q}",
+				hold.Round(time.Second), queued.JobID, status, queued.JobID)}
+		}
+		select {
+		case <-ctx.Done():
+			return &scheduler.ToolOutput{OK: false, JobID: queued.JobID, Status: status, Error: ctx.Err().Error()}
+		case <-tick.C:
+		}
+	}
+}
+
+// ClearJobs implements plugins.SchedulerCleaner.
+func (a *schedulerPluginAdapter) ClearJobs(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
+	return a.dispatch(ctx, owner, inputJSON, "clear", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
+		return t.ClearJobs(ctx, so, inputJSON)
+	})
+}
+
 // dispatch translates the plugin-local Owner to the scheduler Owner and
 // routes to either the in-process scheduler or (via jsonline) the
 // remote client. Remote clients don't expose a ToolAdapter directly,
@@ -186,10 +280,9 @@ func (a *schedulerPluginAdapter) remote(ctx context.Context, owner scheduler.Own
 	}
 	c := a.cli.schedulerRemote
 	needID := func() error {
-		if strings.TrimSpace(in.ID) == "" {
-			return fmt.Errorf("scheduler %s: id is required", op)
-		}
-		return nil
+		id, err := resolveRemoteJobRef(ctx, c, op, in.ID)
+		in.ID = id
+		return err
 	}
 	var out any
 	switch op {
@@ -237,8 +330,21 @@ func (a *schedulerPluginAdapter) remote(ctx context.Context, owner scheduler.Own
 			return "", err
 		}
 		out = scheduler.ToolOutput{OK: true, JobID: scheduler.JobID(in.ID), Status: scheduler.StatusPending}
+	case "clear":
+		filter, err := scheduler.PruneFilterFromInput(in, owner)
+		if err != nil {
+			return "", err
+		}
+		removed, err := c.Prune(ctx, owner, filter)
+		if err != nil {
+			return "", err
+		}
+		if removed == nil {
+			removed = []scheduler.JobID{}
+		}
+		out = scheduler.ToolOutput{OK: true, Removed: removed}
 	default: // schedule, wait: both enqueue a job (wait carries its condition)
-		o, err := c.Enqueue(ctx, owner, in)
+		o, err := a.remoteEnqueue(ctx, c, owner, op, in)
 		if err != nil {
 			return "", err
 		}

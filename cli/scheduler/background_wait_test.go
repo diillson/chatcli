@@ -386,3 +386,27 @@ func TestDescribeCondition(t *testing.T) {
 		}
 	}
 }
+
+// The filter names the tool documents must reach the filter, and the Go
+// names the daemon protocol sends must keep working.
+func TestListFilterReadsDocumentedNames(t *testing.T) {
+	var f ListFilter
+	if err := json.Unmarshal([]byte(`{"include_terminal":true,"name_substr":"api","statuses":["failed"],"tag":"env"}`), &f); err != nil {
+		t.Fatal(err)
+	}
+	if !f.IncludeTerminal || f.NameSubstr != "api" || len(f.Statuses) != 1 || f.Tag != "env" {
+		t.Fatalf("documented names: %+v", f)
+	}
+	owner := Owner{Kind: OwnerUser, ID: "u"}
+	wire, _ := json.Marshal(ListFilter{IncludeTerminal: true, NameSubstr: "db", Owner: &owner})
+	var back ListFilter
+	if err := json.Unmarshal(wire, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !back.IncludeTerminal || back.NameSubstr != "db" || back.Owner == nil || back.Owner.ID != "u" {
+		t.Fatalf("protocol round trip: %s -> %+v", wire, back)
+	}
+	if err := json.Unmarshal([]byte(`{"name":"only"}`), &f); err != nil || f.NameSubstr != "only" || f.IncludeTerminal {
+		t.Fatalf("name alias / reset: %+v %v", f, err)
+	}
+}
