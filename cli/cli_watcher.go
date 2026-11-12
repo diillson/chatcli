@@ -62,8 +62,12 @@ func (cli *ChatCLI) StartWatcher(ctx context.Context, cfg k8s.WatchConfig) error
 		}
 	}()
 
-	// Wait for first collection
-	<-watcherReady
+	// Wait for the first collection, at most 15s — or less when the user
+	// interrupts the command: the watcher keeps starting in the background.
+	select {
+	case <-watcherReady:
+	case <-ctx.Done():
+	}
 
 	cli.WatcherContextFunc = summarizer.GenerateContext
 	cli.SetWatching(true, summarizer.GenerateStatusSummary)

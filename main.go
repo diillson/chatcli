@@ -473,7 +473,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	installSignalHandlers(chatCLI.IsExecuting, chatCLI.CancelOperation, cancel, logger)
+	installSignalHandlers(chatCLI.CanInterrupt, chatCLI.CancelOperation, cancel, logger)
 
 	if chatCLI.HandleOneShotOrFatal(ctx, opts) {
 		return
