@@ -283,6 +283,14 @@ func TestWebCommands_Plan(t *testing.T) {
 	}
 }
 
+// /wait registers a background job and returns, so the page no longer
+// refuses it: it goes to the backend like any other headless command.
+func TestWebCommands_WaitIsNotRefused(t *testing.T) {
+	if key, refused := webRefusals["/wait"]; refused {
+		t.Fatalf("/wait is still refused by the page (%s)", key)
+	}
+}
+
 func TestWebCommands_SkillsAndRefusals(t *testing.T) {
 	srv, eb := startEdit(t)
 	evs := turnEvents(t, srv, "chat", "/zeta the diff")
@@ -293,7 +301,7 @@ func TestWebCommands_SkillsAndRefusals(t *testing.T) {
 	if types(evs) != "run,done" || evs[1].Reply != "not invocable: /hidden" {
 		t.Fatalf("refused skill: %s %+v", types(evs), evs)
 	}
-	for _, line := range []string{"/exit", "/quit", "/wait --until x", "/reload", "/menu", "/auth login openai", "/retryall"} {
+	for _, line := range []string{"/exit", "/quit", "/reload", "/menu", "/auth login openai", "/retryall"} {
 		evs = turnEvents(t, srv, "chat", line)
 		token, _ := splitLeadingToken(line)
 		if types(evs) != "run,done" || !strings.Contains(evs[1].Reply, token) || strings.Contains(evs[1].Reply, "web.command") {
@@ -343,7 +351,7 @@ func TestPage_AppliesSessionEvents(t *testing.T) {
 	// Every string the session commands can show resolves in every page
 	// language, so no raw key ever reaches the transcript.
 	for _, lang := range UILanguages {
-		for _, key := range []string{"web.command.clear.kept", "web.command.rewind.done", "web.command.retry.running", "web.command.plan.how", "web.command.refuse.exit", "web.command.refuse.wait"} {
+		for _, key := range []string{"web.command.clear.kept", "web.command.rewind.done", "web.command.retry.running", "web.command.plan.how", "web.command.refuse.exit", "web.command.refuse.reload"} {
 			if v, ok := i18n.LookupIn(lang, key); !ok || v == "" {
 				t.Errorf("%s: %s unresolved", lang, key)
 			}

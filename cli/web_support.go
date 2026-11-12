@@ -40,12 +40,14 @@ var webSessionHints = map[string]bool{"rewind": true, "plan": true}
 
 // webHeadlessCommands run through RunWebCommandRPC with the terminal's own
 // handlers, under the web rules below.
-var webHeadlessCommands = map[string]bool{"/jobs": true, "/schedule": true, "/hooks": true, "/lsp": true}
+var webHeadlessCommands = map[string]bool{"/hooks": true, "/lsp": true}
 
-// webJobsReadOnly are the /jobs subcommands the page runs: the ones that
-// only read. Cancelling, pausing, pruning or driving the daemon stay in the
-// terminal, where the scheduler's owner is.
-var webJobsReadOnly = map[string]bool{"": true, "list": true, "show": true, "tree": true, "logs": true, "history": true, "help": true}
+// webJobsTerminalOnly are the /jobs subcommands the page leaves to the
+// terminal: pruning history, forcing a snapshot and driving the daemon act
+// on the scheduler as a whole. Everything that reads jobs, and everything
+// that acts on one job the page can itself create (cancel, pause, resume),
+// runs in the page.
+var webJobsTerminalOnly = map[string]bool{"clear": true, "clean": true, "prune": true, "gc": true, "daemon": true}
 
 // ListWebCommands returns the commands the web page advertises: the ACP
 // surface plus the web-only ones, each with a localized description.
@@ -80,9 +82,15 @@ func (cli *ChatCLI) RunWebCommandRPC(ctx context.Context, line string) (string, 
 	}
 	switch fields[0] {
 	case "/jobs":
-		if !webJobsReadOnly[sub] {
+		if webJobsTerminalOnly[sub] {
 			return i18n.T("web.command.jobs.terminal_only", sub), nil
 		}
+	case "/wait":
+		out, err := cli.RunSlashCommandRPC(ctx, line)
+		if err == nil && sub != "" && sub != "help" && cli.scheduler != nil && cli.schedulerRemote == nil {
+			out += "\n\n" + i18n.T("web.command.schedule.in_process")
+		}
+		return out, err
 	case "/schedule":
 		// The terminal has no "/schedule list" (it would try to create a
 		// job named "list"); in the page it is the listing it reads as.

@@ -736,6 +736,10 @@ func (b *schedulerBridge) PublishEvent(evt scheduler.Event) {
 	// interactive loop.
 	b.cli.markSchedulerDirty()
 
+	// Tell the terminal about jobs that asked to be announced (/wait,
+	// /schedule --notify) now that waits no longer hold the prompt.
+	b.cli.onSchedulerEvent(evt)
+
 	// Safety net: a park job that dies OUTSIDE its executor (action
 	// timeout, breaker open, retries exhausted, WAL write error) never
 	// reaches the executor's own wake-up fallbacks — without this hook

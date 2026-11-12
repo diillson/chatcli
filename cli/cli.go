@@ -577,6 +577,11 @@ type ChatCLI struct {
 	schedulerSocket string
 	schedulerCancel context.CancelFunc
 	schedulerDirty  int32 // atomic — bumped by scheduler events for prompt refresh
+	// jobNotices decides which finished jobs this terminal announces;
+	// replInteractive gates it to the interactive loop, the only place
+	// where printing above the prompt means anything.
+	jobNotices      jobNotifier
+	replInteractive atomic.Bool
 	// cmdInterrupt is the slash command Ctrl+C would cancel right now
 	// (guarded by mu); see command_interrupt.go.
 	cmdInterrupt *commandInterrupt
@@ -1311,6 +1316,8 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 	// gateway, one-shot), where unwinding the prompt has no meaning.
 	cli.replActive = true
 	defer func() { cli.replActive = false }()
+	cli.replInteractive.Store(true)
+	defer cli.replInteractive.Store(false)
 
 	shouldContinue := true
 	for shouldContinue {

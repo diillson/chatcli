@@ -42,8 +42,13 @@ type ACPCommandInfo struct {
 //     /auth (browser/stdin login flow), /plan /worktree (interactive UIs).
 //   - Daemons/channels: /gateway /connect /disconnect /channel /hub /watch
 //     (long-lived processes bound to the operator terminal).
-//   - Blocking/stdin: /hooks /lsp (management UIs), /schedule /wait /jobs
-//     /parked /resume /cancel-park (scheduler owns the interactive side).
+//   - Blocking/stdin: /hooks /lsp (management UIs), /parked /resume
+//     /cancel-park (the park flow owns the interactive side).
+//
+// /schedule, /wait and /jobs ARE here: each registers or inspects a
+// scheduler job and returns. /wait stopped holding its caller, and its
+// opt-in --block is declined on headless surfaces (schedulerHeadless),
+// where a held command would pin the capture slot every session shares.
 //
 // /agent, /coder and /run are NOT here: the ACP prompt handler drains them
 // first as session mode switches (they panic-request mode in the REPL).
@@ -56,6 +61,7 @@ var acpCommandAllow = map[string]bool{
 	"/cost": true, "/storage": true, "/metrics": true, "/ratelimit": true,
 	"/version": true, "/help": true, "/agents": true, "/board": true, "/mail": true,
 	"/taskgraph": true, "/dash": true,
+	"/schedule": true, "/wait": true, "/jobs": true,
 }
 
 // acpModeCommands are advertised alongside the allowlist but handled by the

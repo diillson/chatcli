@@ -94,7 +94,6 @@ var webRefusals = map[string]string{
 	"/connect":  "web.command.refuse.daemon",
 	"/worktree": "web.command.refuse.worktree",
 	"/reload":   "web.command.refuse.reload",
-	"/wait":     "web.command.refuse.wait",
 	"/retryall": "web.command.refuse.chunks", "/nextchunk": "web.command.refuse.chunks", "/skipchunk": "web.command.refuse.chunks",
 	"/reset": "web.command.refuse.redraw", "/redraw": "web.command.refuse.redraw",
 }
