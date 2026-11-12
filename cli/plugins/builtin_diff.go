@@ -65,15 +65,15 @@ Subcommands (cmd + args):
   dirs  {a, b, glob?}             added / removed / changed files between two
                                   directories (names only, ≤2000 entries; skips
                                   .git, node_modules, vendor; glob matches basenames)
-  apply {file, patch, dry_run?}   apply a unified diff to one file. Context is
+  apply {file, patch, apply?}     apply a unified diff to one file. Context is
                                   verified hunk by hunk; a mismatch refuses the
                                   whole patch and names the first failing line.
-                                  dry_run defaults to true (stats only);
-                                  dry_run:false writes the file and keeps file.bak`
+                                  it previews by default (stats only);
+                                  "apply": true writes the file and keeps file.bak`
 }
 
 // Version is semver.
-func (*BuiltinDiffPlugin) Version() string { return "1.0.0" }
+func (*BuiltinDiffPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinDiffPlugin) Path() string { return "" }
@@ -106,8 +106,9 @@ func (*BuiltinDiffPlugin) Schema() string {
 				"flags": []map[string]interface{}{
 					{"name": "file", "type": "string", "required": true, "description": "Target file path"},
 					{"name": "patch", "type": "string", "required": true, "description": "Unified diff text (--- / +++ headers optional, @@ hunks required)"},
-					{"name": "dry_run", "type": "boolean", "required": false, "description": "true (default): preview only; false: write the file and keep <file>.bak"}},
-				"examples": []string{`{"cmd":"apply","args":{"file":"main.go","patch":"@@ -1,2 +1,2 @@\n-old\n+new\n same\n"}}`, `{"cmd":"apply","args":{"file":"main.go","patch":"...","dry_run":false}}`}},
+					{"name": "apply", "type": "boolean", "required": false, "description": "true: write the file and keep <file>.bak. Omitted: preview only"},
+					{"name": "dry_run", "type": "boolean", "required": false, "description": "true (default): preview only. To write, pass \"apply\": true"}},
+				"examples": []string{`{"cmd":"apply","args":{"file":"main.go","patch":"@@ -1,2 +1,2 @@\n-old\n+new\n same\n"}}`, `{"cmd":"apply","args":{"file":"main.go","patch":"...","apply":true}}`}},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -160,6 +161,12 @@ func diffToolArgsFrom(raw map[string]json.RawMessage) diffToolArgs {
 		glob:    jsonString(raw, "glob", "pattern"),
 		context: clampInt(jsonInt(raw, "context", "lines"), diffToolDefaultContext, diffToolMaxContext),
 		dryRun:  true,
+	}
+	// "apply": true writes. A false boolean does not survive the agent
+	// loop's flattening of the call, so dry_run:false alone left every
+	// apply a preview.
+	if jsonBool(raw, "apply", "write") {
+		d.dryRun = false
 	}
 	if jsonHas(raw, "dry_run", "dryRun", "dry") {
 		d.dryRun = jsonBool(raw, "dry_run", "dryRun", "dry")

@@ -85,7 +85,7 @@ func (*BuiltinChannelsPlugin) Usage() string {
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinChannelsPlugin) Version() string { return "1.1.0" }
+func (*BuiltinChannelsPlugin) Version() string { return "1.1.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinChannelsPlugin) Path() string { return "" }
@@ -147,8 +147,17 @@ func parseChannelsInvocation(payload string) channelsInvocation {
 	if !strings.HasPrefix(payload, "{") {
 		if f := strings.Fields(payload); len(f) > 0 {
 			inv.Cmd = strings.ToLower(f[0])
-			if len(f) > 1 {
-				inv.Channel = f[1]
+			// "list telegram" and the flattened "list --channel telegram
+			// --limit 5" both arrive here.
+			positional, inner := argvToInnerJSON(f[1:], nil, map[string]bool{"limit": true})
+			var flags struct {
+				Channel string          `json:"channel"`
+				Limit   json.RawMessage `json:"limit"`
+			}
+			_ = json.Unmarshal([]byte(inner), &flags)
+			inv.Channel = firstNonEmptyStr(flags.Channel, positional)
+			if n := lenientInt(flags.Limit); n > 0 {
+				inv.Limit = n
 			}
 		}
 		return inv

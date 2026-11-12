@@ -109,7 +109,7 @@ Bare model names are accepted and resolved to the owning provider (active provid
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinModelPlugin) Version() string { return "1.0.0" }
+func (*BuiltinModelPlugin) Version() string { return "1.0.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinModelPlugin) Path() string { return "" }
@@ -262,6 +262,11 @@ func parseModelInvocation(args []string) (modelInvocation, error) {
 			}
 		}
 		inv.cmd = canonicalModelCmd(raw.Cmd)
+		if inv.cmd == "" && strings.TrimSpace(raw.Cmd) != "" {
+			// It used to fall through to "use" and switch the model for
+			// the rest of the task.
+			return inv, fmt.Errorf("@model: unknown cmd %q (valid: use|delegate|list|status|reset)", strings.TrimSpace(raw.Cmd))
+		}
 		if inv.cmd == "" {
 			if inv.model != "" {
 				inv.cmd = "use"

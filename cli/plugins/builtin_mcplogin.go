@@ -84,7 +84,7 @@ then retry the original tool.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMCPLoginPlugin) Version() string { return "1.0.0" }
+func (*BuiltinMCPLoginPlugin) Version() string { return "1.0.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMCPLoginPlugin) Path() string { return "" }
@@ -190,6 +190,9 @@ func parseMCPLoginInvocation(args []string) (cmd string, server string, err erro
 		}
 		server = firstNonEmptyStr(raw.Args.Server, raw.Args.Name, raw.Server, raw.Name)
 		cmd = canonicalMCPLoginCmd(raw.Cmd)
+		if cmd == "" && strings.TrimSpace(raw.Cmd) != "" {
+			return "", "", errUnknownMCPLoginCmd(raw.Cmd)
+		}
 		if cmd == "" {
 			if server != "" {
 				return "login", server, nil
@@ -228,6 +231,14 @@ func parseMCPLoginInvocation(args []string) (cmd string, server string, err erro
 			}
 			positionals = append(positionals, trimQuotes(f))
 		}
+	}
+	// "restart aws": two bare words whose first is no verb of this tool.
+	// Reading it as a server name would start a login for "restart".
+	// The same when the server came from a flag ("restart --server aws"):
+	// a bare word that is neither a verb nor needed as the server name.
+	if cmd == "" && len(positionals) > 0 && canonicalMCPLoginCmd(positionals[0]) == "" &&
+		(len(positionals) >= 2 || server != "") {
+		return "", "", errUnknownMCPLoginCmd(positionals[0])
 	}
 	for _, p := range positionals {
 		if cmd == "" {
@@ -270,4 +281,11 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// errUnknownMCPLoginCmd rejects a verb this tool does not have. It used to
+// fall through to "login", so asking to restart a server opened a browser
+// for an OAuth flow nobody requested.
+func errUnknownMCPLoginCmd(cmd string) error {
+	return fmt.Errorf("@mcp-login: unknown cmd %q (valid: login|logout|status). Restarting or reloading a server is done by the user with /mcp", strings.TrimSpace(cmd))
 }
