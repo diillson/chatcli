@@ -32,6 +32,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -674,6 +675,37 @@ type ListFilter struct {
 	Tag             string
 	NameSubstr      string
 	IncludeTerminal bool
+}
+
+// UnmarshalJSON reads a filter under the names the agent tool documents
+// (include_terminal, name_substr) as well as the Go field names the daemon
+// protocol sends. Without it the documented names matched no field: a list
+// asked to include finished jobs, or to match a name, silently did neither.
+func (f *ListFilter) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Owner           *Owner      `json:"owner"`
+		Statuses        []JobStatus `json:"statuses"`
+		Tag             string      `json:"tag"`
+		NameSubstr      string      `json:"NameSubstr"`
+		NameSnake       string      `json:"name_substr"`
+		Name            string      `json:"name"`
+		IncludeTerminal bool        `json:"IncludeTerminal"`
+		IncludeSnake    bool        `json:"include_terminal"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.Owner = raw.Owner
+	f.Statuses = raw.Statuses
+	f.Tag = raw.Tag
+	f.NameSubstr = raw.NameSubstr
+	for _, alt := range []string{raw.NameSnake, raw.Name} {
+		if f.NameSubstr == "" {
+			f.NameSubstr = alt
+		}
+	}
+	f.IncludeTerminal = raw.IncludeTerminal || raw.IncludeSnake
+	return nil
 }
 
 // List returns summaries of every known job matching the filter.

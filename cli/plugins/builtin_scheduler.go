@@ -48,6 +48,13 @@ type SchedulerPauser interface {
 	ResumeJob(ctx context.Context, owner SchedulerOwner, inputJSON string) (string, error)
 }
 
+// SchedulerCleaner is an OPTIONAL capability of the wired SchedulerAdapter:
+// dropping finished jobs from the history. Separate interface for the same
+// reason as SchedulerPauser.
+type SchedulerCleaner interface {
+	ClearJobs(ctx context.Context, owner SchedulerOwner, inputJSON string) (string, error)
+}
+
 // SchedulerOwner is the package-local mirror of scheduler.Owner (the
 // plugins package cannot import cli/scheduler without an import cycle).
 type SchedulerOwner struct {
@@ -123,12 +130,27 @@ Subcommands (use cmd + args; do/when are required for schedule):
              skills?:["skill-name",...] (persona skills re-resolved and
              injected into the headless run at fire time; defaults to the
              creating run's active skills when omitted)}
-  wait      {until:"<condition>", every?, timeout?, max_polls?, async?, name?}
-  query     {id}
+             wait_timeout?, on_timeout?:"fail"|"fire_anyway", notify?:true
+             (the user's terminal announces the end of the job / of each cycle)
+  wait      {until:"<condition>", then?:"<action DSL>", every?, timeout?,
+             max_polls?, on_timeout?, name?, notify?, i_know?,
+             async?:true  (return the job id at once; the wait keeps running),
+             max_block?:"60s" (sync only: stop holding the turn after this
+             long; the job keeps running and you query it later)}
+            Without async the call HOLDS YOUR TURN until the condition is met
+            or the wait times out. For anything that may take minutes, pass
+            async:true (or a short max_block) and check back with query.
+  query     {id}              id accepts the job id, its name, or an id prefix
   list      {filter?:{owner, statuses, tag, name_substr, include_terminal}}
+            a waiting job reports wait_polls, wait_deadline and wait_detail
   cancel    {id, reason?}
   pause     {id, reason?}     hold a pending/blocked/waiting job (a running one must be cancelled)
   resume    {id}              put a paused job back in the queue
+  clear     {filter?:{statuses, name_substr}, older_than?:"24h"}
+            drop FINISHED jobs from history (live jobs are never touched)
+
+Durations accept "30s", "5m", "2h", "1d", "10 min", "2 hours". A duration
+that cannot be read is an error, not a silent default.
 
 Aliases accepted for natural phrasing: delay→when, command/cmd/exec/run→do,
   in/after→when, i-know/iKnow/iknow/know→i_know. Bare durations like "5m"
@@ -140,7 +162,7 @@ the job pre-authorizes itself at fire time (denylist rules still reject):
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinSchedulerPlugin) Version() string { return "1.2.0" }
+func (*BuiltinSchedulerPlugin) Version() string { return "1.3.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSchedulerPlugin) Path() string { return "" }
@@ -166,8 +188,11 @@ func (*BuiltinSchedulerPlugin) Schema() string {
 					{"name": "until", "type": "string",
 						"description": "Optional precondition before the action fires (e.g. \"docker:my-container:running\", \"http://host/health==200\", \"file:/tmp/done\", \"tcp://host:5432\")"},
 					{"name": "wait", "type": "object", "description": "Explicit wait spec (condition, timeout, on_timeout). Prefer until= for the common case."},
-					{"name": "timeout", "type": "string", "description": "Action timeout (Go duration: 30s, 5m, 1h)"},
-					{"name": "poll", "type": "string", "description": "Wait poll interval (Go duration)"},
+					{"name": "timeout", "type": "string", "description": "Action timeout (30s, 5m, 1h, \"10 min\")"},
+					{"name": "poll", "type": "string", "description": "Wait poll interval when until/wait is set"},
+					{"name": "wait_timeout", "type": "string", "description": "How long until/wait may stay unmet before the job times out (default 30m)"},
+					{"name": "on_timeout", "type": "string", "description": "What a timed-out wait does: \"fail\" (default) or \"fire_anyway\" (run the action regardless)"},
+					{"name": "notify", "type": "boolean", "description": "Announce the end of the job (each cycle, for a recurring one) in the user's terminal"},
 					{"name": "max_polls", "type": "integer", "description": "Cap wait iterations"},
 					{"name": "max_retries", "type": "integer", "description": "Retry the action this many times on failure"},
 					{"name": "depends_on", "type": "array", "description": "Job IDs that must finish before this one runs"},
@@ -185,26 +210,33 @@ func (*BuiltinSchedulerPlugin) Schema() string {
 				},
 			},
 			{
-				"name":        "wait",
-				"description": "Block (or schedule asynchronously) until a condition holds. async=true returns the job id immediately.",
+				"name": "wait",
+				"description": "Wait until a condition holds, optionally running an action when it does. Without async the call HOLDS THE TURN until the condition is met or the wait times out; " +
+					"for anything that may take minutes pass async=true (returns the job id at once) or a short max_block, then check back with query.",
 				"flags": []map[string]interface{}{
-					{"name": "until", "type": "string", "required": true, "description": "Condition DSL (same shapes as schedule.until)"},
-					{"name": "every", "type": "string", "description": "Poll interval"},
-					{"name": "timeout", "type": "string", "description": "Maximum total wait time"},
+					{"name": "until", "type": "string", "required": true, "description": "Condition DSL (same shapes as schedule.until); \"not <cond>\", \"and(a, b)\" and \"or(a, b)\" compose"},
+					{"name": "then", "type": "string", "description": "Action DSL to run once the condition holds (same shapes as schedule.do). Omit for a bare wait."},
+					{"name": "every", "type": "string", "description": "Poll interval (default 5s)"},
+					{"name": "timeout", "type": "string", "description": "Maximum total wait time (default 30m)"},
 					{"name": "max_polls", "type": "integer", "description": "Iteration cap"},
-					{"name": "async", "type": "boolean", "description": "Return immediately with the job id instead of blocking"},
-					{"name": "name", "type": "string", "description": "Optional name for the wait job"},
+					{"name": "on_timeout", "type": "string", "description": "\"fail\" (default) or \"fire_anyway\" (run then= even though the condition never held)"},
+					{"name": "async", "type": "boolean", "description": "Return immediately with the job id instead of holding the turn"},
+					{"name": "max_block", "type": "string", "description": "Sync only: hold the turn at most this long (e.g. \"60s\"); afterwards the job keeps running and the reply says how to query it"},
+					{"name": "notify", "type": "boolean", "description": "Announce the end of the wait in the user's terminal (useful with async)"},
+					{"name": "i_know", "type": "boolean", "description": "Pre-authorize a shell condition/action that would otherwise need approval"},
+					{"name": "name", "type": "string", "description": "Optional name for the wait job; query/cancel accept it in place of the id"},
 				},
 				"examples": []string{
 					`{"cmd":"wait","args":{"until":"docker:Docker:running","timeout":"2m","every":"5s"}}`,
-					`{"cmd":"wait","args":{"until":"http://localhost:8080/health==200","async":true}}`,
+					`{"cmd":"wait","args":{"name":"api-up","until":"http://localhost:8080/health==200","async":true,"notify":true}}`,
+					`{"cmd":"wait","args":{"until":"tcp://localhost:5432","then":"shell: make migrate","max_block":"90s","i_know":true}}`,
 				},
 			},
 			{
 				"name":        "query",
 				"description": "Inspect a single job by id.",
 				"flags": []map[string]interface{}{
-					{"name": "id", "type": "string", "required": true, "description": "Job id returned by schedule/wait"},
+					{"name": "id", "type": "string", "required": true, "description": "Job id returned by schedule/wait, the job's name, or the start of its id"},
 				},
 				"examples": []string{`{"cmd":"query","args":{"id":"job-abc123"}}`},
 			},
@@ -245,6 +277,18 @@ func (*BuiltinSchedulerPlugin) Schema() string {
 				},
 				"examples": []string{`{"cmd":"resume","args":{"id":"job-abc123"}}`},
 			},
+			{
+				"name":        "clear",
+				"description": "Drop FINISHED jobs (completed, failed, cancelled, timed_out, skipped) from the history. Live jobs are never touched — cancel those instead.",
+				"flags": []map[string]interface{}{
+					{"name": "filter", "type": "object", "description": "{statuses:[\"failed\",\"timed_out\"], name_substr}; empty clears every finished job you may clear"},
+					{"name": "older_than", "type": "string", "description": "Only jobs finished at least this long ago (e.g. \"24h\")"},
+				},
+				"examples": []string{
+					`{"cmd":"clear","args":{"older_than":"24h"}}`,
+					`{"cmd":"clear","args":{"filter":{"statuses":["failed","timed_out"]}}}`,
+				},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -282,7 +326,15 @@ func (p *BuiltinSchedulerPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return "", fmt.Errorf("@scheduler: %w", err)
 	}
 
+	inner = normalizeSchedulerArgs(cmd, inner)
+
 	switch cmd {
+	case "clear":
+		cl, ok := adapter.(SchedulerCleaner)
+		if !ok {
+			return "", errors.New("@scheduler clear: not available in this session")
+		}
+		return cl.ClearJobs(ctx, adapter.Owner(), inner)
 	case "schedule":
 		return adapter.ScheduleJob(ctx, adapter.Owner(), inner)
 	case "wait":
@@ -304,7 +356,7 @@ func (p *BuiltinSchedulerPlugin) ExecuteWithStream(ctx context.Context, args []s
 		return pz.ResumeJob(ctx, adapter.Owner(), inner)
 	default:
 		return "", fmt.Errorf(
-			"@scheduler: unknown cmd %q (valid: schedule|wait|query|list|cancel|pause|resume). "+
+			"@scheduler: unknown cmd %q (valid: schedule|wait|query|list|cancel|pause|resume|clear). "+
 				`Example: {"cmd":"schedule","args":{"name":"x","when":"+5m","do":"/run echo hi"}}`,
 			cmd,
 		)
@@ -341,7 +393,7 @@ func parseSchedulerInvocation(args []string) (string, string, error) {
 		canon := canonicalSchedulerCmd(cmdStr)
 		if canon == "" {
 			return "", "", fmt.Errorf(
-				"missing or unknown cmd %q (valid: schedule|wait|query|list|cancel)", cmdStr,
+				"missing or unknown cmd %q (valid: schedule|wait|query|list|cancel|pause|resume|clear)", cmdStr,
 			)
 		}
 		var inner string
@@ -387,6 +439,8 @@ func canonicalSchedulerCmd(s string) string {
 		return "pause"
 	case "resume", "unpause", "unhold", "continue":
 		return "resume"
+	case "clear", "clean", "prune", "clear_jobs":
+		return "clear"
 	}
 	return ""
 }
@@ -446,6 +500,76 @@ func tryParseJSONScalar(s string) (interface{}, bool) {
 		return v, true
 	}
 	return nil, false
+}
+
+// normalizeSchedulerArgs maps the per-subcommand vocabulary the schema
+// teaches onto the engine's field names. The schema has always offered
+// wait {every, timeout}, but the engine reads poll and wait_timeout — and
+// reads "timeout" as the ACTION timeout — so a model's poll interval and
+// wait budget were dropped and every wait ran on the 30-minute default.
+// Explicit engine names always win.
+func normalizeSchedulerArgs(cmd, inner string) string {
+	t := strings.TrimSpace(inner)
+	if !strings.HasPrefix(t, "{") {
+		return inner
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(t), &m); err != nil {
+		return inner
+	}
+	move := func(from, to string) {
+		v, ok := m[from]
+		if !ok {
+			return
+		}
+		delete(m, from)
+		if _, exists := m[to]; !exists {
+			m[to] = v
+		}
+	}
+	switch cmd {
+	case "wait":
+		move("action_timeout", "\x00action_timeout")
+		move("timeout", "wait_timeout")
+		move("\x00action_timeout", "timeout")
+		move("every", "poll")
+		move("then", "do")
+	case "schedule":
+		// every= is a recurring schedule when nothing else says when to
+		// fire; next to an explicit when= it is the poll interval.
+		if v, ok := m["every"].(string); ok {
+			if _, hasWhen := m["when"]; !hasWhen && m["schedule"] == nil {
+				m["when"] = "every " + v
+				delete(m, "every")
+			}
+		}
+		move("every", "poll")
+		move("then", "do")
+	case "clear":
+		for _, k := range []string{"statuses", "name_substr"} {
+			if v, ok := m[k]; ok {
+				f, _ := m["filter"].(map[string]interface{})
+				if f == nil {
+					f = map[string]interface{}{}
+				}
+				if _, exists := f[k]; !exists {
+					f[k] = v
+				}
+				m["filter"] = f
+				delete(m, k)
+			}
+		}
+	}
+	// "max-block" / "on-timeout" / "older-than" arrive hyphenated from the
+	// argv form.
+	for _, k := range []string{"max_block", "on_timeout", "older_than", "wait_timeout", "max_polls", "max_retries", "depends_on"} {
+		move(strings.ReplaceAll(k, "_", "-"), k)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return inner
+	}
+	return string(b)
 }
 
 // applySchedulerAliases rewrites natural-language field names that LLMs
