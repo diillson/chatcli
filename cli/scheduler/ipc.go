@@ -20,6 +20,7 @@
  *     "query"          Input: id
  *     "list"           Input: filter
  *     "snapshot"       Input: none
+ *     "prune"          Input: PruneFilter — drop terminal jobs from history
  *     "subscribe"      — enter event-stream mode for this connection
  *     "stats"          Input: none — returns scheduler + daemon stats
  *     "bye"            — orderly close
@@ -57,6 +58,7 @@ const (
 	KindQuery     FrameKind = "query"
 	KindList      FrameKind = "list"
 	KindSnapshot  FrameKind = "snapshot"
+	KindPrune     FrameKind = "prune"
 	KindSubscribe FrameKind = "subscribe"
 	KindStats     FrameKind = "stats"
 	KindBye       FrameKind = "bye"
@@ -142,6 +144,11 @@ type DaemonStats struct {
 	WALSegments int                     `json:"wal_segments"`
 	Connections int                     `json:"connections"`
 	Breakers    map[string]BreakerState `json:"breakers,omitempty"`
+}
+
+// PruneResult is returned for Kind=prune.
+type PruneResult struct {
+	Removed []JobID `json:"removed"`
 }
 
 // DefaultSocketPath returns the platform-default daemon socket path.

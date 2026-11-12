@@ -1,0 +1,16 @@
+{
+  "scheduler.render.polling": "sondando",
+  "scheduler.render.polling_left": "sondando, resta %s",
+  "scheduler.render.running_now": "executando",
+  "scheduler.render.after_deps": "após dependências",
+  "scheduler.render.due_now": "agora",
+  "scheduler.render.cond_unmet": "ainda não atendida",
+  "scheduler.render.cond_error": "checagem falhou",
+  "scheduler.render.wait_budget": "Limite da espera",
+  "scheduler.render.wait_budget_value": "checa a cada %s, desiste após %s",
+  "scheduler.render.wait_budget_max_polls": " ou %d checagens",
+  "scheduler.render.wait_progress": "Progresso da espera",
+  "scheduler.render.wait_progress_value": "%d checagens até agora",
+  "scheduler.render.wait_progress_left": ", resta %s",
+  "scheduler.render.wait_last_check": "Última checagem"
+}

@@ -274,6 +274,8 @@ func (d *Daemon) handleConn(ctx context.Context, dc *daemonConn) {
 			_ = dc.Write(d.handleList(frame))
 		case KindSnapshot:
 			_ = dc.Write(d.handleSnapshot(frame))
+		case KindPrune:
+			_ = dc.Write(d.handlePrune(frame))
 		default:
 			_ = dc.Write(Frame{ID: frame.ID, Kind: KindError, Error: fmt.Sprintf("unknown kind %q", frame.Kind)})
 		}
@@ -378,6 +380,21 @@ func (d *Daemon) handleSnapshot(frame Frame) Frame {
 		return errFrame(frame.ID, err.Error())
 	}
 	return Frame{ID: frame.ID, Kind: KindOK}
+}
+
+func (d *Daemon) handlePrune(frame Frame) Frame {
+	var filter PruneFilter
+	if len(frame.Input) > 0 {
+		if err := json.Unmarshal(frame.Input, &filter); err != nil {
+			return errFrame(frame.ID, "prune: "+err.Error())
+		}
+	}
+	removed, err := d.sched.Prune(filter)
+	if err != nil {
+		return errFrame(frame.ID, err.Error())
+	}
+	body, _ := json.Marshal(PruneResult{Removed: removed})
+	return Frame{ID: frame.ID, Kind: KindOK, Result: body}
 }
 
 func errFrame(id, msg string) Frame {

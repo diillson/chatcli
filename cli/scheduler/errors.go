@@ -61,6 +61,8 @@ var (
 	// ErrJobNotFound is returned from Query / Cancel / Pause when the
 	// given ID has no record in the active set.
 	ErrJobNotFound = errors.New("scheduler: job not found")
+	// ErrJobAmbiguous — a job reference (name or ID prefix) fits several jobs.
+	ErrJobAmbiguous = errors.New("scheduler: job reference is ambiguous")
 
 	// ErrJobTerminal is returned when a mutating operation is attempted
 	// on a job that has already reached a terminal state (completed,

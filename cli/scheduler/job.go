@@ -245,6 +245,18 @@ type JobSummary struct {
 	// its fire-time policy re-check because the bridge had no way to
 	// see the per-job authorization.
 	DangerousConfirmed bool `json:"dangerous_confirmed,omitempty"`
+
+	// Wait-phase projection, filled only while Status is waiting. Without
+	// it a listing can only show the fire time (long past, since the job
+	// already fired and is polling) and the outcome of the latest poll,
+	// which read as "overdue" and "failed" for a wait that is healthy.
+	//
+	// WaitPolls is how many times the condition was checked in this wait;
+	// WaitDeadline is when the wait gives up; WaitDetail is the first line
+	// of what the latest check reported.
+	WaitPolls    int       `json:"wait_polls,omitempty"`
+	WaitDeadline time.Time `json:"wait_deadline,omitzero"`
+	WaitDetail   string    `json:"wait_detail,omitempty"`
 }
 
 // Summary projects a Job to a JobSummary.
@@ -267,7 +279,7 @@ func (j *Job) Summary() JobSummary {
 			tags = append(tags, k+"="+v)
 		}
 	}
-	return JobSummary{
+	sum := JobSummary{
 		ID:                 j.ID,
 		Name:               j.Name,
 		Owner:              j.Owner,
@@ -282,6 +294,40 @@ func (j *Job) Summary() JobSummary {
 		Tags:               tags,
 		DangerousConfirmed: j.DangerousConfirmed,
 	}
+	if j.Status == StatusWaiting {
+		sum.WaitPolls, sum.WaitDeadline, sum.WaitDetail = j.waitProgressLocked()
+	}
+	return sum
+}
+
+// waitProgressLocked reports where the current wait stands: checks made,
+// when it gives up, and the first line of the latest check's report. The
+// caller holds j.mu. The wait began at the latest transition into waiting;
+// a result older than that belongs to an earlier phase (an action attempt
+// before a retry re-entered the wait) and is not counted.
+func (j *Job) waitProgressLocked() (polls int, deadline time.Time, detail string) {
+	var began time.Time
+	for i := len(j.Transitions) - 1; i >= 0; i-- {
+		if j.Transitions[i].To == StatusWaiting {
+			began = j.Transitions[i].At
+			break
+		}
+	}
+	if !began.IsZero() && j.Budget.WaitTimeout > 0 {
+		deadline = began.Add(j.Budget.WaitTimeout)
+	}
+	if r := j.LastResult; r != nil && !r.StartedAt.Before(began) {
+		polls = r.AttemptNum
+		detail = r.ConditionDetails
+		if detail == "" {
+			detail = r.Error
+		}
+		if i := strings.IndexByte(detail, '\n'); i >= 0 {
+			detail = detail[:i]
+		}
+		detail = truncate(strings.TrimSpace(detail), 160)
+	}
+	return polls, deadline, detail
 }
 
 // IsExpired returns true when the job's TTL has elapsed since it

@@ -106,30 +106,16 @@ func RenderList(summaries []JobSummary) string {
 	rows := make([]row, 0, len(summaries))
 	now := time.Now()
 	for _, s := range summaries {
-		nextFire := ""
-		if !s.NextFireAt.IsZero() {
-			d := s.NextFireAt.Sub(now)
-			if d < 0 {
-				nextFire = i18n.T("scheduler.render.overdue")
-			} else {
-				nextFire = i18n.T("scheduler.render.in", compactDuration(d))
-			}
-		}
-		lastCol := "—"
-		if s.LastOutcome != "" {
-			lastCol = string(s.LastOutcome)
-		}
 		rows = append(rows, row{cols: [7]string{
 			string(s.Status),
 			string(s.ID),
 			s.Name,
 			s.Owner.String(),
 			s.Type,
-			nextFire,
-			lastCol,
+			nextFireLabel(s, now),
+			lastLabel(s),
 		}})
 	}
-	widths := [7]int{8, 18, 22, 18, 18, 14, 10}
 	header := []string{
 		i18n.T("scheduler.render.col_status"),
 		i18n.T("scheduler.render.col_id"),
@@ -138,6 +124,22 @@ func RenderList(summaries []JobSummary) string {
 		i18n.T("scheduler.render.col_type"),
 		i18n.T("scheduler.render.col_next_fire"),
 		i18n.T("scheduler.render.col_last"),
+	}
+	// Each column is as wide as its widest cell, up to a cap: a short
+	// table stays short, and a long name is cut instead of pushing the
+	// row past the terminal.
+	widths := [7]int{}
+	caps := [7]int{10, 18, 28, 18, 18, 24, 18}
+	for i := range widths {
+		widths[i] = len([]rune(header[i]))
+		for _, r := range rows {
+			if n := len([]rune(r.cols[i])); n > widths[i] {
+				widths[i] = n
+			}
+		}
+		if widths[i] > caps[i] {
+			widths[i] = caps[i]
+		}
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "  %s\n", rowLine(widths, header))
@@ -148,6 +150,74 @@ func RenderList(summaries []JobSummary) string {
 	return b.String()
 }
 
+// nextFireLabel says what the job is due to do next. The fire time alone
+// misleads once a job has fired: a job polling its condition, or running
+// its action, has a fire time in the past and is not overdue, and a
+// finished job is not due at all. "Overdue" is kept for a job that is
+// still queued after its time.
+func nextFireLabel(s JobSummary, now time.Time) string {
+	switch {
+	case s.Status.IsTerminal(), s.Status == StatusPaused:
+		return "—"
+	case s.Status == StatusWaiting:
+		if s.WaitDeadline.IsZero() {
+			return i18n.T("scheduler.render.polling")
+		}
+		left := s.WaitDeadline.Sub(now)
+		if left < 0 {
+			left = 0
+		}
+		return i18n.T("scheduler.render.polling_left", compactDuration(left))
+	case s.Status == StatusRunning:
+		return i18n.T("scheduler.render.running_now")
+	case s.Status == StatusBlocked:
+		return i18n.T("scheduler.render.after_deps")
+	case s.NextFireAt.IsZero():
+		return "—"
+	}
+	d := s.NextFireAt.Sub(now)
+	switch {
+	case d >= 0:
+		return i18n.T("scheduler.render.in", compactDuration(d))
+	case d > -overdueGrace:
+		return i18n.T("scheduler.render.due_now")
+	}
+	return i18n.T("scheduler.render.overdue")
+}
+
+// overdueGrace is how long past its fire time a queued job is simply
+// "due": the pump picks it up within moments, and calling that overdue
+// would flag every job caught between its fire time and its worker.
+const overdueGrace = 5 * time.Second
+
+// lastLabel says how the latest execution went. For a job gated on a
+// condition the latest execution is a check of that condition, whose raw
+// outcome ("skipped" when not yet met, "failed" when the probe errored,
+// as a service still starting does) reads as a verdict on the job. It is
+// shown as what it is, with the number of checks so far.
+func lastLabel(s JobSummary) string {
+	if s.LastOutcome == "" {
+		return "—"
+	}
+	gated := strings.HasSuffix(s.Type, "+wait")
+	if gated && (s.Status == StatusWaiting || s.Status == StatusTimedOut) {
+		key := ""
+		switch s.LastOutcome {
+		case OutcomeSkipped:
+			key = "scheduler.render.cond_unmet"
+		case OutcomeFailed:
+			key = "scheduler.render.cond_error"
+		}
+		if key != "" {
+			if s.WaitPolls > 0 {
+				return fmt.Sprintf("%s ×%d", i18n.T(key), s.WaitPolls)
+			}
+			return i18n.T(key)
+		}
+	}
+	return string(s.LastOutcome)
+}
+
 func rowLine(widths [7]int, cols []string) string {
 	parts := make([]string, len(cols))
 	for i, c := range cols {
@@ -155,7 +225,7 @@ func rowLine(widths [7]int, cols []string) string {
 		if len([]rune(c)) > w {
 			c = string([]rune(c)[:w-1]) + "…"
 		}
-		parts[i] = fmt.Sprintf("%-*s", w, c)
+		parts[i] = padRight(c, w)
 	}
 	return strings.Join(parts, "  ")
 }
@@ -168,6 +238,40 @@ func rowLineSep(widths [7]int) string {
 	return strings.Join(parts, "  ")
 }
 
+// kv is one labeled row of the /jobs show view.
+type kv struct{ label, value string }
+
+// waitShowRows are the rows describing a job's wait: what it waits for,
+// its budget and, while it is waiting, how far along it is.
+func waitShowRows(j *Job) []kv {
+	if j.Wait == nil {
+		return nil
+	}
+	var rows []kv
+	rows = append(rows, kv{i18n.T("scheduler.render.wait"), DescribeCondition(j.Wait.Condition)})
+	budget := i18n.T("scheduler.render.wait_budget_value", compactDuration(j.Budget.PollInterval), compactDuration(j.Budget.WaitTimeout))
+	if j.Budget.MaxPolls > 0 {
+		budget += i18n.T("scheduler.render.wait_budget_max_polls", j.Budget.MaxPolls)
+	}
+	rows = append(rows, kv{i18n.T("scheduler.render.wait_budget"), budget})
+	if j.Status == StatusWaiting {
+		polls, deadline, detail := j.waitProgressLocked()
+		progress := i18n.T("scheduler.render.wait_progress_value", polls)
+		if !deadline.IsZero() {
+			left := time.Until(deadline)
+			if left < 0 {
+				left = 0
+			}
+			progress += i18n.T("scheduler.render.wait_progress_left", compactDuration(left))
+		}
+		rows = append(rows, kv{i18n.T("scheduler.render.wait_progress"), progress})
+		if detail != "" {
+			rows = append(rows, kv{i18n.T("scheduler.render.wait_last_check"), detail})
+		}
+	}
+	return rows
+}
+
 // RenderShow emits the detailed `/jobs show <id>` view.
 func RenderShow(j *Job) string {
 	if j == nil {
@@ -176,14 +280,14 @@ func RenderShow(j *Job) string {
 
 	// Build the labeled rows, then align the colons to the widest (translated)
 	// label so the column lines up in any language.
-	type kv struct{ label, value string }
 	rows := []kv{
 		{i18n.T("scheduler.render.owner"), j.Owner.String()},
 		{i18n.T("scheduler.render.status"), fmt.Sprintf("%s %s", j.Status, StatusBadge(j.Status))},
 		{i18n.T("scheduler.render.type"), string(j.Schedule.Kind)},
 		{i18n.T("scheduler.render.created"), j.CreatedAt.Format(time.RFC3339)},
 	}
-	if !j.NextFireAt.IsZero() {
+	// The fire time only says something while the job is still queued.
+	if !j.NextFireAt.IsZero() && (j.Status == StatusPending || j.Status == StatusBlocked || j.Status == StatusPaused) {
 		rows = append(rows, kv{i18n.T("scheduler.render.next_fire"), fmt.Sprintf("%s (%s)", j.NextFireAt.Format(time.RFC3339), compactDuration(time.Until(j.NextFireAt)))})
 	}
 	if !j.FinishedAt.IsZero() {
@@ -194,9 +298,7 @@ func RenderShow(j *Job) string {
 	if cmd, ok := j.Action.Payload["command"].(string); ok {
 		rows = append(rows, kv{i18n.T("scheduler.render.command"), cmd})
 	}
-	if j.Wait != nil {
-		rows = append(rows, kv{i18n.T("scheduler.render.wait"), j.Wait.Condition.Type})
-	}
+	rows = append(rows, waitShowRows(j)...)
 	if len(j.DependsOn) > 0 {
 		rows = append(rows, kv{i18n.T("scheduler.render.depends_on"), fmt.Sprintf("%v", j.DependsOn)})
 	}
@@ -237,7 +339,7 @@ func RenderShow(j *Job) string {
 		if j.CycleCount > 0 {
 			header += i18n.T("scheduler.render.cycles", j.CycleCount)
 		}
-		header += ":\n"
+		header += "):\n" // the history key opens the parenthesis
 		fmt.Fprint(&b, header)
 		for i := len(j.History) - 1; i >= 0 && i >= len(j.History)-10; i-- {
 			r := j.History[i]
@@ -262,6 +364,47 @@ func RenderShow(j *Job) string {
 		for _, t := range j.Transitions {
 			fmt.Fprintf(&b, "    %s  %s → %s  %s\n", t.At.Format(time.RFC3339), t.From, t.To, t.Message)
 		}
+	}
+	return b.String()
+}
+
+// DescribeCondition renders a condition as the target a person recognizes
+// ("http_status http://host/health", "shell_exit pg_isready") instead of
+// the bare evaluator type, which says nothing about what is being waited
+// for when several waits are listed side by side.
+func DescribeCondition(c Condition) string {
+	var b strings.Builder
+	if c.Negate {
+		b.WriteString("not ")
+	}
+	b.WriteString(c.Type)
+	if len(c.Children) > 0 {
+		parts := make([]string, 0, len(c.Children))
+		for _, ch := range c.Children {
+			parts = append(parts, DescribeCondition(ch))
+		}
+		b.WriteString("(" + strings.Join(parts, ", ") + ")")
+		return b.String()
+	}
+	target := ""
+	for _, k := range []string{"url", "cmd", "path", "container", "prompt"} {
+		if v, ok := c.Spec[k].(string); ok && v != "" {
+			target = v
+			break
+		}
+	}
+	switch {
+	case target != "":
+	case c.Spec["host"] != nil:
+		target = fmt.Sprintf("%v:%v", c.Spec["host"], c.Spec["port"])
+	case c.Spec["name"] != nil:
+		target = fmt.Sprintf("%v/%v", c.Spec["kind"], c.Spec["name"])
+		if ns, ok := c.Spec["namespace"].(string); ok && ns != "" {
+			target = fmt.Sprintf("%v/%s/%v", c.Spec["kind"], ns, c.Spec["name"])
+		}
+	}
+	if target != "" {
+		b.WriteString(" " + truncRender(target, 80))
 	}
 	return b.String()
 }

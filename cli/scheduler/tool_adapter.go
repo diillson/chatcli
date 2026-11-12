@@ -61,6 +61,16 @@ type ToolInput struct {
 	TTL string `json:"ttl,omitempty"`
 	// async for wait_until.
 	Async bool `json:"async,omitempty"`
+	// MaxBlock caps how long a synchronous wait_until holds its caller.
+	// When it elapses the job keeps running and the caller is told how to
+	// pick the result up. Empty means the scheduler's default wait budget.
+	MaxBlock string `json:"max_block,omitempty"`
+	// Notify asks the terminal to announce the job's end (each cycle, for
+	// a recurring job). Stored as the "notify" tag so it survives restarts
+	// and reaches a daemon unchanged. Nil leaves the tags as given.
+	Notify *bool `json:"notify,omitempty"`
+	// OlderThan narrows clear_jobs to jobs finished at least this long ago.
+	OlderThan string `json:"older_than,omitempty"`
 
 	// IKnow pre-authorizes shell commands that would normally hit
 	// ShellPolicyAsk at enqueue time. When true, the resulting Job
@@ -97,6 +107,8 @@ type ToolOutput struct {
 	Outcome Outcome      `json:"outcome,omitempty"`
 	Details string       `json:"details,omitempty"`
 	Error   string       `json:"error,omitempty"`
+	// Removed lists the jobs clear_jobs dropped from history.
+	Removed []JobID `json:"removed,omitempty"`
 }
 
 // ToolAdapter exposes the scheduler methods as JSON-in/JSON-out
@@ -179,6 +191,15 @@ func (t *ToolAdapter) WaitUntil(ctx context.Context, owner Owner, rawIn string) 
 	if t.s.cfg.DefaultWaitTimeout > 0 {
 		timeout = t.s.cfg.DefaultWaitTimeout + time.Minute
 	}
+	if strings.TrimSpace(in.MaxBlock) != "" {
+		d, derr := ParseLooseDuration(in.MaxBlock)
+		if derr != nil {
+			return jsonError(fmt.Errorf("max_block: %w", derr))
+		}
+		if d > 0 && d < timeout {
+			timeout = d
+		}
+	}
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -234,6 +255,11 @@ func (t *ToolAdapter) QueryJob(_ context.Context, _ Owner, rawIn string) (string
 	if in.ID == "" {
 		return jsonError(fmt.Errorf("query_job: id is required"))
 	}
+	ref, err := t.s.ResolveRef(in.ID)
+	if err != nil {
+		return jsonError(err)
+	}
+	in.ID = string(ref)
 	j, err := t.s.Query(JobID(in.ID))
 	if err != nil {
 		return jsonError(err)
@@ -268,6 +294,11 @@ func (t *ToolAdapter) CancelJob(_ context.Context, owner Owner, rawIn string) (s
 	if in.ID == "" {
 		return jsonError(fmt.Errorf("cancel_job: id is required"))
 	}
+	ref, err := t.s.ResolveRef(in.ID)
+	if err != nil {
+		return jsonError(err)
+	}
+	in.ID = string(ref)
 	if err := t.s.Cancel(JobID(in.ID), firstNonEmpty(in.Reason, "agent-cancelled"), owner); err != nil {
 		return jsonError(err)
 	}
@@ -284,6 +315,11 @@ func (t *ToolAdapter) PauseJob(_ context.Context, owner Owner, rawIn string) (st
 	if in.ID == "" {
 		return jsonError(fmt.Errorf("pause_job: id is required"))
 	}
+	ref, err := t.s.ResolveRef(in.ID)
+	if err != nil {
+		return jsonError(err)
+	}
+	in.ID = string(ref)
 	if err := t.s.Pause(JobID(in.ID), firstNonEmpty(in.Reason, "agent-paused"), owner); err != nil {
 		return jsonError(err)
 	}
@@ -300,10 +336,66 @@ func (t *ToolAdapter) ResumeJob(_ context.Context, owner Owner, rawIn string) (s
 	if in.ID == "" {
 		return jsonError(fmt.Errorf("resume_job: id is required"))
 	}
+	ref, err := t.s.ResolveRef(in.ID)
+	if err != nil {
+		return jsonError(err)
+	}
+	in.ID = string(ref)
 	if err := t.s.Resume(JobID(in.ID), owner); err != nil {
 		return jsonError(err)
 	}
 	return jsonOK(ToolOutput{OK: true, JobID: JobID(in.ID), Status: StatusPending})
+}
+
+// ClearJobs implements the clear_jobs tool: drop finished jobs from the
+// history. Running, waiting and queued jobs are never touched. An agent or
+// worker clears only what it owns; the filter's owner is ignored for them.
+func (t *ToolAdapter) ClearJobs(_ context.Context, owner Owner, rawIn string) (string, error) {
+	var in ToolInput
+	if strings.TrimSpace(rawIn) != "" {
+		if err := json.Unmarshal([]byte(rawIn), &in); err != nil {
+			return jsonError(err)
+		}
+	}
+	filter, err := PruneFilterFromInput(in, owner)
+	if err != nil {
+		return jsonError(err)
+	}
+	removed, err := t.s.Prune(filter)
+	if err != nil {
+		return jsonError(err)
+	}
+	if removed == nil {
+		removed = []JobID{}
+	}
+	return jsonOK(ToolOutput{OK: true, Removed: removed, Details: fmt.Sprintf("%d finished job(s) removed from history", len(removed))})
+}
+
+// PruneFilterFromInput builds the clear_jobs filter from a tool input,
+// scoping agents and workers to their own jobs.
+func PruneFilterFromInput(in ToolInput, owner Owner) (PruneFilter, error) {
+	filter := PruneFilter{
+		Statuses:   in.Filter.Statuses,
+		Owner:      in.Filter.Owner,
+		NameSubstr: in.Filter.NameSubstr,
+	}
+	for _, st := range filter.Statuses {
+		if !st.IsTerminal() {
+			return PruneFilter{}, fmt.Errorf("clear_jobs: status %q is not a finished state (use completed, failed, cancelled, timed_out or skipped); cancel a live job instead", st)
+		}
+	}
+	if owner.Kind == OwnerAgent || owner.Kind == OwnerWorker {
+		o := owner
+		filter.Owner = &o
+	}
+	if strings.TrimSpace(in.OlderThan) != "" {
+		d, err := ParseLooseDuration(in.OlderThan)
+		if err != nil {
+			return PruneFilter{}, fmt.Errorf("older_than: %w", err)
+		}
+		filter.OlderThan = d
+	}
+	return filter, nil
 }
 
 // ─── helpers ──────────────────────────────────────────────────
@@ -351,8 +443,14 @@ func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {
 		}
 		wait = &WaitSpec{Condition: cond}
 	}
-	if wait != nil && in.OnTimeout != "" {
-		wait.OnTimeout = TimeoutBehavior(in.OnTimeout)
+	if in.OnTimeout != "" {
+		behavior, err := parseTimeoutBehavior(in.OnTimeout)
+		if err != nil {
+			return nil, err
+		}
+		if wait != nil {
+			wait.OnTimeout = behavior
+		}
 	}
 
 	// Name.
@@ -374,34 +472,12 @@ func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {
 	job.Wait = wait
 	job.Description = in.Description
 	job.Tags = in.Tags
+	applyNotify(in, job)
 	// --i-know / i_know pre-authorizes ShellPolicyAsk commands at
 	// preflight. Denylist is NOT overridable here.
 	job.DangerousConfirmed = in.IKnow
-	if in.TTL != "" {
-		if d, err := time.ParseDuration(in.TTL); err == nil {
-			job.TTL = d
-		}
-	}
-	if in.Timeout != "" {
-		if d, err := time.ParseDuration(in.Timeout); err == nil {
-			job.Budget.ActionTimeout = d
-		}
-	}
-	if in.PollInterval != "" {
-		if d, err := time.ParseDuration(in.PollInterval); err == nil {
-			job.Budget.PollInterval = d
-		}
-	}
-	if in.WaitTimeout != "" {
-		if d, err := time.ParseDuration(in.WaitTimeout); err == nil {
-			job.Budget.WaitTimeout = d
-		}
-	}
-	if in.MaxPolls > 0 {
-		job.Budget.MaxPolls = in.MaxPolls
-	}
-	if in.MaxRetries > 0 {
-		job.Budget.MaxRetries = in.MaxRetries
+	if err := applyBudget(in, job); err != nil {
+		return nil, err
 	}
 	if len(in.DependsOn) > 0 {
 		ids := make([]JobID, len(in.DependsOn))
@@ -418,6 +494,71 @@ func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {
 		job.Triggers = ids
 	}
 	return job, nil
+}
+
+// applyBudget copies the input's timeouts and limits onto the job. A
+// duration that cannot be read is an error, never a silent fall back to
+// the default: "--timeout 10x" used to leave the wait on 30 minutes.
+func applyBudget(in *ToolInput, job *Job) error {
+	for _, f := range []struct {
+		name, raw string
+		dst       *time.Duration
+	}{
+		{"ttl", in.TTL, &job.TTL},
+		{"timeout", in.Timeout, &job.Budget.ActionTimeout},
+		{"poll", in.PollInterval, &job.Budget.PollInterval},
+		{"wait_timeout", in.WaitTimeout, &job.Budget.WaitTimeout},
+	} {
+		if strings.TrimSpace(f.raw) == "" {
+			continue
+		}
+		d, err := ParseLooseDuration(f.raw)
+		if err != nil {
+			return fmt.Errorf("%s: %w", f.name, err)
+		}
+		if d > 0 { // zero keeps the configured default
+			*f.dst = d
+		}
+	}
+	if in.MaxPolls < 0 || in.MaxRetries < 0 {
+		return fmt.Errorf("max_polls and max_retries cannot be negative")
+	}
+	if in.MaxPolls > 0 {
+		job.Budget.MaxPolls = in.MaxPolls
+	}
+	if in.MaxRetries > 0 {
+		job.Budget.MaxRetries = in.MaxRetries
+	}
+	return nil
+}
+
+// applyNotify stores the input's notify choice as the job's "notify" tag.
+func applyNotify(in *ToolInput, job *Job) {
+	if in.Notify == nil {
+		return
+	}
+	if job.Tags == nil {
+		job.Tags = map[string]string{}
+	}
+	job.Tags["notify"] = "off"
+	if *in.Notify {
+		job.Tags["notify"] = "on"
+	}
+}
+
+// parseTimeoutBehavior reads on_timeout tolerantly ("fire-anyway", "run",
+// "fail") and rejects what it does not know: an unknown value used to be
+// stored as is and then treated as "fail" at fire time.
+func parseTimeoutBehavior(raw string) (TimeoutBehavior, error) {
+	switch strings.ToLower(strings.NewReplacer("-", "_", " ", "_").Replace(strings.TrimSpace(raw))) {
+	case "fail", "failed", "error", "abort":
+		return TimeoutFail, nil
+	case "fire_anyway", "fireanyway", "fire", "run", "run_anyway", "continue", "proceed":
+		return TimeoutFireAnyway, nil
+	case "fallback":
+		return TimeoutFallback, nil
+	}
+	return "", fmt.Errorf("on_timeout: unknown value %q (use fail, fire_anyway or fallback)", raw)
 }
 
 func jsonOK(v ToolOutput) (string, error) {

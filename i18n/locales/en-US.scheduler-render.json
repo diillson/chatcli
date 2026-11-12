@@ -1,0 +1,16 @@
+{
+  "scheduler.render.polling": "polling",
+  "scheduler.render.polling_left": "polling, %s left",
+  "scheduler.render.running_now": "running",
+  "scheduler.render.after_deps": "after dependencies",
+  "scheduler.render.due_now": "due now",
+  "scheduler.render.cond_unmet": "not met yet",
+  "scheduler.render.cond_error": "check failed",
+  "scheduler.render.wait_budget": "Wait budget",
+  "scheduler.render.wait_budget_value": "checks every %s, gives up after %s",
+  "scheduler.render.wait_budget_max_polls": " or %d checks",
+  "scheduler.render.wait_progress": "Wait progress",
+  "scheduler.render.wait_progress_value": "%d checks so far",
+  "scheduler.render.wait_progress_left": ", %s left",
+  "scheduler.render.wait_last_check": "Last check"
+}
