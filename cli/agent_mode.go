@@ -151,11 +151,18 @@ type AgentMode struct {
 	qualityPipeline *quality.Pipeline
 	qualityConfig   quality.Config
 	// Centralized stdin reader for type-ahead queue support
-	stdinLines   chan string        // all stdin lines flow through here
-	stdinDone    chan struct{}      // signals reader goroutine to stop
-	stdinCancel  *stdinReadCanceler // aborts a blocking console read (Windows)
-	stdinWg      sync.WaitGroup
-	multilineBuf MultilineBuffer // ``` delimited multiline input
+	stdinLines chan string   // all stdin lines flow through here
+	stdinDone  chan struct{} // signals reader goroutine to stop
+	// stdinCtl carries park/restore requests for the half-typed line to
+	// the reader goroutine; see agent_typeahead_draft.go.
+	stdinCtl chan stdinDraftReq
+	// draftNoticed is the parked draft last announced to the user, and
+	// when (guarded by typeaheadMu).
+	draftNoticed   string
+	draftNoticedAt time.Time
+	stdinCancel    *stdinReadCanceler // aborts a blocking console read (Windows)
+	stdinWg        sync.WaitGroup
+	multilineBuf   MultilineBuffer // ``` delimited multiline input
 
 	// stdinMu guards the reader lifecycle fields above plus stdinDepth.
 	// processAIResponseAndAct is re-entrant (command-block menu, park
@@ -365,6 +372,7 @@ func (a *AgentMode) startStdinReader(ctx context.Context) {
 	// Outermost scope: lines the security prompts' input guard drains are
 	// follow-up instructions for THIS loop, not garbage.
 	coder.SetSecurityPromptSalvage(a.salvageGuardDrained)
+	coder.SetSecurityPromptDraftParker(a.parkTypeaheadDraft)
 	a.spawnStdinReaderLocked(ctx)
 }
 
@@ -374,6 +382,7 @@ func (a *AgentMode) startStdinReader(ctx context.Context) {
 func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 	a.stdinLines = make(chan string, 10)
 	a.stdinDone = make(chan struct{})
+	a.stdinCtl = make(chan stdinDraftReq)
 	a.stdinCancel = newStdinReadCanceler()
 	// Own the line editing while the loop runs: without cbreak the kernel
 	// echoes typed characters on top of the spinner (where the repaint
@@ -387,6 +396,7 @@ func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 	// still be draining — it must keep talking to ITS channels, not the
 	// successor's.
 	linesCh, doneCh, canceler := a.stdinLines, a.stdinDone, a.stdinCancel
+	ctlCh := a.stdinCtl
 	carry := a.stdinCarry
 	a.stdinCarry = ""
 	a.setTypeaheadPreview(carry)
@@ -400,11 +410,29 @@ func (a *AgentMode) spawnStdinReaderLocked(ctx context.Context) {
 		defer canceler.unbind()
 		var lineBuf strings.Builder
 		lineBuf.WriteString(carry)
+		// A draft parked for an open question survives this reader: on the
+		// way out it is published with the line being typed, where the
+		// teardown picks it up as the carry for the next reader.
+		var draft stdinDraft
+		defer func() {
+			if draft.parked != "" {
+				a.setTypeaheadPreview(draft.pending(&lineBuf))
+			}
+		}()
 		buf := make([]byte, 512)
 		for {
 			select {
 			case <-doneCh:
 				return
+			case req := <-ctlCh:
+				if req.park {
+					req.reply <- draft.park(&lineBuf)
+				} else {
+					draft.restore(&lineBuf)
+					req.reply <- lineBuf.String()
+				}
+				a.setTypeaheadPreview(lineBuf.String())
+				continue
 			default:
 			}
 
@@ -486,6 +514,7 @@ func (a *AgentMode) stopStdinReader() {
 	a.teardownStdinReaderLocked()
 	a.stdinCarry = ""
 	coder.SetSecurityPromptSalvage(nil)
+	coder.SetSecurityPromptDraftParker(nil)
 	a.reportUnconsumedTypeahead()
 }
 
@@ -515,6 +544,7 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		a.stdinCarry = a.typeaheadPreviewSnapshot()
 		a.stdinLines = nil
 		a.stdinDone = nil
+		a.stdinCtl = nil
 	}
 	if a.stdinCbreakRestore != nil {
 		a.stdinCbreakRestore()
@@ -713,6 +743,10 @@ func (a *AgentMode) readLineSignal(cancel <-chan struct{}) string {
 		return ""
 	}
 	if a.stdinLines != nil {
+		// What the user was typing before this question appeared is not
+		// part of the answer: set it aside until the answer is in.
+		restoreDraft := a.parkTypeaheadDraft()
+		defer restoreDraft()
 		select {
 		case line := <-a.stdinLines:
 			return line

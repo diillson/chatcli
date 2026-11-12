@@ -1,7 +1,6 @@
 package coder
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
@@ -217,64 +215,31 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	fmt.Println(box)
 	fmt.Print(purple + " > " + reset)
 
-	// Read user input either from the centralized stdin channel (if provided)
-	// or via a fallback goroutine. Using inputCh avoids orphaned goroutines
-	// that steal stdin after Ctrl+C cancels the context.
-	var input string
-	if inputCh != nil {
-		select {
-		case <-ctx.Done():
+	// Read the answer from the centralized stdin channel when there is one
+	// (it avoids orphaned goroutines that steal stdin after Ctrl+C), else
+	// from stdin. An answer that is none of the options is asked again.
+	for attempt := 1; ; attempt++ {
+		line := readSecurityLine(ctx, inputCh)
+		if line.canceled {
 			fmt.Println("\n" + red + " [" + i18n.T("coder.security.canceled") + "]" + reset)
 			return DecisionCanceled
-		case line := <-inputCh:
-			input = strings.TrimSpace(strings.ToLower(line))
 		}
-	} else {
-		resultChan := make(chan string, 1)
-		go func() {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				resultChan <- strings.TrimSpace(strings.ToLower(scanner.Text()))
-			} else {
-				resultChan <- ""
-			}
-		}()
-		select {
-		case <-ctx.Done():
-			_ = os.Stdin.SetReadDeadline(time.Now())
-			fmt.Println("\n" + red + " [" + i18n.T("coder.security.canceled") + "]" + reset)
-			return DecisionCanceled
-		case input = <-resultChan:
-		}
-	}
-
-	if isExecCmd {
-		switch input {
-		case "", "y", "yes", "s", "sim":
-			return DecisionRunOnce
-		case "n", "no", "nao", "não":
-			return DecisionDenyOnce
-		default:
-			// Unknown input (garbled terminal, paste artifacts, etc.)
-			// Deny once to avoid unintended execution.
+		if line.closed && strings.TrimSpace(line.text) == "" {
+			// Nobody can answer: never read the end of input as a yes.
 			fmt.Println(yellow + " [" + i18n.T("coder.security.invalid_input") + "]" + reset)
 			return DecisionDenyOnce
 		}
-	}
-	switch input {
-	case "", "y", "yes", "s", "sim":
-		return DecisionRunOnce
-	case "a", "always":
-		return DecisionAllowAlways
-	case "n", "no", "nao", "não":
-		return DecisionDenyOnce
-	case "d", "deny":
-		return DecisionDenyForever
-	default:
-		// Unknown input (garbled terminal, paste artifacts, etc.)
-		// Deny once to avoid unintended execution.
-		fmt.Println(yellow + " [" + i18n.T("coder.security.invalid_input") + "]" + reset)
-		return DecisionDenyOnce
+		if decision, ok := parseSecurityAnswer(line.text, isExecCmd); ok {
+			return decision
+		}
+		if attempt >= maxInvalidSecurityAnswers || line.closed {
+			// Unknown input (garbled terminal, paste artifacts, etc.):
+			// deny once to avoid unintended execution.
+			fmt.Println(yellow + " [" + i18n.T("coder.security.invalid_input") + "]" + reset)
+			return DecisionDenyOnce
+		}
+		fmt.Println(yellow + " [" + i18n.T("coder.security.invalid_retry", preview(line.text)) + "]" + reset)
+		fmt.Print(purple + " > " + reset)
 	}
 }
 

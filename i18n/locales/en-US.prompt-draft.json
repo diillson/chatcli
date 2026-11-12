@@ -1,0 +1,4 @@
+{
+  "agent.typeahead.draft_parked": "Your draft was set aside while this question is open and comes back after you answer: %s",
+  "coder.security.invalid_retry": "Did not understand %q. Answer with one of the options shown."
+}

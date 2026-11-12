@@ -85,6 +85,8 @@ func activeInputGuard() *InputGuard {
 // would be consumed by the very next <-inputCh as the y/n answer.
 func PromptSecurityCheckGuarded(ctx context.Context, toolName, args string, inputCh <-chan string) SecurityDecision {
 	guard := activeInputGuard()
+	restoreDraft := parkPromptDraft()
+	defer restoreDraft()
 	guardPrompt(guard, inputCh)
 	decision := PromptSecurityCheck(ctx, toolName, args, inputCh)
 	// The wrapped prompt already consumed the user's deliberate answer
@@ -101,6 +103,8 @@ func PromptSecurityCheckGuarded(ctx context.Context, toolName, args string, inpu
 // before the prompt renders, debounce after the answer is read.
 func PromptSecurityCheckWithContextGuarded(ctx context.Context, toolName, args string, secCtx *SecurityContext, inputCh <-chan string) SecurityDecision {
 	guard := activeInputGuard()
+	restoreDraft := parkPromptDraft()
+	defer restoreDraft()
 	guardPrompt(guard, inputCh)
 	decision := PromptSecurityCheckWithContext(ctx, toolName, args, secCtx, inputCh)
 	guard.IntentDebounce(ctx, inputCh)
