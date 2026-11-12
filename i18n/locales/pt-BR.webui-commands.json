@@ -16,7 +16,7 @@
   "web.command.plan.none": "Ainda não há plano nesta conversa: os planos aparecem no painel de plano enquanto um turno do coder ou do agente trabalha.",
   "web.command.plan.shown": "O painel de plano mostra o plano mais recente desta conversa (%d passo(s)).",
   "web.command.plan.how": "Rode uma tarefa com plano primeiro com /plan <tarefa> (agente) ou /plan coder <tarefa>; veja um plano sem executá-lo com /plan preview <tarefa>.",
-  "web.command.jobs.terminal_only": "/jobs %s altera jobs do agendador, o que é feito pelo terminal. A página os lê: /jobs list, show, tree, logs e history.",
+  "web.command.jobs.terminal_only": "/jobs %s age sobre o agendador como um todo (histórico, snapshots, o daemon), o que é feito pelo terminal. A página lista e inspeciona jobs e os cancela, pausa e retoma.",
   "web.command.schedule.in_process": "Este job roda no agendador deste processo web e para junto com ele. Para manter os jobs rodando e compartilhá-los com o terminal, inicie o daemon do agendador (chatcli daemon start).",
   "web.command.refuse.exit": "%s não se aplica aqui: feche a aba para sair da página, ou pare o chatcli web (Ctrl+C onde ele roda, ou /web stop no terminal que o abriu).",
   "web.command.refuse.menu": "%s abre o menu do terminal. Aqui, digite / para ver a lista de comandos ou abra Painel → Comandos.",
@@ -25,7 +25,6 @@
   "web.command.refuse.daemon": "%s inicia ou controla um processo de longa duração ligado ao terminal, então roda lá.",
   "web.command.refuse.worktree": "%s troca a árvore de trabalho da sessão do terminal, então roda no terminal.",
   "web.command.refuse.reload": "%s recarrega a configuração do terminal. Para aplicar mudanças de configuração aqui, reinicie o app web (/web stop e depois /web).",
-  "web.command.refuse.wait": "%s segura a conversa até uma condição ser atendida (até 45 minutos), e a página roda um turno por vez. Agende a espera com /schedule <nome> --wait <condição> e acompanhe com /jobs.",
   "web.command.refuse.chunks": "%s faz parte do fluxo de arquivos grandes do terminal, que a página não usa. Para refazer o último turno, use /retry.",
   "web.command.refuse.redraw": "%s redesenha a tela do terminal; a página não tem o que redesenhar. Para começar uma nova conversa, use /clear."
 }

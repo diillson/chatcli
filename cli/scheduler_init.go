@@ -55,6 +55,8 @@ func (cli *ChatCLI) initScheduler(parent context.Context) {
 				// Even in daemon mode, wire the plugin adapter so the
 				// ReAct loop can still invoke @scheduler.
 				pluginsSetAdapter(&schedulerPluginAdapter{cli: cli})
+				cli.startJobNotices(context.WithoutCancel(parent))
+				cli.watchRemoteJobEvents(parent, client)
 				cli.logger.Info("scheduler: connected to daemon",
 					zap.String("socket", socket))
 				return
@@ -87,6 +89,7 @@ func (cli *ChatCLI) initScheduler(parent context.Context) {
 	}
 	cli.scheduler = s
 	cli.schedulerBridge = bridge
+	cli.startJobNotices(ctx)
 	// Wire the @scheduler builtin plugin into the ReAct tool registry.
 	pluginsAdapter := &schedulerPluginAdapter{cli: cli}
 	pluginsSetAdapter(pluginsAdapter)

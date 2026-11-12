@@ -185,3 +185,49 @@ func TestI18nKeys_PresentInBundle(t *testing.T) {
 		}
 	}
 }
+
+// Everything /wait and /jobs gained is reachable from the dropdown.
+func TestWaitCompleter_BackgroundSurface(t *testing.T) {
+	cli := &ChatCLI{}
+	first := suggestTexts(cli.getWaitSuggestions(docFor("/wait ")))
+	for _, want := range []string{"--until", "help", "tcp://localhost:5432", "file:/tmp/done"} {
+		if !contains(first, want) {
+			t.Errorf("/wait first argument lacks %q; got %v", want, first)
+		}
+	}
+	for _, s := range first {
+		if strings.Contains(s, " ") && s != "help" {
+			t.Errorf("bare condition %q needs quoting and must not be offered unquoted", s)
+		}
+	}
+	flags := suggestTexts(cli.getWaitSuggestions(docFor("/wait tcp://db:5432 --")))
+	for _, want := range []string{"--then", "--every", "--timeout", "--block", "--quiet", "--name", "--description", "--tag", "--action-timeout", "--max-retries", "--depends-on", "--ttl", "--i-know", "--on-timeout", "--max-polls"} {
+		if !contains(flags, want) {
+			t.Errorf("/wait flags lack %q; got %v", want, flags)
+		}
+	}
+	if got := suggestTexts(cli.getWaitSuggestions(docFor("/wait tcp://db:5432 --action-timeout "))); len(got) == 0 {
+		t.Error("--action-timeout offers no duration hints")
+	}
+	if got := suggestTexts(cli.getScheduleSuggestions(docFor("/schedule nightly --"))); !contains(got, "--notify") {
+		t.Errorf("/schedule flags lack --notify; got %v", got)
+	}
+}
+
+func TestJobsCompleter_WaitSubcommandAndNames(t *testing.T) {
+	c := newCLIWithScheduler(t)
+	if got := suggestTexts(c.getJobsSuggestions(docFor("/jobs "))); !contains(got, "wait") {
+		t.Errorf("/jobs subcommands lack wait; got %v", got)
+	}
+	ids := seedTerminalJobs(t, c, 1)
+	got := suggestTexts(c.getJobsSuggestions(docFor("/jobs show ")))
+	if !contains(got, string(ids[0])) || !contains(got, "job-a") {
+		t.Errorf("/jobs show offers neither the id nor the name; got %v", got)
+	}
+	if got := suggestTexts(c.getJobsSuggestions(docFor("/jobs wait " + string(ids[0]) + " --"))); !contains(got, "--timeout") {
+		t.Errorf("/jobs wait lacks --timeout; got %v", got)
+	}
+	if got := suggestTexts(c.getJobsSuggestions(docFor("/jobs wait " + string(ids[0]) + " --timeout "))); len(got) == 0 {
+		t.Error("/jobs wait --timeout offers no duration hints")
+	}
+}

@@ -10,7 +10,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +57,7 @@ func (cli *ChatCLI) handleScheduleCommand(ctx context.Context, input string) {
 			fmt.Println(colorize("  ❌ "+out.Error, ColorRed))
 			return
 		}
+		cli.jobNotices.own(out.JobID)
 		fmt.Println(colorize("  ✔ "+i18n.T("scheduler.created", out.JobID, in.Name), ColorGreen))
 		return
 	}
@@ -71,69 +71,8 @@ func (cli *ChatCLI) handleScheduleCommand(ctx context.Context, input string) {
 		fmt.Println(colorize("  ❌ "+out.Error, ColorRed))
 		return
 	}
+	cli.jobNotices.own(out.JobID)
 	fmt.Println(colorize("  ✔ "+i18n.T("scheduler.created", out.JobID, in.Name), ColorGreen))
-}
-
-// handleWaitCommand implements /wait …
-func (cli *ChatCLI) handleWaitCommand(ctx context.Context, input string) {
-	if !cli.schedulerEnabled() {
-		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
-		return
-	}
-	args, err := tokenizeSchedulerInput(strings.TrimPrefix(input, "/wait"))
-	if err != nil {
-		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
-		return
-	}
-	if len(args) == 0 || args[0] == "help" {
-		cli.printWaitUsage()
-		return
-	}
-	in, err := parseWaitArgs(args)
-	if err != nil {
-		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
-		cli.printWaitUsage()
-		return
-	}
-	owner := cli.currentSchedulerOwner()
-	// Wait blocks by default; use --async to fire-and-forget.
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
-	defer cancel()
-	if cli.schedulerRemote != nil {
-		out, err := cli.schedulerRemote.Enqueue(ctx, owner, in)
-		if err != nil {
-			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
-			return
-		}
-		if !out.OK {
-			fmt.Println(colorize("  ❌ "+out.Error, ColorRed))
-			return
-		}
-		if in.Async {
-			fmt.Println(colorize("  ✔ "+i18n.T("scheduler.wait_async", out.JobID), ColorGreen))
-			return
-		}
-		// Poll for terminal status.
-		waitForTerminal(ctx, cli.schedulerRemote, out.JobID)
-		return
-	}
-	adapter := scheduler.NewToolAdapter(cli.scheduler)
-	raw := mustJSON(in)
-	res, _ := adapter.WaitUntil(ctx, owner, raw)
-	var out scheduler.ToolOutput
-	_ = jsonDecode(res, &out)
-	if !out.OK {
-		fmt.Println(colorize("  ❌ "+out.Error, ColorRed))
-		return
-	}
-	if in.Async {
-		fmt.Println(colorize("  ✔ "+i18n.T("scheduler.wait_async", out.JobID), ColorGreen))
-		return
-	}
-	fmt.Println(colorize(fmt.Sprintf("  ✔ %s", i18n.T("scheduler.wait_completed", out.JobID, string(out.Outcome))), ColorGreen))
-	if out.Details != "" {
-		fmt.Println(colorize(out.Details, ColorGray))
-	}
 }
 
 // handleJobsCommand implements /jobs …
@@ -167,6 +106,8 @@ func (cli *ChatCLI) handleJobsCommand(ctx context.Context, input string) {
 		cli.jobsResume(ctx, args[1:])
 	case "logs":
 		cli.jobsLogs(ctx, args[1:])
+	case "wait", "follow", "attach":
+		cli.jobsWait(ctx, args[1:])
 	case "history":
 		cli.jobsList(ctx, []string{"--all"})
 	case "daemon":
@@ -224,7 +165,11 @@ func (cli *ChatCLI) jobsShow(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.show_usage"), ColorYellow))
 		return
 	}
-	id := scheduler.JobID(args[0])
+	id, refMsg := cli.resolveJobRef(ctx, args[0])
+	if refMsg != "" {
+		fmt.Println(colorize("  "+refMsg, ColorYellow))
+		return
+	}
 	j := cli.schedulerQuery(ctx, id)
 	if j == nil {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.not_found", id), ColorYellow))
@@ -254,7 +199,11 @@ func (cli *ChatCLI) jobsCancel(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.cancel_usage"), ColorYellow))
 		return
 	}
-	id := scheduler.JobID(args[0])
+	id, refMsg := cli.resolveJobRef(ctx, args[0])
+	if refMsg != "" {
+		fmt.Println(colorize("  "+refMsg, ColorYellow))
+		return
+	}
 	reason := "user-cancelled"
 	if len(args) > 1 {
 		reason = strings.Join(args[1:], " ")
@@ -279,7 +228,11 @@ func (cli *ChatCLI) jobsPause(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.pause_usage"), ColorYellow))
 		return
 	}
-	id := scheduler.JobID(args[0])
+	id, refMsg := cli.resolveJobRef(ctx, args[0])
+	if refMsg != "" {
+		fmt.Println(colorize("  "+refMsg, ColorYellow))
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var err error
@@ -300,7 +253,11 @@ func (cli *ChatCLI) jobsResume(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.resume_usage"), ColorYellow))
 		return
 	}
-	id := scheduler.JobID(args[0])
+	id, refMsg := cli.resolveJobRef(ctx, args[0])
+	if refMsg != "" {
+		fmt.Println(colorize("  "+refMsg, ColorYellow))
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var err error
@@ -321,7 +278,11 @@ func (cli *ChatCLI) jobsLogs(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.logs_usage"), ColorYellow))
 		return
 	}
-	id := scheduler.JobID(args[0])
+	id, refMsg := cli.resolveJobRef(ctx, args[0])
+	if refMsg != "" {
+		fmt.Println(colorize("  "+refMsg, ColorYellow))
+		return
+	}
 	j := cli.schedulerQuery(ctx, id)
 	if j == nil {
 		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.not_found", id), ColorYellow))
@@ -411,15 +372,9 @@ func (cli *ChatCLI) jobsDaemon(ctx context.Context, args []string) {
 //
 // Active jobs (pending/running/waiting/paused) are NEVER pruned — use
 // /jobs cancel <id> to stop them first.
-func (cli *ChatCLI) jobsClear(_ context.Context, args []string) {
+func (cli *ChatCLI) jobsClear(ctx context.Context, args []string) {
 	if cli.scheduler == nil && cli.schedulerRemote == nil {
 		fmt.Println(colorize("  "+i18n.T("scheduler.disabled"), ColorYellow))
-		return
-	}
-	// Remote scheduler doesn't expose a Prune RPC yet — surface a
-	// clear "not implemented" instead of silently doing nothing.
-	if cli.schedulerRemote != nil {
-		fmt.Println(colorize("  /jobs clear is not yet supported against a remote daemon — run on the local scheduler instead.", ColorYellow))
 		return
 	}
 
@@ -455,12 +410,12 @@ func (cli *ChatCLI) jobsClear(_ context.Context, args []string) {
 			}
 		case "--older-than":
 			if i+1 < len(args) {
-				if d, err := time.ParseDuration(args[i+1]); err == nil {
-					olderThan = d
-				} else {
-					fmt.Println(colorize("  ❌ invalid --older-than value: "+args[i+1], ColorRed))
+				d, err := scheduler.ParseLooseDuration(args[i+1])
+				if err != nil {
+					fmt.Println(colorize("  ❌ --older-than: "+err.Error(), ColorRed))
 					return
 				}
+				olderThan = d
 				i++
 			}
 		case "--name":
@@ -474,7 +429,7 @@ func (cli *ChatCLI) jobsClear(_ context.Context, args []string) {
 		case "--yes", "-y":
 			skipConfirm = true
 		default:
-			fmt.Println(colorize("  ❌ unknown flag: "+args[i], ColorRed))
+			fmt.Println(colorize("  ❌ "+i18n.T("scheduler.jobs.unknown_flag", args[i]), ColorRed))
 			return
 		}
 	}
@@ -494,16 +449,16 @@ func (cli *ChatCLI) jobsClear(_ context.Context, args []string) {
 		Owner:           ownerFilter,
 		NameSubstr:      nameSubstr,
 	}
-	preview := cli.scheduler.List(previewFilter)
+	preview := cli.schedulerList(ctx, previewFilter)
 	preview = filterTerminal(preview, olderThan)
 	if len(preview) == 0 {
-		fmt.Println(colorize("  (no terminal jobs match the filter — nothing to clear)", ColorGray))
+		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.clear.none"), ColorGray))
 		return
 	}
 
 	if !skipConfirm {
 		desc := jobsClearDescription(statuses, olderThan, nameSubstr, ownerFilter)
-		fmt.Println(colorize(fmt.Sprintf("  Would delete %d terminal job(s)%s:", len(preview), desc), ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.clear.preview", len(preview), desc), ColorYellow))
 		maxN := 10
 		if len(preview) < maxN {
 			maxN = len(preview)
@@ -516,23 +471,34 @@ func (cli *ChatCLI) jobsClear(_ context.Context, args []string) {
 				s.Name)
 		}
 		if len(preview) > maxN {
-			fmt.Println(colorize(fmt.Sprintf("    … and %d more", len(preview)-maxN), ColorGray))
+			fmt.Println(colorize("    "+i18n.T("scheduler.jobs.clear.more", len(preview)-maxN), ColorGray))
 		}
-		fmt.Println(colorize("  Re-run the same command with --yes (or -y) to actually delete.", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("scheduler.jobs.clear.rerun"), ColorYellow))
 		return
 	}
 
-	removed, err := cli.scheduler.Prune(scheduler.PruneFilter{
+	pruneFilter := scheduler.PruneFilter{
 		Statuses:   statuses,
 		Owner:      ownerFilter,
 		OlderThan:  olderThan,
 		NameSubstr: nameSubstr,
-	})
+	}
+	var (
+		removed []scheduler.JobID
+		err     error
+	)
+	if cli.schedulerRemote != nil {
+		pruneCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		removed, err = cli.schedulerRemote.Prune(pruneCtx, cli.currentSchedulerOwner(), pruneFilter)
+	} else {
+		removed, err = cli.scheduler.Prune(pruneFilter)
+	}
 	if err != nil {
 		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
 		return
 	}
-	fmt.Println(colorize(fmt.Sprintf("  ✔ removed %d terminal job(s) from history", len(removed)), ColorGreen))
+	fmt.Println(colorize("  ✔ "+i18n.T("scheduler.jobs.clear.removed", len(removed)), ColorGreen))
 }
 
 // filterTerminal narrows a List preview to terminal entries that also
@@ -629,30 +595,22 @@ func (cli *ChatCLI) schedulerQuery(ctx context.Context, id scheduler.JobID) *sch
 	return nil
 }
 
-// waitForTerminal polls the remote client until the job reaches a
-// terminal state or ctx is cancelled.
-func waitForTerminal(ctx context.Context, c *scheduler.RemoteClient, id scheduler.JobID) {
-	t := time.NewTicker(500 * time.Millisecond)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println(colorize("  ⚠ "+i18n.T("scheduler.wait_ctx_cancelled"), ColorYellow))
-			return
-		case <-t.C:
-			j, err := c.Query(ctx, id)
-			if err != nil {
-				continue
-			}
-			if j.Status.IsTerminal() {
-				fmt.Println(colorize(fmt.Sprintf("  ✔ job %s → %s", id, j.Status), ColorGreen))
-				return
-			}
-		}
-	}
-}
-
 // ─── Argument parsers ─────────────────────────────────────────
+
+// scheduleValueFlags are the /schedule flags that take one value and
+// store it as is.
+var scheduleValueFlags = map[string]func(*scheduler.ToolInput) *string{
+	"--when":         func(in *scheduler.ToolInput) *string { return &in.When },
+	"--do":           func(in *scheduler.ToolInput) *string { return &in.Do },
+	"--wait":         func(in *scheduler.ToolInput) *string { return &in.Until },
+	"--until":        func(in *scheduler.ToolInput) *string { return &in.Until },
+	"--timeout":      func(in *scheduler.ToolInput) *string { return &in.Timeout },
+	"--wait-timeout": func(in *scheduler.ToolInput) *string { return &in.WaitTimeout },
+	"--poll":         func(in *scheduler.ToolInput) *string { return &in.PollInterval },
+	"--ttl":          func(in *scheduler.ToolInput) *string { return &in.TTL },
+	"--description":  func(in *scheduler.ToolInput) *string { return &in.Description },
+	"--on-timeout":   func(in *scheduler.ToolInput) *string { return &in.OnTimeout },
+}
 
 // parseScheduleArgs reads /schedule CLI flags into a ToolInput. The
 // first positional argument is the job name.
@@ -667,9 +625,19 @@ func parseScheduleArgs(args []string) (scheduler.ToolInput, error) {
 		args = args[1:]
 	}
 	for i := 0; i < len(args); i++ {
+		if target, ok := scheduleValueFlags[args[i]]; ok {
+			*target(&in), i = takeString(args, i)
+			continue
+		}
+		ni, handled, err := parseSharedJobFlag("schedule", &in, args, i)
+		if err != nil {
+			return in, err
+		}
+		if handled {
+			i = ni
+			continue
+		}
 		switch args[i] {
-		case "--when":
-			in.When, i = takeString(args, i)
 		case "--cron":
 			val, ni := takeString(args, i)
 			in.When = "cron:" + val
@@ -678,69 +646,18 @@ func parseScheduleArgs(args []string) (scheduler.ToolInput, error) {
 			val, ni := takeString(args, i)
 			in.When = "every " + val
 			i = ni
-		case "--do":
-			in.Do, i = takeString(args, i)
-		case "--wait", "--until":
-			in.Until, i = takeString(args, i)
-		case "--timeout":
-			in.Timeout, i = takeString(args, i)
-		case "--wait-timeout":
-			in.WaitTimeout, i = takeString(args, i)
-		case "--poll":
-			in.PollInterval, i = takeString(args, i)
-		case "--max-polls":
-			val, ni := takeString(args, i)
-			if n, err := strconv.Atoi(val); err == nil {
-				in.MaxPolls = n
-			}
-			i = ni
-		case "--max-retries":
-			val, ni := takeString(args, i)
-			if n, err := strconv.Atoi(val); err == nil {
-				in.MaxRetries = n
-			}
-			i = ni
-		case "--depends-on":
-			val, ni := takeString(args, i)
-			in.DependsOn = append(in.DependsOn, val)
-			i = ni
 		case "--triggers":
 			val, ni := takeString(args, i)
 			in.Triggers = append(in.Triggers, val)
 			i = ni
-		case "--ttl":
-			in.TTL, i = takeString(args, i)
-		case "--description":
-			in.Description, i = takeString(args, i)
-		case "--tag":
-			val, ni := takeString(args, i)
-			parts := strings.SplitN(val, "=", 2)
-			if len(parts) == 2 {
-				in.Tags[parts[0]] = parts[1]
-			} else {
-				in.Tags[parts[0]] = ""
-			}
-			i = ni
-		case "--on-timeout":
-			in.OnTimeout, i = takeString(args, i)
-		case "--skill":
-			// Repeatable: each --skill adds one persona skill name that
-			// the headless agent_task run re-resolves and injects at
-			// fire time. Without the flag, jobs created via @scheduler
-			// inherit the creating run's active skills automatically.
-			val, ni := takeString(args, i)
-			if val != "" {
-				in.Skills = append(in.Skills, val)
-			}
-			i = ni
-		case "--i-know":
-			// Pre-authorize ShellPolicyAsk commands at enqueue
-			// preflight. Propagates to Job.DangerousConfirmed via
-			// ToolInput.IKnow. Note: denylist rules are NOT
-			// overridable — --i-know cannot override a Deny.
-			in.IKnow = true
 		case "--async":
 			in.Async = true
+		case "--notify":
+			// Announce in the terminal when the job (or each cycle of a
+			// recurring one) ends. /wait does this by default.
+			in.Tags[notifyTag] = "on"
+		case "--quiet", "--no-notify":
+			in.Tags[notifyTag] = "off"
 		default:
 			if strings.HasPrefix(args[i], "--") {
 				return in, fmt.Errorf("schedule: unknown flag %s", args[i])
@@ -762,51 +679,54 @@ func parseScheduleArgs(args []string) (scheduler.ToolInput, error) {
 	return in, nil
 }
 
-func parseWaitArgs(args []string) (scheduler.ToolInput, error) {
-	in := scheduler.ToolInput{Tags: map[string]string{}}
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--until":
-			in.Until, i = takeString(args, i)
-		case "--then":
-			in.Do, i = takeString(args, i)
-		case "--every":
-			in.PollInterval, i = takeString(args, i)
-		case "--timeout":
-			in.WaitTimeout, i = takeString(args, i)
-		case "--max-polls":
-			val, ni := takeString(args, i)
-			if n, err := strconv.Atoi(val); err == nil {
-				in.MaxPolls = n
-			}
-			i = ni
-		case "--async":
-			in.Async = true
-		case "--on-timeout":
-			in.OnTimeout, i = takeString(args, i)
-		case "--name":
-			in.Name, i = takeString(args, i)
-		default:
-			if strings.HasPrefix(args[i], "--") {
-				return in, fmt.Errorf("wait: unknown flag %s", args[i])
-			}
-			return in, fmt.Errorf("wait: unexpected positional %q (did you forget to quote a multi-word value?)", args[i])
+// parseSharedJobFlag handles the flags /schedule and /wait read the same
+// way. handled is false when args[i] is not one of them; ni is the index
+// of the last token consumed.
+//
+//	--max-polls N / --max-retries N   whole, non-negative numbers
+//	--depends-on ID                   repeatable
+//	--skill NAME                      repeatable: persona skills the headless
+//	                                  agent_task run re-resolves at fire time
+//	--tag k=v                         repeatable
+//	--i-know                          pre-authorize a shell command that
+//	                                  would otherwise ask (never a denied one)
+func parseSharedJobFlag(cmd string, in *scheduler.ToolInput, args []string, i int) (ni int, handled bool, err error) {
+	flag := args[i]
+	if flag == "--i-know" {
+		in.IKnow = true
+		return i, true, nil
+	}
+	switch flag {
+	case "--max-polls", "--max-retries", "--depends-on", "--skill", "--tag":
+	default:
+		return i, false, nil
+	}
+	if i+1 >= len(args) {
+		return i, true, fmt.Errorf("%s: %s needs a value", cmd, flag)
+	}
+	val := args[i+1]
+	switch flag {
+	case "--max-polls", "--max-retries":
+		n, convErr := strconv.Atoi(val)
+		if convErr != nil || n < 0 {
+			return i, true, fmt.Errorf("%s: %s needs a whole number, got %q", cmd, flag, val)
 		}
+		if flag == "--max-polls" {
+			in.MaxPolls = n
+		} else {
+			in.MaxRetries = n
+		}
+	case "--depends-on":
+		in.DependsOn = append(in.DependsOn, val)
+	case "--skill":
+		if val != "" {
+			in.Skills = append(in.Skills, val)
+		}
+	case "--tag":
+		k, v, _ := strings.Cut(val, "=")
+		in.Tags[k] = v
 	}
-	if in.Until == "" {
-		return in, fmt.Errorf("wait: --until is required")
-	}
-	if in.When == "" {
-		in.When = "when-ready"
-	}
-	if in.Do == "" {
-		in.Do = "noop"
-	}
-	if in.Name == "" {
-		host, _ := os.Hostname()
-		in.Name = fmt.Sprintf("wait-%s-%d", host, time.Now().UnixNano()%100000)
-	}
-	return in, nil
+	return i + 1, true, nil
 }
 
 func takeString(args []string, i int) (string, int) {
@@ -913,7 +833,9 @@ func (cli *ChatCLI) printWaitUsage() {
 	fmt.Println(colorize(i18n.T("scheduler.wait.usage_header"), ColorCyan+ColorBold))
 	fmt.Println("  " + i18n.T("scheduler.wait.usage_example_1"))
 	fmt.Println("  " + i18n.T("scheduler.wait.usage_example_2"))
+	fmt.Println("  " + i18n.T("scheduler.wait.usage_example_3"))
 	fmt.Println("  " + i18n.T("scheduler.wait.usage_flags"))
+	fmt.Println("  " + i18n.T("scheduler.wait.usage_background"))
 }
 
 func (cli *ChatCLI) printJobsUsage() {
@@ -925,6 +847,7 @@ func (cli *ChatCLI) printJobsUsage() {
 	fmt.Println("  /jobs pause <id>")
 	fmt.Println("  /jobs resume <id>")
 	fmt.Println("  /jobs logs <id>")
+	fmt.Println("  /jobs wait <id> [--timeout D]")
 	fmt.Println("  /jobs history")
 	fmt.Println("  /jobs clear [--failed | --succeeded | --cancelled | --timed-out | --status S | --older-than D | --name N | --mine | --yes]")
 	fmt.Println("              (aliases: clean, prune)")

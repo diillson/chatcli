@@ -116,7 +116,7 @@ func TestJobsClear_PreviewWithoutYes(t *testing.T) {
 		t.Errorf("preview output missing two-step instructions: %q", out)
 	}
 	// Output includes job count.
-	if !strings.Contains(out, "3 terminal job") {
+	if !strings.Contains(out, "3 finished job") {
 		t.Errorf("preview output missing job count: %q", out)
 	}
 }
@@ -134,7 +134,7 @@ func TestJobsClear_DeletesWithYes(t *testing.T) {
 	if got := countTerminalJobs(cli); got != 0 {
 		t.Errorf("--yes did not delete: want 0 terminal jobs, got %d", got)
 	}
-	if !strings.Contains(out, "removed 4 terminal job") {
+	if !strings.Contains(out, "Removed 4 finished job") {
 		t.Errorf("output should confirm deletion count: %q", out)
 	}
 }

@@ -196,7 +196,7 @@ func scheduleFlagSuggestions() []prompt.Suggest {
 		{Text: "--description", Description: i18n.T("sched.flag.description")},
 		{Text: "--tag", Description: i18n.T("sched.flag.tag")},
 		{Text: "--on-timeout", Description: i18n.T("sched.flag.on_timeout")},
-		{Text: "--async", Description: i18n.T("sched.flag.async")},
+		{Text: "--notify", Description: i18n.T("sched.flag.notify")},
 		{Text: "--i-know", Description: i18n.T("sched.flag.i_know")},
 	}
 }
@@ -211,10 +211,18 @@ func (cli *ChatCLI) getWaitSuggestions(d prompt.Document) []prompt.Suggest {
 	trailingSpace := strings.HasSuffix(d.TextBeforeCursor(), " ")
 
 	if len(args) == 0 || (len(args) == 1 && !trailingSpace) {
-		return prompt.FilterHasPrefix([]prompt.Suggest{
+		// The condition may be given bare (/wait tcp://db:5432): offer the
+		// one-word condition shapes next to --until.
+		first := []prompt.Suggest{
 			{Text: "--until", Description: i18n.T("sched.flag.until")},
 			{Text: "help", Description: i18n.T("sched.complete.help")},
-		}, current, true)
+		}
+		for _, h := range scheduleUntilHints() {
+			if !strings.Contains(h.Text, " ") {
+				first = append(first, h)
+			}
+		}
+		return prompt.FilterHasPrefix(first, current, true)
 	}
 
 	prevFlag := lastFlag(args, trailingSpace)
@@ -223,11 +231,11 @@ func (cli *ChatCLI) getWaitSuggestions(d prompt.Document) []prompt.Suggest {
 		return prompt.FilterHasPrefix(scheduleUntilHints(), current, true)
 	case "--then":
 		return prompt.FilterHasPrefix(scheduleDoHints(), current, true)
-	case "--every", "--timeout":
+	case "--every", "--timeout", "--action-timeout", "--ttl":
 		return prompt.FilterHasPrefix(scheduleDurationHints(), current, true)
 	case "--on-timeout":
 		return prompt.FilterHasPrefix(scheduleOnTimeoutValues(), current, true)
-	case "--max-polls", "--name":
+	case "--max-polls", "--max-retries", "--name", "--description", "--tag", "--depends-on", "--skill":
 		return nil
 	}
 
@@ -245,8 +253,16 @@ func waitFlagSuggestions() []prompt.Suggest {
 		{Text: "--timeout", Description: i18n.T("sched.flag.timeout")},
 		{Text: "--max-polls", Description: i18n.T("sched.flag.max_polls")},
 		{Text: "--on-timeout", Description: i18n.T("sched.flag.on_timeout")},
-		{Text: "--async", Description: i18n.T("sched.flag.async")},
+		{Text: "--block", Description: i18n.T("sched.flag.block")},
+		{Text: "--quiet", Description: i18n.T("sched.flag.quiet")},
 		{Text: "--name", Description: i18n.T("sched.flag.name")},
+		{Text: "--description", Description: i18n.T("sched.flag.description")},
+		{Text: "--tag", Description: i18n.T("sched.flag.tag")},
+		{Text: "--action-timeout", Description: i18n.T("sched.flag.action_timeout")},
+		{Text: "--max-retries", Description: i18n.T("sched.flag.max_retries")},
+		{Text: "--depends-on", Description: i18n.T("sched.flag.depends_on")},
+		{Text: "--ttl", Description: i18n.T("sched.flag.ttl")},
+		{Text: "--i-know", Description: i18n.T("sched.flag.i_know")},
 	}
 }
 
@@ -260,6 +276,7 @@ var jobsIDSubcommands = map[string]bool{
 	"pause":  true,
 	"resume": true,
 	"logs":   true,
+	"wait":   true,
 }
 
 // jobsSubcommandSuggestions() lists the top-level subcommand table.
@@ -272,6 +289,7 @@ func jobsSubcommandSuggestions() []prompt.Suggest {
 		{Text: "pause", Description: i18n.T("sched.jobs.sub.pause")},
 		{Text: "resume", Description: i18n.T("sched.jobs.sub.resume")},
 		{Text: "logs", Description: i18n.T("sched.jobs.sub.logs")},
+		{Text: "wait", Description: i18n.T("sched.jobs.sub.wait")},
 		{Text: "history", Description: i18n.T("sched.jobs.sub.history")},
 		{Text: "clear", Description: i18n.T("sched.jobs.sub.clear")},
 		{Text: "clean", Description: i18n.T("sched.jobs.sub.clear")},
@@ -355,6 +373,9 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 			includeTerminal := sub == "logs" || sub == "show"
 			return prompt.FilterHasPrefix(cli.schedulerJobIDSuggestions(!includeTerminal), current, true)
 		}
+		if sub == "wait" {
+			return jobsWaitFlagSuggestions(args[1:], current, trailingSpace)
+		}
 		return nil
 	}
 
@@ -407,6 +428,19 @@ func (cli *ChatCLI) getJobsSuggestions(d prompt.Document) []prompt.Suggest {
 	return nil
 }
 
+// jobsWaitFlagSuggestions completes `/jobs wait <id> --timeout <duration>`.
+func jobsWaitFlagSuggestions(args []string, current string, trailingSpace bool) []prompt.Suggest {
+	if lastFlag(args, trailingSpace) == "--timeout" {
+		return prompt.FilterHasPrefix(scheduleDurationHints(), current, true)
+	}
+	if strings.HasPrefix(current, "-") || trailingSpace {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "--timeout", Description: i18n.T("sched.jobs.wait.flag.timeout")},
+		}, current, true)
+	}
+	return nil
+}
+
 // ─── Helpers ──────────────────────────────────────────────────
 
 // schedulerJobIDSuggestions pulls live IDs from the scheduler so the
@@ -425,6 +459,16 @@ func (cli *ChatCLI) schedulerJobIDSuggestions(activeOnly bool) []prompt.Suggest 
 			desc = s.Description + "  [" + string(s.Status) + "]"
 		}
 		out = append(out, prompt.Suggest{Text: string(s.ID), Description: desc})
+	}
+	// A job answers to its name too (/jobs show api-up). Names follow the
+	// IDs; one that needs quoting is left out, the ID covers it.
+	seen := map[string]bool{}
+	for _, s := range list {
+		if s.Name == "" || seen[s.Name] || strings.ContainsAny(s.Name, " \t\"'") {
+			continue
+		}
+		seen[s.Name] = true
+		out = append(out, prompt.Suggest{Text: s.Name, Description: string(s.ID) + "  [" + string(s.Status) + "]"})
 	}
 	return out
 }

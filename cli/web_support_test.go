@@ -38,7 +38,14 @@ func TestListWebCommands_ExtendsWithoutWideningACP(t *testing.T) {
 	for _, cmd := range c.ListWebCommands() {
 		web[cmd.Name] = cmd
 	}
-	for _, name := range []string{"clear", "retry", "rewind", "plan", "jobs", "schedule", "hooks", "lsp"} {
+	// The scheduler commands register or inspect a job and return, so they
+	// are part of the headless surface every client shares.
+	for _, name := range []string{"jobs", "schedule", "wait"} {
+		if !acp[name] || web[name].Name != name {
+			t.Errorf("%q must be advertised over ACP and to the web page", name)
+		}
+	}
+	for _, name := range []string{"clear", "retry", "rewind", "plan", "hooks", "lsp"} {
 		if acp[name] {
 			t.Errorf("%q must not be advertised over ACP", name)
 		}
@@ -59,14 +66,22 @@ func TestListWebCommands_ExtendsWithoutWideningACP(t *testing.T) {
 	}
 }
 
-// /jobs only reads from the page; "/schedule list" is the listing.
+// The page acts on single jobs; what acts on the scheduler as a whole
+// stays in the terminal. "/schedule list" is the listing.
 func TestRunWebCommandRPC_SchedulerRules(t *testing.T) {
 	c := webTestCLI(t)
 	ctx := context.Background()
-	for _, line := range []string{"/jobs cancel j1", "/jobs pause j1", "/jobs gc", "/jobs daemon start"} {
+	refusal := i18n.T("web.command.jobs.terminal_only", "gc")
+	for _, line := range []string{"/jobs gc", "/jobs daemon start", "/jobs clear --yes", "/jobs prune"} {
 		out, err := c.RunWebCommandRPC(ctx, line)
-		if err != nil || !strings.Contains(out, "/jobs list") || strings.Contains(out, "web.command") {
+		if err != nil || out != i18n.T("web.command.jobs.terminal_only", strings.Fields(line)[1]) || strings.Contains(out, "web.command") {
 			t.Fatalf("%s: %q %v", line, out, err)
+		}
+	}
+	for _, line := range []string{"/jobs cancel j1", "/jobs pause j1", "/jobs resume j1", "/jobs show j1", "/jobs wait j1"} {
+		out, err := c.RunWebCommandRPC(ctx, line)
+		if err != nil || out == refusal || strings.Contains(out, "from the terminal") {
+			t.Fatalf("%s must reach the scheduler from the page: %q %v", line, out, err)
 		}
 	}
 	listing, err := c.RunWebCommandRPC(ctx, "/jobs list")
