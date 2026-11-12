@@ -427,7 +427,17 @@ func (cli *ChatCLI) handleSwitchCommand(ctx context.Context, userInput string) {
 				shouldUpdateStackSpot = true
 				i++
 			}
+		default:
+			// An argument this command does not read used to be dropped,
+			// so "/switch openai" or a mistyped flag did nothing and said
+			// nothing.
+			fmt.Println(i18n.T("cli.switch.unknown_arg", args[i]))
+			return
 		}
+	}
+	if missing := switchFlagMissingValue(args); missing != "" {
+		fmt.Println(i18n.T("cli.switch.missing_value", missing))
+		return
 	}
 	if maxTokensOverride != -1 {
 		cli.UserMaxTokens = maxTokensOverride
@@ -481,6 +491,20 @@ func (cli *ChatCLI) handleSwitchCommand(ctx context.Context, userInput string) {
 	if !shouldSwitchModel && maxTokensOverride == -1 && len(args) == 1 {
 		cli.switchProvider()
 	}
+}
+
+// switchFlagMissingValue returns the /switch flag that ends the line
+// without the value it needs ("" when none). --model is exempt: bare, it
+// lists the models.
+func switchFlagMissingValue(args []string) string {
+	if len(args) < 2 {
+		return ""
+	}
+	switch last := args[len(args)-1]; last {
+	case "--max-tokens", "--realm", "--agent-id":
+		return last
+	}
+	return ""
 }
 
 func (cli *ChatCLI) listAvailableModels(ctx context.Context) {

@@ -166,7 +166,7 @@ entities and relations you extracted as nodes/edges with source=json.`
 }
 
 // Version is semver.
-func (*BuiltinGraphViewPlugin) Version() string { return "1.2.0" }
+func (*BuiltinGraphViewPlugin) Version() string { return "1.2.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinGraphViewPlugin) Path() string { return "" }
@@ -319,6 +319,48 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// graphViewArgvToJSON rebuilds the flat JSON object from a flattened call
+// that carries inline graph data. ok is false when argv has none (the
+// simple --source/--theme form is then handled as before).
+func graphViewArgvToJSON(argv []string) (string, bool) {
+	listKeys := map[string]bool{"nodes": true, "edges": true, "links": true}
+	_, inner := argvToInnerJSON(argv, listKeys, nil)
+	var flags map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(inner), &flags); err != nil {
+		return "", false
+	}
+	obj := map[string]json.RawMessage{}
+	inline := false
+	for k, raw := range flags {
+		if !listKeys[k] {
+			obj[k] = raw
+			continue
+		}
+		var items []string
+		if err := json.Unmarshal(raw, &items); err != nil {
+			continue
+		}
+		elems := make([]json.RawMessage, 0, len(items))
+		for _, it := range items {
+			if json.Valid([]byte(it)) {
+				elems = append(elems, json.RawMessage(it))
+			}
+		}
+		if b, err := json.Marshal(elems); err == nil && len(elems) > 0 {
+			obj[k] = b
+			inline = true
+		}
+	}
+	if !inline {
+		return "", false
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
+}
+
 // parseGraphViewArgs supports flat JSON, the {"cmd","args"} envelope and a
 // minimal --flag argv form.
 func parseGraphViewArgs(args []string) (graphViewArgs, error) {
@@ -326,6 +368,12 @@ func parseGraphViewArgs(args []string) (graphViewArgs, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
 
 	if !strings.HasPrefix(payload, "{") {
+		// The agent loop flattens {"cmd":"render","args":{...}} into argv,
+		// one --nodes / --edges per element. Rebuild the object and take
+		// the JSON path, or the graph renders empty.
+		if rebuilt, ok := graphViewArgvToJSON(args); ok {
+			return parseGraphViewArgs([]string{rebuilt})
+		}
 		// Bare argv: only the simple sources/flags are supported here.
 		if s := stringFromFlagArgs(args, []string{"source", "src"}); s != "" {
 			out.Source = s

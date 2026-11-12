@@ -15,6 +15,19 @@ func (cli *ChatCLI) handleHooksCommand(userInput string) {
 		return
 	}
 
+	// /hooks [list] shows the hooks; /hooks reload reads the configuration
+	// files again first. Completion has always offered both, but the
+	// arguments were never read, so "reload" reloaded nothing.
+	switch sub := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(userInput), "/hooks"))); sub {
+	case "", "list", "ls":
+	case "reload":
+		cli.hookManager.Reload()
+		fmt.Println(colorize("  ✔ "+i18n.T("hooks.cmd.reloaded", len(cli.hookManager.GetHooks())), ColorGreen))
+	default:
+		fmt.Println(colorize("  "+i18n.T("hooks.cmd.unknown_sub", sub), ColorYellow))
+		return
+	}
+
 	hks := cli.hookManager.GetHooks()
 
 	fmt.Println()

@@ -67,6 +67,16 @@ func (m *Manager) LoadFromFile(path string) error {
 	return nil
 }
 
+// Reload discards the loaded hooks and reads the settings hierarchy again.
+// LoadFromSettings alone is not a reload: with the global file gone it
+// keeps what it had, and the workspace hooks are appended a second time.
+func (m *Manager) Reload() {
+	m.mu.Lock()
+	m.hooks = nil
+	m.mu.Unlock()
+	m.LoadFromSettings()
+}
+
 // LoadFromSettings loads hooks from the chatcli settings hierarchy.
 // Checks: workspace/.chatcli/hooks.json > ~/.chatcli/hooks.json
 //
