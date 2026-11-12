@@ -43,7 +43,18 @@ var (
 // aplica direto (semântica de brew upgrade), sem confirmação intermediária.
 func (cli *ChatCLI) handleUpdateCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(userInput)
-	checkOnly := len(args) > 1 && (args[1] == "check" || args[1] == "--check")
+	// Anything but "check" after /update used to fall through to the
+	// install, so a typo ("/update chek") applied the update.
+	checkOnly := false
+	for _, a := range args[1:] {
+		switch a {
+		case "check", "--check", "-check":
+			checkOnly = true
+		default:
+			fmt.Println(colorize("  "+i18n.T("update.repl.unknown_arg", a), ColorYellow))
+			return
+		}
+	}
 	_ = runUpdateFlow(ctx, cli.logger, checkOnly, func(latest string) {
 		// O processo segue na versão antiga até reiniciar; no REPL o
 		// /restart faz isso sem perder a conversa.

@@ -266,11 +266,18 @@ func (cli *ChatCLI) runChannelConfirm(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+i18n.T("chan.cmd.confirm_bad_id"), ColorYellow))
 		return
 	}
+	// With no word the action is accepted; with one, it must be a yes or
+	// a no. Any other word used to approve the gated action, so a mistyped
+	// or differently worded refusal ("reject", "nao") ran it.
 	accept := true
 	if len(args) >= 4 {
 		switch strings.ToLower(args[3]) {
-		case "no", "n", "deny":
+		case "yes", "y", "ok", "accept", "approve", "sim", "s":
+		case "no", "n", "deny", "reject", "nao", "não":
 			accept = false
+		default:
+			fmt.Println(colorize("  "+i18n.T("chan.cmd.confirm_bad_answer", args[3]), ColorYellow))
+			return
 		}
 	}
 	if err := cli.channelTriggerConfirm(ctx, id, accept); err != nil {

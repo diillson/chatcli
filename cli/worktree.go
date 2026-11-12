@@ -44,7 +44,13 @@ func (cli *ChatCLI) handleWorktreeCommand(userInput string) {
 	case "status":
 		cli.worktreeStatus()
 	default:
-		// Treat as branch name: /worktree feature-x
+		// Treat as branch name: /worktree feature-x — unless it is one
+		// keystroke away from a subcommand, where creating a branch called
+		// "lsit" and changing into it is never what was meant.
+		if sub := nearSubcommand(args[1], "create", "new", "list", "ls", "remove", "rm", "delete", "status"); sub != "" {
+			fmt.Println(colorize("  "+i18n.T("wt.cmd.did_you_mean", args[1], sub, args[1]), ColorYellow))
+			return
+		}
 		cli.worktreeCreate(args[1])
 	}
 }

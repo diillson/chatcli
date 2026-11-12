@@ -126,7 +126,8 @@ func (s *Server) routeSlash(ctx context.Context, rn *run, session, line string, 
 // commandAdvertised reports whether the token names a command the backend
 // runs headless. Catalog names come with or without the leading slash.
 func (s *Server) commandAdvertised(token string) bool {
-	name := strings.TrimPrefix(token, "/")
+	// An alias is the command it stands for (/status is /config).
+	name := strings.TrimPrefix(palette.Canonical(token), "/")
 	for _, c := range s.opts.Backend.Commands() {
 		if strings.TrimPrefix(c.Name, "/") == name {
 			return true

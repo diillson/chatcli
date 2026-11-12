@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/diillson/chatcli/cli/palette"
 	"github.com/diillson/chatcli/i18n"
 )
 
@@ -126,7 +127,8 @@ func (s *Server) routeWebCommand(ctx context.Context, rn *run, session, line str
 			return s.cmdPlan(ctx, rn, pc, session, line, mode, text), true
 		}
 	}
-	if key, ok := webRefusals[token]; ok {
+	// /commands and /palette are /menu, and are refused like it.
+	if key, ok := webRefusals[palette.Canonical(token)]; ok {
 		rn.sink.push(event{Type: "done", Reply: i18n.T(key, token)})
 		return true, true
 	}

@@ -27,11 +27,14 @@ func (h *ContextHandler) handleInspect(args []string) error {
 
 	// Parse flags
 	for i := 1; i < len(args); i++ {
-		if args[i] == "--chunk" && i+1 < len(args) {
+		// -c is the short form the completer offers; a chunk that is not
+		// a number used to be dropped and the whole context inspected.
+		if (args[i] == "--chunk" || args[i] == "-c") && i+1 < len(args) {
 			n, err := strconv.Atoi(args[i+1])
-			if err == nil {
-				chunkNum = n
+			if err != nil || n < 0 {
+				return fmt.Errorf("%s", i18n.T("context.inspect.bad_chunk", args[i+1]))
 			}
+			chunkNum = n
 			i++
 		}
 	}

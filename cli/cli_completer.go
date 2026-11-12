@@ -89,7 +89,24 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/gateway", (*ChatCLI).getGatewaySuggestions},
 	{"/lsp", (*ChatCLI).getLSPSuggestions},
 	{"/update", (*ChatCLI).getUpdateSuggestions},
+	{"/autocompact", (*ChatCLI).getAutoCompactSuggestions},
 	{"/graph", (*ChatCLI).getGraphSuggestions},
+}
+
+// getAutoCompactSuggestions completes `/autocompact <value>` with the
+// shapes the command reads: a share of the window, a token count, or the
+// default.
+func (cli *ChatCLI) getAutoCompactSuggestions(d prompt.Document) []prompt.Suggest {
+	args := strings.Fields(d.TextBeforeCursor())
+	if len(args) > 2 || (len(args) == 2 && strings.HasSuffix(d.TextBeforeCursor(), " ")) {
+		return nil
+	}
+	return prompt.FilterHasPrefix([]prompt.Suggest{
+		{Text: "default", Description: i18n.T("complete.autocompact.default")},
+		{Text: "60%", Description: i18n.T("complete.autocompact.percent")},
+		{Text: "80%", Description: i18n.T("complete.autocompact.percent")},
+		{Text: "150k", Description: i18n.T("complete.autocompact.tokens")},
+	}, d.GetWordBeforeCursor(), true)
 }
 
 // getUpdateSuggestions completes `/update <sub>`: check (and its --check
@@ -545,6 +562,7 @@ func (cli *ChatCLI) getWatchSuggestions(d prompt.Document) []prompt.Suggest {
 	if strings.Contains(lineBeforeCursor, "/watch start") && strings.HasPrefix(wordBeforeCursor, "-") {
 		flags := []prompt.Suggest{
 			{Text: "--deployment", Description: i18n.T("complete.watch.flag_deployment")},
+			{Text: "--kind", Description: i18n.T("complete.watch.flag_kind")},
 			{Text: "--namespace", Description: i18n.T("complete.watch.flag_namespace")},
 			{Text: "--interval", Description: i18n.T("complete.watch.flag_interval")},
 			{Text: "--window", Description: i18n.T("complete.watch.flag_window")},
@@ -1723,6 +1741,7 @@ func (cli *ChatCLI) getConfigSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 1 || (len(args) == 2 && !strings.HasSuffix(line, " ")) {
 		sections := []prompt.Suggest{
 			{Text: "--reload", Description: i18n.T("complete.config.reload")},
+			{Text: "reload", Description: i18n.T("complete.config.reload")},
 			{Text: "all", Description: i18n.T("complete.config.all")},
 			{Text: "general", Description: i18n.T("complete.config.general")},
 			{Text: "providers", Description: i18n.T("complete.config.providers")},
