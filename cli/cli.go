@@ -577,6 +577,9 @@ type ChatCLI struct {
 	schedulerSocket string
 	schedulerCancel context.CancelFunc
 	schedulerDirty  int32 // atomic — bumped by scheduler events for prompt refresh
+	// cmdInterrupt is the slash command Ctrl+C would cancel right now
+	// (guarded by mu); see command_interrupt.go.
+	cmdInterrupt *commandInterrupt
 	// schedulerBridge is the in-process CLIBridge implementation. The
 	// agent loop reaches it via ChatCLI when handling @park parking
 	// (snapshot enqueue) and resume notifications. Nil when the
@@ -1197,7 +1200,7 @@ func (cli *ChatCLI) executor(in string) {
 	}
 
 	if strings.HasPrefix(in, "/") || in == "exit" || in == "quit" {
-		exit := cli.commandHandler.HandleCommand(context.Background(), in)
+		exit := cli.runInterruptibleCommand(in)
 		if !exit {
 			// If the handler asked to open the command palette, run it now —
 			// raw mode is already released while the executor runs — and
@@ -1257,6 +1260,7 @@ func (cli *ChatCLI) CancelOperation() {
 	if cli.operationCancel != nil {
 		cli.operationCancel()
 	}
+	cli.interruptCommandLocked()
 }
 
 // dequeueMessage removes and returns the first message from the queue.
@@ -1601,7 +1605,7 @@ func (cli *ChatCLI) runRequestedPalette() bool {
 	// pickable selection (e.g. "/config", "/switch") from reopening the
 	// overlay; the trigger consumes and clears it on this very call.
 	cli.suppressPaletteOnce = true
-	exit := cli.commandHandler.HandleCommand(context.Background(), sel)
+	exit := cli.runInterruptibleCommand(sel)
 	cli.suppressPaletteOnce = false
 	cli.paletteRequested = false // ignore any re-trigger raised during execution
 	return exit

@@ -277,7 +277,9 @@ func (ch *CommandHandler) pluginInstall(ctx context.Context, args []string) {
 	}
 	cloneArgs = append(cloneArgs, cloneURL, tempDir)
 
-	cloneCmd := exec.Command("git", cloneArgs...)
+	// Bound to the command: Ctrl+C stops a clone that stalls (a slow
+	// remote, a credential prompt) instead of leaving it to run forever.
+	cloneCmd := exec.CommandContext(ctx, "git", cloneArgs...)
 	if output, err := cloneCmd.CombinedOutput(); err != nil {
 		fmt.Println(i18n.T("plugin.install.error.clone", err))
 		fmt.Println(string(output))
@@ -302,7 +304,7 @@ func (ch *CommandHandler) pluginInstall(ctx context.Context, args []string) {
 		pluginName += ".exe"
 	}
 
-	buildCmd := exec.Command("go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".") //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", filepath.Join(pluginManager.PluginsDir(), pluginName), ".") //#nosec G204 -- agent/CLI tool execution; commands validated by command_validator + policy_manager upstream
 	buildCmd.Dir = buildDir
 	if output, err := buildCmd.CombinedOutput(); err != nil {
 		fmt.Println(i18n.T("plugin.install.error.build", err, string(output)))
