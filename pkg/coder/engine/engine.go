@@ -198,6 +198,17 @@ func (e *Engine) validatePath(target string) error {
 	return e.validatePathForAccess(target, false)
 }
 
+// underSystemBin reports whether p lies in one of the system binary
+// directories.
+func underSystemBin(p string) bool {
+	for _, bp := range systemBinPaths {
+		if strings.HasPrefix(p, bp) {
+			return true
+		}
+	}
+	return false
+}
+
 // validateWritePath is validatePath for a path about to be written. It
 // refuses the system binary directories: the workspace boundary is the
 // promise this tool makes, and a write outside it is the one effect that
@@ -239,15 +250,14 @@ func (e *Engine) validatePathForAccess(target string, write bool) error {
 			}
 		}
 
-		isSystemBin := false
-		if !write {
-			for _, bp := range systemBinPaths {
-				if strings.HasPrefix(resolved, bp) {
-					isSystemBin = true
-					break
-				}
-			}
-		}
+		// A system binary is recognized by where it was asked for as well
+		// as by where it resolves. Distributions ship some tools as links
+		// out of the binary directories (a multi-call coreutils behind
+		// /usr/bin/env, the alternatives system), so the resolved path
+		// alone refused reading an interpreter the system put on PATH.
+		// The directories are root-owned, and the sensitive-path denylist
+		// above was already applied to the resolved target.
+		isSystemBin := !write && (underSystemBin(resolved) || underSystemBin(filepath.Clean(abs)))
 
 		if !isSystemBin && !fspath.WithinBoundary(resolved, boundary) {
 			// Check aux allowlist (e.g. session scratch dir, tool-result
