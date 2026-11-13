@@ -47,8 +47,15 @@ type stdioTransport struct {
 	// killed). The Manager registers it to flip Status.Connected back
 	// to false so /mcp status reflects the real state without the
 	// user having to /mcp restart.
+	//
+	// The read loop starts inside newStdioTransport, before the caller
+	// can register anything, so the hooks are set and read under hookMu
+	// and a close that happened first is kept and delivered on
+	// registration. Use setOnClose and setOnLog, never the fields.
+	hookMu      sync.Mutex
 	onClose     func(error)
-	onCloseOnce sync.Once
+	closed      bool
+	closeReason error
 	// onLog forwards each stderr line into the per-server log ring
 	// so /mcp logs <name> can show recent output without tailing the
 	// debug log. Optional — left nil when no consumer is interested.
@@ -194,12 +201,49 @@ func (t *stdioTransport) send(req jsonRPCRequest) error {
 	return nil
 }
 
-// fireClose invokes the onClose callback at most once.
+// fireClose invokes the onClose callback at most once. Only the first
+// reason counts. With no callback registered yet the reason is kept
+// for setOnClose to deliver.
 func (t *stdioTransport) fireClose(reason error) {
-	if t.onClose == nil {
+	t.hookMu.Lock()
+	if t.closed {
+		t.hookMu.Unlock()
 		return
 	}
-	t.onCloseOnce.Do(func() { t.onClose(reason) })
+	t.closed = true
+	t.closeReason = reason
+	cb := t.onClose
+	t.hookMu.Unlock()
+	if cb != nil {
+		cb(reason)
+	}
+}
+
+// setOnClose registers the close callback. A process that died before
+// the registration is reported right away, so a server that exits at
+// startup is never left looking connected.
+func (t *stdioTransport) setOnClose(cb func(error)) {
+	t.hookMu.Lock()
+	t.onClose = cb
+	closed, reason := t.closed, t.closeReason
+	t.hookMu.Unlock()
+	if closed && cb != nil {
+		cb(reason)
+	}
+}
+
+// setOnLog registers the consumer of the server's stderr lines.
+func (t *stdioTransport) setOnLog(cb func(string)) {
+	t.hookMu.Lock()
+	t.onLog = cb
+	t.hookMu.Unlock()
+}
+
+// logHook returns the current stderr consumer, or nil.
+func (t *stdioTransport) logHook() func(string) {
+	t.hookMu.Lock()
+	defer t.hookMu.Unlock()
+	return t.onLog
 }
 
 // readLoop reads newline-delimited JSON-RPC responses from stdout and
@@ -296,8 +340,8 @@ func (t *stdioTransport) drainStderr(name string, r io.ReadCloser) {
 		t.logger.Debug("MCP stderr",
 			zap.String("server", name),
 			zap.String("line", line))
-		if t.onLog != nil {
-			t.onLog(line)
+		if cb := t.logHook(); cb != nil {
+			cb(line)
 		}
 	}
 }
