@@ -105,3 +105,16 @@ func BenchmarkMonoglyphASCII(b *testing.B) {
 		_ = Monoglyph(s)
 	}
 }
+
+func TestSectionHeader(t *testing.T) {
+	withTheme(t, "onyx")
+	for _, width := range []int{80, 40, 10} {
+		h := SectionHeader("  HOOKS ", width)
+		if got := VisibleLen(h); got > max(width, 20) {
+			t.Errorf("width %d: header is %d cells wide", width, got)
+		}
+		if plain := StripANSI(h); len(plain) < 10 || plain[:9] != "  HOOKS \xe2" {
+			t.Errorf("width %d: header %q", width, plain)
+		}
+	}
+}

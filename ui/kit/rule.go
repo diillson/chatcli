@@ -70,3 +70,20 @@ func Header(title string) string {
 func Subheader(title string) string {
 	return Dim(title)
 }
+
+// SectionHeader renders the title line of a flat panel: the title in the
+// strong text color, then a thin rule out to width. It is what a framed
+// box's top border becomes when the theme draws without frames.
+func SectionHeader(title string, width int) string {
+	title = strings.TrimSpace(title)
+	if width < 20 {
+		width = 20
+	}
+	used := 2 + VisibleLen(title) + 1
+	fill := width - used - 1
+	if fill < 3 {
+		fill = 3
+	}
+	return "  " + theme.ANSI(theme.RoleTextStrong) + "\033[1m" + title + theme.Reset() + " " +
+		Colorize(strings.Repeat("─", fill), theme.RoleBorder)
+}

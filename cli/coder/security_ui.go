@@ -15,6 +15,7 @@ import (
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/textfold"
 	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -122,13 +123,8 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	resetTTYToSane()
 
 	purple := "\u001b[35m"
-	cyan := "\u001b[36m"
 	yellow := "\u001b[33m"
-	green := "\u001b[32m"
 	red := "\u001b[31m"
-	gray := "\u001b[90m"
-	bold := "\u001b[1m"
-	white := "\u001b[37m"
 	reset := "\u001b[0m"
 
 	// --- Parse the action up front so the box knows what to display ---
@@ -137,84 +133,11 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 	pattern := GetSuggestedPattern(toolName, args)
 	isExecCmd := pattern == ""
 
-	// Build the entire prompt body INSIDE a single bordered card so
-	// title, agent context, action, rule, and choices all read as
-	// one cohesive panel. The previous design drew a separate ╔══╗
-	// banner just for the title and then left every detail line as
-	// loose text below the box, which the user (rightly) called
-	// "disorganized". One card, one visual statement.
-	var b strings.Builder
-	b.WriteString(bold + purple + "🔒 " + i18n.T("coder.security.header") + reset + "\n")
-	b.WriteString("\n")
-
-	// --- Agent context (parallel mode) ---
-	if secCtx != nil && secCtx.AgentName != "" {
-		fmt.Fprintf(&b, "%s🤖 Agent%s  %s%s%s%s\n",
-			gray, reset, gray+"·  "+reset, cyan+bold, secCtx.AgentName, reset)
-		if secCtx.TaskDesc != "" {
-			taskDisplay := secCtx.TaskDesc
-			if len(taskDisplay) > 120 {
-				taskDisplay = textfold.Cut(taskDisplay, 120) + "..."
-			}
-			fmt.Fprintf(&b, "%s📋 %s%s  %s%s%s%s\n",
-				gray, i18n.T("coder.security.task"), reset, gray+"·  "+reset, white, taskDisplay, reset)
-		}
-		b.WriteString("\n")
-	}
-
-	// --- Action + details ---
-	fmt.Fprintf(&b, "%s⚡ %s%s  %s%s%s%s\n",
-		gray, i18n.T("coder.security.action"), reset, gray+"·  "+reset, yellow+bold, actionLabel, reset)
-	for _, d := range details {
-		fmt.Fprintf(&b, "              %s%s%s\n", cyan, d, reset)
-	}
-
-	// --- Policy rule info ---
-	var ruleVal string
-	if isExecCmd {
-		ruleVal = i18n.T("coder.security.exec_requires_approval")
+	if theme.Active().Layout == theme.LayoutFlat {
+		printFlatSecurityPrompt(secCtx, actionLabel, details, pattern, isExecCmd)
 	} else {
-		ruleVal = i18n.T("coder.security.no_rule_for", pattern)
+		printFramedSecurityPrompt(secCtx, actionLabel, details, pattern, isExecCmd)
 	}
-	fmt.Fprintf(&b, "%s📜 %s%s  %s%s%s%s\n",
-		gray, i18n.T("coder.security.rule"), reset, gray+"·  "+reset, gray, ruleVal, reset)
-
-	b.WriteString("\n")
-
-	// --- Choices ---
-	b.WriteString(bold + i18n.T("coder.security.choose") + ":" + reset + "\n")
-	fmt.Fprintf(&b, "  [%s] %s\n", green+"y"+reset, i18n.T("coder.security.yes_once"))
-	if !isExecCmd {
-		fmt.Fprintf(&b, "  [%s] %s\n", green+"a"+reset, i18n.T("coder.security.allow_always", pattern))
-	}
-	fmt.Fprintf(&b, "  [%s] %s\n", red+"n"+reset, i18n.T("coder.security.no_skip"))
-	if !isExecCmd {
-		fmt.Fprintf(&b, "  [%s] %s", red+"d"+reset, i18n.T("coder.security.deny_always", pattern))
-	}
-	// No final "\n" intentionally: trailing newline would force lipgloss
-	// to render an empty padding row before the bottom border.
-
-	// Render the body in a single rounded box. Purple = the security
-	// channel color across the renderer; matches the prompt arrow on
-	// the next line. We cap width to the live terminal so a long
-	// command like `cp /Users/.../foo.go /Users/.../bar.go` doesn't
-	// blow the box past the right edge — lipgloss wraps inside the
-	// box at the configured width.
-	termWidth := detectTerminalWidth()
-	maxBox := termWidth - 2
-	if maxBox < 40 {
-		maxBox = 40
-	}
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("5")).
-		Padding(0, 2).
-		Width(maxBox - 2). // -2 for the border chars (lipgloss includes them in Width)
-		Render(strings.TrimRight(kit.Plain(b.String()), "\n"))
-
-	fmt.Println()
-	fmt.Println(box)
-	fmt.Print(purple + " > " + reset)
 
 	// Read the answer from the centralized stdin channel when there is one
 	// (it avoids orphaned goroutines that steal stdin after Ctrl+C), else
@@ -475,4 +398,97 @@ func extractField(argsMap map[string]interface{}, rawArgs string, keys ...string
 	}
 
 	return ""
+}
+
+// printFramedSecurityPrompt draws the permission prompt as one bordered
+// card: title, agent context, action, rule and choices.
+func printFramedSecurityPrompt(secCtx *SecurityContext, actionLabel string, details []string, pattern string, isExecCmd bool) {
+	purple := "\u001b[35m"
+	cyan := "\u001b[36m"
+	yellow := "\u001b[33m"
+	green := "\u001b[32m"
+	red := "\u001b[31m"
+	gray := "\u001b[90m"
+	bold := "\u001b[1m"
+	white := "\u001b[37m"
+	reset := "\u001b[0m"
+
+	// Build the entire prompt body INSIDE a single bordered card so
+	// title, agent context, action, rule, and choices all read as
+	// one cohesive panel. The previous design drew a separate ╔══╗
+	// banner just for the title and then left every detail line as
+	// loose text below the box, which the user (rightly) called
+	// "disorganized". One card, one visual statement.
+	var b strings.Builder
+	b.WriteString(bold + purple + "🔒 " + i18n.T("coder.security.header") + reset + "\n")
+	b.WriteString("\n")
+
+	// --- Agent context (parallel mode) ---
+	if secCtx != nil && secCtx.AgentName != "" {
+		fmt.Fprintf(&b, "%s🤖 Agent%s  %s%s%s%s\n",
+			gray, reset, gray+"·  "+reset, cyan+bold, secCtx.AgentName, reset)
+		if secCtx.TaskDesc != "" {
+			taskDisplay := secCtx.TaskDesc
+			if len(taskDisplay) > 120 {
+				taskDisplay = textfold.Cut(taskDisplay, 120) + "..."
+			}
+			fmt.Fprintf(&b, "%s📋 %s%s  %s%s%s%s\n",
+				gray, i18n.T("coder.security.task"), reset, gray+"·  "+reset, white, taskDisplay, reset)
+		}
+		b.WriteString("\n")
+	}
+
+	// --- Action + details ---
+	fmt.Fprintf(&b, "%s⚡ %s%s  %s%s%s%s\n",
+		gray, i18n.T("coder.security.action"), reset, gray+"·  "+reset, yellow+bold, actionLabel, reset)
+	for _, d := range details {
+		fmt.Fprintf(&b, "              %s%s%s\n", cyan, d, reset)
+	}
+
+	// --- Policy rule info ---
+	var ruleVal string
+	if isExecCmd {
+		ruleVal = i18n.T("coder.security.exec_requires_approval")
+	} else {
+		ruleVal = i18n.T("coder.security.no_rule_for", pattern)
+	}
+	fmt.Fprintf(&b, "%s📜 %s%s  %s%s%s%s\n",
+		gray, i18n.T("coder.security.rule"), reset, gray+"·  "+reset, gray, ruleVal, reset)
+
+	b.WriteString("\n")
+
+	// --- Choices ---
+	b.WriteString(bold + i18n.T("coder.security.choose") + ":" + reset + "\n")
+	fmt.Fprintf(&b, "  [%s] %s\n", green+"y"+reset, i18n.T("coder.security.yes_once"))
+	if !isExecCmd {
+		fmt.Fprintf(&b, "  [%s] %s\n", green+"a"+reset, i18n.T("coder.security.allow_always", pattern))
+	}
+	fmt.Fprintf(&b, "  [%s] %s\n", red+"n"+reset, i18n.T("coder.security.no_skip"))
+	if !isExecCmd {
+		fmt.Fprintf(&b, "  [%s] %s", red+"d"+reset, i18n.T("coder.security.deny_always", pattern))
+	}
+	// No final "\n" intentionally: trailing newline would force lipgloss
+	// to render an empty padding row before the bottom border.
+
+	// Render the body in a single rounded box. Purple = the security
+	// channel color across the renderer; matches the prompt arrow on
+	// the next line. We cap width to the live terminal so a long
+	// command like `cp /Users/.../foo.go /Users/.../bar.go` doesn't
+	// blow the box past the right edge — lipgloss wraps inside the
+	// box at the configured width.
+	termWidth := detectTerminalWidth()
+	maxBox := termWidth - 2
+	if maxBox < 40 {
+		maxBox = 40
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("5")).
+		Padding(0, 2).
+		Width(maxBox - 2). // -2 for the border chars (lipgloss includes them in Width)
+		Render(strings.TrimRight(kit.Plain(b.String()), "\n"))
+
+	fmt.Println()
+	fmt.Println(box)
+	fmt.Print(purple + " > " + reset)
 }

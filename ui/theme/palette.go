@@ -154,4 +154,20 @@ type Theme struct {
 	// as two designs at once; the themes that set this are the ones built
 	// around weight and spacing instead of hue.
 	Monoglyph bool
+	// Layout says how panels are drawn; see Layout.
+	Layout Layout
 }
+
+// Layout is how a theme draws its panels.
+type Layout int
+
+const (
+	// LayoutFramed is the historical look: a titled top border, a rail
+	// down the left side of every line, a bottom border.
+	LayoutFramed Layout = iota
+	// LayoutFlat draws a panel as a title over a thin rule with its
+	// content indented beneath, and nothing around it. Frames are chrome:
+	// on a screen with three panels the borders outnumber the content,
+	// and a monochrome theme has no hue to push them back with.
+	LayoutFlat
+)

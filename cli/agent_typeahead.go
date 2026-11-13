@@ -24,6 +24,7 @@ import (
 
 	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 // salvagedTypeaheadCap bounds the rescue buffer, same order of magnitude as
@@ -265,6 +266,9 @@ func (a *AgentMode) buildTurnSpinnerFrame(d time.Duration, modelName string, had
 	// BELOW the spinner (same placement as the dispatch panel), cursor
 	// returned to the spinner line each tick.
 	suffix, had := formatTypeaheadPreviewBelow(a.typeaheadPreviewSnapshot(), hadPreview)
+	if theme.Active().Layout == theme.LayoutFlat {
+		return a.flatTurnStatus(d, modelName, queued) + "\033[K" + suffix, had
+	}
 	return metrics.FormatTimerStatus(d, modelName, msg) + "\033[K" + suffix, had
 }
 
