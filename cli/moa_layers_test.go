@@ -34,12 +34,13 @@ func TestParseMoALayers(t *testing.T) {
 		{"--layers=4 what now?", "what now?", 4, false},
 		{"--layers 9 q", "q", moa.MaxLayers, false},
 		{"--layers 2", "", 2, false},
-		{"--layersx q", "--layersx q", 3, false},
-		{"--layers two q", "", 0, true},
+		{"--layersx q", "", 3, true},
+		{"--layers two q", "", 3, true},
 	}
 	for _, c := range cases {
-		n, p, err := parseMoALayers(c.in)
-		if (err != nil) != c.err || n != c.layers || p != c.prompt {
+		o, err := parseMoAOptions(c.in)
+		n, p := o.layers, o.prompt
+		if (err != nil) != c.err || (!c.err && (n != c.layers || p != c.prompt)) {
 			t.Errorf("parseMoALayers(%q) = %d, %q, %v; want %d, %q, err=%v", c.in, n, p, err, c.layers, c.prompt, c.err)
 		}
 	}

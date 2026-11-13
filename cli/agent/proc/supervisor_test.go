@@ -11,8 +11,14 @@
 package proc
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -272,4 +278,60 @@ func TestStdinRejectsNonPTYAndUnknown(t *testing.T) {
 		t.Fatal("unknown id must error")
 	}
 	_, _ = s.Stop(info.ID)
+}
+
+// TestProcEscapeHelper is not a test: re-executed by the test below, it
+// leaves the process group (setsid) but keeps the stdout pipe, as a daemon.
+func TestProcEscapeHelper(t *testing.T) {
+	if os.Getenv("CHATCLI_PROC_ESCAPE_HELPER") != "1" {
+		return
+	}
+	_, _ = syscall.Setsid()
+	fmt.Printf("escaped %d\n", os.Getpid())
+	time.Sleep(60 * time.Second)
+	os.Exit(0)
+}
+
+// A child that escaped the process group and holds the output pipe used to
+// keep Stop (@proc stop, /proc stop, session shutdown) blocked while it lived.
+func TestSupervisorStopIsBoundedWhenAChildEscapesTheGroup(t *testing.T) {
+	stopGrace, killWaitBound = 300*time.Millisecond, 300*time.Millisecond
+	t.Cleanup(func() { stopGrace, killWaitBound = 5*time.Second, 2*time.Second })
+	s := NewSupervisor(nil, zap.NewNop())
+	start := func() Info {
+		info, err := s.Start(fmt.Sprintf("CHATCLI_PROC_ESCAPE_HELPER=1 %q -test.run=TestProcEscapeHelper & sleep 60", os.Args[0]), "")
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		r, err := s.WaitFor(context.Background(), info.ID, regexp.MustCompile(`escaped \d+`), 30*time.Second)
+		if err != nil || !r.Matched {
+			t.Fatalf("helper never escaped: %+v %v", r, err)
+		}
+		pid, _ := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(r.Line), "escaped "))
+		t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+		return info
+	}
+	bounded := func(what string, fn func()) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() { fn(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(20 * time.Second):
+			t.Fatalf("%s still blocked on the escaped child's pipe", what)
+		}
+	}
+	first := start()
+	var stopped Info
+	bounded("Stop", func() { stopped, _ = s.Stop(first.ID) })
+	if stopped.State != StateExited || !stopped.PipesAbandoned {
+		t.Fatalf("Stop must report the process exited with abandoned pipes: %+v", stopped)
+	}
+	second := start()
+	if info, err := s.StopAsync(second.ID); err != nil || info.State != StateRunning {
+		t.Fatalf("StopAsync must return the running snapshot at once: %+v %v", info, err)
+	}
+	waitState(t, s, second.ID, StateExited, 20*time.Second)
+	start()
+	bounded("CloseAll", s.CloseAll)
 }

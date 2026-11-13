@@ -44,6 +44,14 @@ type ChannelsAdapter interface {
 	Ack() (notify int, unread int, err error)
 }
 
+// ChannelsRuleLister is the OPTIONAL read-only view of the trigger rules
+// (what fires on which channel, and how). A separate interface because
+// ChannelsAdapter is exported API — extending it would break implementers.
+type ChannelsRuleLister interface {
+	// RulesSummary renders the active rule set as model-readable text.
+	RulesSummary() (string, error)
+}
+
 type channelsAdapterHolder struct{ a ChannelsAdapter }
 
 var channelsAdapterAtom atomic.Value // stores channelsAdapterHolder
@@ -74,18 +82,24 @@ func (*BuiltinChannelsPlugin) Name() string { return "@channels" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinChannelsPlugin) Description() string {
-	return "Read the MCP channel inbox — events pushed by connected MCP servers (CI alerts, monitoring, webhooks, protocol notices). Use 'list' to see recent messages (optionally filtered by channel), 'unread' for what arrived since the last acknowledgment, and 'ack' after processing the inbox so the user's banner clears. Pending confirm actions are user-only and never appear here."
+	return "Read the MCP channel inbox — events pushed by connected MCP servers (CI alerts, monitoring, webhooks, protocol notices). Use 'list' to see recent messages (optionally filtered by channel), 'unread' for what arrived since the last acknowledgment, 'rules' for the trigger rules that decide what each channel's messages do, and 'ack' after processing the inbox so the user's banner clears. Pending confirm actions are user-only and never appear here."
 }
 
 // Usage explains the canonical invocation forms.
 func (*BuiltinChannelsPlugin) Usage() string {
 	return `<tool_call name="@channels" args='{"cmd":"list","args":{"channel":"","limit":10}}' />
 <tool_call name="@channels" args='{"cmd":"unread"}' />
-<tool_call name="@channels" args='{"cmd":"ack"}' />`
+<tool_call name="@channels" args='{"cmd":"rules"}' />
+<tool_call name="@channels" args='{"cmd":"ack"}' />
+
+rules is read-only: it shows the trigger rules, it cannot change or reload
+them. Confirming or running a gated action, clearing the inbox and pausing
+or resuming the trigger engine are the user's gates — they exist only as
+/channel confirm|run|clear|pause|resume and are not available to this tool.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinChannelsPlugin) Version() string { return "1.1.1" }
+func (*BuiltinChannelsPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinChannelsPlugin) Path() string { return "" }
@@ -109,6 +123,11 @@ func (*BuiltinChannelsPlugin) Schema() string {
 				"description": "Messages received since the last acknowledgment, plus the count.",
 			},
 			{
+				"name":        "rules",
+				"description": "Read-only: the active trigger rules (name, mode, server/channel match, content regex, rate limit, dedup window, tools). Takes no arguments; changing or reloading rules is the user's.",
+				"examples":    []string{`{"cmd":"rules"}`},
+			},
+			{
 				"name":        "ack",
 				"description": "Acknowledge the inbox after processing it: clears the unread counter and the pending notify banner.",
 			},
@@ -117,6 +136,7 @@ func (*BuiltinChannelsPlugin) Schema() string {
 			`{"cmd":"list","args":{"limit":5}}`,
 			`{"cmd":"list","args":{"channel":"incidents"}}`,
 			`{"cmd":"unread"}`,
+			`{"cmd":"rules"}`,
 			`{"cmd":"ack"}`,
 		},
 	}
@@ -202,6 +222,8 @@ func canonicalChannelsCmd(cmd string) string {
 		return "list"
 	case "unread", "new", "pending", "count":
 		return "unread"
+	case "rules", "rule", "triggers":
+		return "rules"
 	case "ack", "acknowledge", "mark_read", "markread", "seen":
 		return "ack"
 	default:
@@ -240,6 +262,16 @@ func (p *BuiltinChannelsPlugin) ExecuteWithStream(_ context.Context, args []stri
 			return "No unread channel messages — the inbox is fully acknowledged.", nil
 		}
 		return out, nil
+	case "rules":
+		// "rules reload" must not look like it worked: this side only reads.
+		if extra := strings.Fields(strings.Join(args, " ")); len(extra) > 1 && !strings.HasPrefix(extra[0], "{") {
+			return "", fmt.Errorf("@channels rules takes no arguments (got %q): it only reads the rules; reloading them is the user's /channel rules reload", strings.Join(extra[1:], " "))
+		}
+		lister, ok := adapter.(ChannelsRuleLister)
+		if !ok {
+			return "", errors.New("@channels rules: not available in this session")
+		}
+		return lister.RulesSummary()
 	case "ack":
 		notify, unread, err := adapter.Ack()
 		if err != nil {

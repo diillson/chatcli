@@ -70,6 +70,37 @@ type taskGraphAdapter struct {
 	pruneOnce sync.Once
 }
 
+// taskGraphError is an adapter failure with two wordings: Error() is the
+// English tool result the MODEL reads; human is what /taskgraph prints.
+// Before this split the command showed people the model's instructions.
+type taskGraphError struct {
+	en    string
+	human func() string
+	cause error
+}
+
+func (e *taskGraphError) Error() string { return e.en }
+func (e *taskGraphError) Unwrap() error { return e.cause }
+
+// tgWrap prefixes a lower-level failure with the subcommand that hit it.
+func tgWrap(op string, err error) error {
+	label := "taskgraph"
+	if op != "" {
+		label += " " + op
+	}
+	return &taskGraphError{en: "@" + label + ": " + err.Error(), cause: err,
+		human: func() string { return "/" + label + ": " + taskGraphHumanText(err) }}
+}
+
+// taskGraphHumanText renders an adapter error for a person.
+func taskGraphHumanText(err error) string {
+	var te *taskGraphError
+	if errors.As(err, &te) && te.human != nil {
+		return te.human()
+	}
+	return err.Error()
+}
+
 // newTaskGraphAdapter builds the adapter.
 func newTaskGraphAdapter(cli *ChatCLI, logger *zap.Logger) *taskGraphAdapter {
 	a := &taskGraphAdapter{cli: cli, logger: logger}
@@ -87,7 +118,8 @@ func (a *taskGraphAdapter) dispatcher() (taskGraphDispatcher, error) {
 		return a.dispatcherFn()
 	}
 	if a.cli.agentMode == nil || a.cli.agentMode.agentDispatcher == nil {
-		return nil, errors.New("@taskgraph: agent dispatcher not available (run inside /coder)")
+		return nil, &taskGraphError{en: "@taskgraph: agent dispatcher not available (run inside /coder)",
+			human: func() string { return i18n.T("taskgraph.err.no_dispatcher") }}
 	}
 	return a.cli.agentMode.agentDispatcher, nil
 }
@@ -130,23 +162,32 @@ func (a *taskGraphAdapter) activeRunID() string {
 // than the given retention ("30d", "72h", "all" = every run). The active
 // run is never removed. Empty input uses the default retention.
 func (a *taskGraphAdapter) Prune(olderThan string) (string, error) {
-	base, err := a.baseDir()
+	n, retention, err := a.pruneRuns(olderThan)
 	if err != nil {
 		return "", err
-	}
-	retention, err := parseRetention(olderThan)
-	if err != nil {
-		return "", err
-	}
-	n, err := taskgraph.PruneRuns(base, retention, a.activeRunID())
-	if err != nil {
-		return "", fmt.Errorf("@taskgraph prune: %w", err)
 	}
 	scope := "older than " + retention.String()
 	if retention <= 0 {
 		scope = "all (active run kept)"
 	}
 	return fmt.Sprintf("pruned %d run(s), scope: %s", n, scope), nil
+}
+
+// pruneRuns does the removal and returns the facts each side words itself.
+func (a *taskGraphAdapter) pruneRuns(olderThan string) (int, time.Duration, error) {
+	base, err := a.baseDir()
+	if err != nil {
+		return 0, 0, err
+	}
+	retention, err := parseRetention(olderThan)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, err := taskgraph.PruneRuns(base, retention, a.activeRunID())
+	if err != nil {
+		return 0, 0, tgWrap("prune", err)
+	}
+	return n, retention, nil
 }
 
 // parseRetention accepts "", "all", Go durations ("72h") and day suffixes
@@ -166,27 +207,37 @@ func parseRetention(s string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil || d < 0 {
-		return 0, fmt.Errorf("@taskgraph prune: invalid retention %q (use \"30d\", \"72h\" or \"all\")", s)
+		return 0, &taskGraphError{en: fmt.Sprintf("@taskgraph prune: invalid retention %q (use \"30d\", \"72h\" or \"all\")", s),
+			human: func() string { return i18n.T("taskgraph.err.bad_retention", s) }}
 	}
 	return d, nil
 }
 
 // Plan implements plugins.TaskGraphAdapter.
 func (a *taskGraphAdapter) Plan(graphJSON string) (string, error) {
-	g, err := taskgraph.ParseGraph(graphJSON)
-	if err != nil {
-		return "", fmt.Errorf("@taskgraph plan: %w", err)
-	}
-	base, err := a.baseDir()
+	runID, tasks, err := a.planRun(graphJSON)
 	if err != nil {
 		return "", err
 	}
+	return fmt.Sprintf("plan accepted: run %s (%d tasks). Execute with {\"cmd\":\"run\",\"args\":{\"id\":%q}}",
+		runID, tasks, runID), nil
+}
+
+// planRun validates and persists a plan, returning its run id and size.
+func (a *taskGraphAdapter) planRun(graphJSON string) (string, int, error) {
+	g, err := taskgraph.ParseGraph(graphJSON)
+	if err != nil {
+		return "", 0, tgWrap("plan", err)
+	}
+	base, err := a.baseDir()
+	if err != nil {
+		return "", 0, err
+	}
 	store, err := taskgraph.CreateRun(base, g)
 	if err != nil {
-		return "", fmt.Errorf("@taskgraph plan: %w", err)
+		return "", 0, tgWrap("plan", err)
 	}
-	return fmt.Sprintf("plan accepted: run %s (%d tasks). Execute with {\"cmd\":\"run\",\"args\":{\"id\":%q}}",
-		store.RunID(), len(g.Tasks), store.RunID()), nil
+	return store.RunID(), len(g.Tasks), nil
 }
 
 // Run implements plugins.TaskGraphAdapter.
@@ -203,11 +254,11 @@ func (a *taskGraphAdapter) Run(ctx context.Context, runID, graphJSON string, onO
 	case strings.TrimSpace(graphJSON) != "":
 		g, err = taskgraph.ParseGraph(graphJSON)
 		if err != nil {
-			return "", fmt.Errorf("@taskgraph run: %w", err)
+			return "", tgWrap("run", err)
 		}
 		store, err = taskgraph.CreateRun(base, g)
 		if err != nil {
-			return "", fmt.Errorf("@taskgraph run: %w", err)
+			return "", tgWrap("run", err)
 		}
 	default:
 		store, g, err = a.loadRun(base, runID)
@@ -232,11 +283,11 @@ func (a *taskGraphAdapter) ResolveRunID(runID, graphJSON string) (string, error)
 	if strings.TrimSpace(graphJSON) != "" {
 		g, err := taskgraph.ParseGraph(graphJSON)
 		if err != nil {
-			return "", fmt.Errorf("@taskgraph run: %w", err)
+			return "", tgWrap("run", err)
 		}
 		store, err := taskgraph.CreateRun(base, g)
 		if err != nil {
-			return "", fmt.Errorf("@taskgraph run: %w", err)
+			return "", tgWrap("run", err)
 		}
 		return store.RunID(), nil
 	}
@@ -253,20 +304,50 @@ var _ plugins.TaskGraphRunResolver = (*taskGraphAdapter)(nil)
 // Retry implements plugins.TaskGraphAdapter: re-opens one failed task plus
 // its blocked successors, extends the attempt budget by one, and resumes.
 func (a *taskGraphAdapter) Retry(ctx context.Context, runID, taskID string, onOutput func(string)) (string, error) {
-	base, err := a.baseDir()
+	store, g, _, err := a.reopenFailedTask(runID, taskID)
 	if err != nil {
 		return "", err
+	}
+	return a.execute(ctx, g, store, onOutput)
+}
+
+// reopenFailedTask puts one failed task (and its blocked successors) back
+// to pending and persists that, without executing. An empty taskID picks
+// the run's only failed task; with none or several it names them. Refused
+// while a run is active: the engine owns the state file then.
+func (a *taskGraphAdapter) reopenFailedTask(runID, taskID string) (*taskgraph.RunStore, *taskgraph.Graph, string, error) {
+	if a.activeRunID() != "" {
+		return nil, nil, "", errTaskGraphBusy()
+	}
+	base, err := a.baseDir()
+	if err != nil {
+		return nil, nil, "", err
 	}
 	store, g, err := a.loadRun(base, runID)
 	if err != nil {
-		return "", err
+		return nil, nil, "", err
+	}
+	if taskID == "" {
+		var failed []string
+		for _, other := range g.Tasks {
+			if other.Status == taskgraph.StatusFailed {
+				failed = append(failed, other.ID)
+			}
+		}
+		if len(failed) != 1 {
+			list := strings.Join(failed, ", ")
+			return nil, nil, "", &taskGraphError{en: fmt.Sprintf("@taskgraph retry: run %s has %d failed task(s) [%s]; name one", store.RunID(), len(failed), list),
+				human: func() string { return i18n.T("taskgraph.err.retry_pick", store.RunID(), len(failed), list) }}
+		}
+		taskID = failed[0]
 	}
 	t := g.TaskByID(taskID)
 	if t == nil {
-		return "", fmt.Errorf("@taskgraph retry: no task %q in run %s", taskID, store.RunID())
+		return nil, nil, "", errTaskGraphNoTask("retry", taskID, store.RunID())
 	}
 	if t.Status != taskgraph.StatusFailed {
-		return "", fmt.Errorf("@taskgraph retry: task %s is %s (only failed tasks can be retried)", taskID, t.Status)
+		return nil, nil, "", &taskGraphError{en: fmt.Sprintf("@taskgraph retry: task %s is %s (only failed tasks can be retried)", taskID, t.Status),
+			human: func() string { return i18n.T("taskgraph.err.retry_not_failed", taskID, string(t.Status)) }}
 	}
 	t.Status = taskgraph.StatusPending
 	if len(t.Attempts) >= t.MaxAttempts {
@@ -279,9 +360,21 @@ func (a *taskGraphAdapter) Retry(ctx context.Context, runID, taskID string, onOu
 	}
 	g.Status = taskgraph.StatusPending
 	if err := store.SaveState(g); err != nil {
-		return "", fmt.Errorf("@taskgraph retry: %w", err)
+		return nil, nil, "", tgWrap("retry", err)
 	}
-	return a.execute(ctx, g, store, onOutput)
+	return store, g, taskID, nil
+}
+
+// errTaskGraphNoTask reports a task id the run does not have.
+func errTaskGraphNoTask(op, taskID, runID string) error {
+	return &taskGraphError{en: fmt.Sprintf("@taskgraph %s: no task %q in run %s", op, taskID, runID),
+		human: func() string { return i18n.T("taskgraph.err.no_task", taskID, runID) }}
+}
+
+// errTaskGraphBusy reports the one-active-run-per-session invariant.
+func errTaskGraphBusy() error {
+	return &taskGraphError{en: "@taskgraph: a run is already active in this session (cancel it or wait)",
+		human: func() string { return i18n.T("taskgraph.err.busy") }}
 }
 
 // Status implements plugins.TaskGraphAdapter.
@@ -309,7 +402,7 @@ func (a *taskGraphAdapter) Show(runID, taskID string) (string, error) {
 	}
 	t := g.TaskByID(taskID)
 	if t == nil {
-		return "", fmt.Errorf("@taskgraph show: no task %q in run %s", taskID, store.RunID())
+		return "", errTaskGraphNoTask("show", taskID, store.RunID())
 	}
 	return taskgraph.FormatTaskDetail(g, t), nil
 }
@@ -320,7 +413,8 @@ func (a *taskGraphAdapter) Cancel() (string, error) {
 	engine := a.active
 	a.mu.Unlock()
 	if engine == nil {
-		return "", errors.New("@taskgraph cancel: no active run")
+		return "", &taskGraphError{en: "@taskgraph cancel: no active run",
+			human: func() string { return i18n.T("taskgraph.err.no_active_run") }}
 	}
 	engine.Cancel()
 	return "cancellation requested; tasks end when they observe the signal", nil
@@ -330,6 +424,15 @@ func (a *taskGraphAdapter) Cancel() (string, error) {
 // dashboard (one server per session, ephemeral 127.0.0.1 port) and opens the
 // browser only on a real terminal — never from a daemon or pipe.
 func (a *taskGraphAdapter) Dash(runID string) (string, error) {
+	dashURL, err := a.dashURL(runID)
+	if err != nil {
+		return "", err
+	}
+	return "task graph dashboard: " + dashURL + " (read-only; closing it never affects the run)", nil
+}
+
+// dashURL starts the dashboard (once) and returns its address.
+func (a *taskGraphAdapter) dashURL(runID string) (string, error) {
 	base, err := a.baseDir()
 	if err != nil {
 		return "", err
@@ -339,7 +442,7 @@ func (a *taskGraphAdapter) Dash(runID string) (string, error) {
 		srv, startErr := dash.Start(base)
 		if startErr != nil {
 			a.mu.Unlock()
-			return "", fmt.Errorf("@taskgraph dash: %w", startErr)
+			return "", tgWrap("dash", startErr)
 		}
 		a.dashSrv = srv
 	}
@@ -359,7 +462,7 @@ func (a *taskGraphAdapter) Dash(runID string) (string, error) {
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		_ = openBrowserURL(dashURL)
 	}
-	return "task graph dashboard: " + dashURL + " (read-only; closing it never affects the run)", nil
+	return dashURL, nil
 }
 
 // shutdownDash stops the dashboard server, if one is up.
@@ -395,7 +498,7 @@ func (a *taskGraphAdapter) List() (string, error) {
 	}
 	rows, err := taskgraph.ListRuns(base)
 	if err != nil {
-		return "", fmt.Errorf("@taskgraph list: %w", err)
+		return "", tgWrap("list", err)
 	}
 	return taskgraph.FormatRunList(rows), nil
 }
@@ -409,7 +512,7 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 	}
 	workspace, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("@taskgraph: resolve workspace: %w", err)
+		return "", tgWrap("", fmt.Errorf("resolve workspace: %w", err))
 	}
 	cfg := taskgraph.Config{
 		Dispatcher:  disp,
@@ -440,7 +543,7 @@ func (a *taskGraphAdapter) execute(ctx context.Context, g *taskgraph.Graph, stor
 	a.mu.Lock()
 	if a.active != nil {
 		a.mu.Unlock()
-		return "", errors.New("@taskgraph: a run is already active in this session (cancel it or wait)")
+		return "", errTaskGraphBusy()
 	}
 	a.active = engine
 	a.activeID = store.RunID()
@@ -467,17 +570,18 @@ func (a *taskGraphAdapter) loadRun(base, runID string) (*taskgraph.RunStore, *ta
 	if runID == "" {
 		rows, err := taskgraph.ListRuns(base)
 		if err != nil || len(rows) == 0 {
-			return nil, nil, errors.New("@taskgraph: no runs yet (create one with plan or run)")
+			return nil, nil, &taskGraphError{en: "@taskgraph: no runs yet (create one with plan or run)",
+				human: func() string { return i18n.T("taskgraph.err.no_runs") }}
 		}
 		runID = rows[0].RunID
 	}
 	store, err := taskgraph.OpenRun(base, runID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("@taskgraph: %w", err)
+		return nil, nil, tgWrap("", err)
 	}
 	g, err := store.LoadState()
 	if err != nil {
-		return nil, nil, fmt.Errorf("@taskgraph: %w", err)
+		return nil, nil, tgWrap("", err)
 	}
 	return store, g, nil
 }

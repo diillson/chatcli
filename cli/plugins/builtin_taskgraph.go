@@ -109,7 +109,7 @@ For real graphs write the plan JSON to a file first and pass {"cmd":"run","args"
 }
 
 // Version returns the plugin contract version.
-func (*BuiltinTaskGraphPlugin) Version() string { return "1.1.0" }
+func (*BuiltinTaskGraphPlugin) Version() string { return "1.1.1" }
 
 // Path returns "" so the tool catalog defers the full definition to the
 // index (the task-graph skill teaches the envelopes).
@@ -117,7 +117,7 @@ func (*BuiltinTaskGraphPlugin) Path() string { return "" }
 
 // Schema declares the machine-readable command surface.
 func (*BuiltinTaskGraphPlugin) Schema() string {
-	graphDesc := `graph plan object: {"name","max_parallel"?,"require_review"? (default true),"phases"?:[{"id","title"}],"tasks":[{"id","title"?,"agent"? (default coder),"prompt","deps"?:[ids declared earlier],"phase"?,"validation"?:[{"run":shell cmd the ENGINE executes,"expect":prose}] or prose,"max_attempts"? (default 3),"require_review"?}]}`
+	graphDesc := `graph plan object: {"name","max_parallel"?,"require_review"? (default true),"phases"?:[{"id","title"}],"tasks":[{"id","title"?,"agent"? (default coder),"prompt" (aliases "task", "description"),"deps"?:[ids declared earlier],"phase"?,"tools"?:[session plugins granted to this task's executor only, e.g. "@browser","@websearch","mcp_*" — the reviewer never gets them],"validation"?:[{"run":shell cmd the ENGINE executes,"expect":prose}] or prose,"max_attempts"? (default 3),"require_review"?}]}`
 	schema := map[string]interface{}{
 		"name":        "@taskgraph",
 		"description": "DAG executor for approved multi-task plans: parallel squad workers + engine-run validation gates + independent reviewer verdicts.",
@@ -249,7 +249,12 @@ func (p *BuiltinTaskGraphPlugin) ExecuteWithStream(ctx context.Context, args []s
 		}
 		id := get("id", "run_id", "runId", "run")
 		out, err := adapter.Show(id, task)
-		return withTaskGraphBackground(out, err, id)
+		if err != nil {
+			// A wrong task id is the caller's error: the background
+			// summary must not turn it into an answer.
+			return "", err
+		}
+		return withTaskGraphBackground(out, nil, id)
 	case "retry", "reopen":
 		task := get("task", "task_id", "taskId")
 		if task == "" {

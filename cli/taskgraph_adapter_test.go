@@ -129,20 +129,20 @@ func TestCoderGateRunnerCapturesOutputAndFailure(t *testing.T) {
 func TestHandleTaskGraphCommandFlows(t *testing.T) {
 	cli := &ChatCLI{}
 	// Nil adapter: must not panic, prints the unavailable notice.
-	cli.handleTaskGraphCommand("/taskgraph status")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph status")
 
 	a := newTestTaskGraphAdapter(t)
 	if _, err := a.Plan(testPlanJSON); err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
 	cli.taskGraphAdapter = a
-	cli.handleTaskGraphCommand("/taskgraph")
-	cli.handleTaskGraphCommand("/taskgraph status")
-	cli.handleTaskGraphCommand("/taskgraph list")
-	cli.handleTaskGraphCommand("/taskgraph show T1")
-	cli.handleTaskGraphCommand("/taskgraph show")
-	cli.handleTaskGraphCommand("/taskgraph help")
-	cli.handleTaskGraphCommand("/taskgraph bogus")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph status")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph list")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph show T1")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph show")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph help")
+	cli.handleTaskGraphCommand(context.Background(), "/taskgraph bogus")
 }
 
 // passDispatcher approves every executor and reviewer call.

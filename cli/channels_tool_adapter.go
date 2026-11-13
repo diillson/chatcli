@@ -68,6 +68,37 @@ func (a *channelsPluginAdapter) UnreadSummary() (string, error) {
 	return renderChannelMessagesForModel(msgs, len(msgs)), nil
 }
 
+// RulesSummary implements plugins.ChannelsRuleLister: the rule set the
+// user sees in /channel rules, as plain English text for the model.
+func (a *channelsPluginAdapter) RulesSummary() (string, error) {
+	if _, err := a.manager(); err != nil {
+		return "", err
+	}
+	rules := a.cli.channelTriggerRules()
+	if len(rules) == 0 {
+		return "No channel trigger rules are active: incoming messages only land in the inbox.", nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d channel trigger rule(s)", len(rules))
+	if a.cli.channelTriggerIsPaused() {
+		b.WriteString(" — the trigger engine is PAUSED by the user, nothing fires")
+	}
+	b.WriteString(":\n")
+	for _, r := range rules {
+		fmt.Fprintf(&b, "- %s [%s] server=%s channel=%s", r.Name, defaultIfEmpty(string(r.Mode), "notify"),
+			defaultIfEmpty(r.Server, "*"), defaultIfEmpty(r.Channel, "*"))
+		for _, kv := range [][2]string{{"contentRegex", r.ContentRegex}, {"rateLimit", r.RateLimitTxt},
+			{"dedupWindow", r.DedupTxt}, {"tools", strings.Join(r.Tools, ",")}} {
+			if kv[1] != "" {
+				fmt.Fprintf(&b, " %s=%s", kv[0], kv[1])
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Read-only view: rules are edited and reloaded by the user (/channel rules reload).")
+	return b.String(), nil
+}
+
 // Ack clears unread + pending notify state through the same path as the
 // user's /channel ack, so both surfaces stay consistent.
 func (a *channelsPluginAdapter) Ack() (int, int, error) {

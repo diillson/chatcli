@@ -131,6 +131,7 @@ var rootCommands = []RootCommand{
 	{"/board", CatAgent, "help.command.board", ""},
 	{"/mail", CatAgent, "help.command.mail", ""},
 	{"/taskgraph", CatAgent, "help.command.taskgraph", ""},
+	{"/proc", CatAgent, "help.command.proc", ""},
 	{"/dash", CatSystem, "help.command.dash", ""},
 	{"/web", CatSystem, "help.command.web", ""},
 	{"/agent", CatAgent, "complete.root.agent", ""},
