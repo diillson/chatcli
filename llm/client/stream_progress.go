@@ -22,14 +22,28 @@ import (
 
 type streamProgressKey struct{}
 
+// StreamProgressRestart is the count a sink receives when a decoder starts
+// reading a response: whatever an earlier attempt of the same call reported
+// was thrown away with that attempt (a retry re-sends the request and the
+// reply starts over), so the sink must start over too.
+const StreamProgressRestart = -1
+
 // WithStreamProgress returns a context whose streamed text is reported to
-// fn, one call per piece with its length in bytes. fn runs on the goroutine
-// that decodes the stream and must not block.
+// fn, one call per piece with its length in bytes, and StreamProgressRestart
+// each time an attempt begins. fn runs on the goroutine that decodes the
+// stream and must not block.
 func WithStreamProgress(ctx context.Context, fn func(chars int)) context.Context {
 	if fn == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, streamProgressKey{}, fn)
+}
+
+// WithoutStreamProgress returns a context that reports to no sink, for an
+// auxiliary request made on behalf of a call (a title, a keep-alive) whose
+// text is not the reply the caller is following.
+func WithoutStreamProgress(ctx context.Context) context.Context {
+	return context.WithValue(ctx, streamProgressKey{}, (func(chars int))(nil))
 }
 
 // ReportStreamProgress tells the sink in ctx, if any, that chars bytes of
@@ -38,8 +52,30 @@ func ReportStreamProgress(ctx context.Context, chars int) {
 	if ctx == nil || chars <= 0 {
 		return
 	}
-	if fn, ok := ctx.Value(streamProgressKey{}).(func(chars int)); ok {
+	if fn, ok := ctx.Value(streamProgressKey{}).(func(chars int)); ok && fn != nil {
 		fn(chars)
+	}
+}
+
+// RestartStreamProgress tells the sink in ctx, if any, that an attempt is
+// starting over.
+func RestartStreamProgress(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	if fn, ok := ctx.Value(streamProgressKey{}).(func(chars int)); ok && fn != nil {
+		fn(StreamProgressRestart)
+	}
+}
+
+// RestartResponseProgress tells the sink of the request resp answers that
+// a decoder is starting on a new response.
+func RestartResponseProgress(resp *http.Response) {
+	if resp == nil || resp.Request == nil {
+		return
+	}
+	if fn, ok := resp.Request.Context().Value(streamProgressKey{}).(func(chars int)); ok && fn != nil {
+		fn(StreamProgressRestart)
 	}
 }
 
@@ -50,7 +86,7 @@ func ReportResponseProgress(resp *http.Response, chars int) {
 	if resp == nil || resp.Request == nil || chars <= 0 {
 		return
 	}
-	if fn, ok := resp.Request.Context().Value(streamProgressKey{}).(func(chars int)); ok {
+	if fn, ok := resp.Request.Context().Value(streamProgressKey{}).(func(chars int)); ok && fn != nil {
 		fn(chars)
 	}
 }

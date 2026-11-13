@@ -567,6 +567,7 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(raw))}
 	}
 
+	client.RestartResponseProgress(resp)
 	var out strings.Builder
 	// Read-side usage capture: message_start/message_delta SSE events carry
 	// the real token counts (see usage_tracker.go). Fed alongside the text
@@ -880,7 +881,9 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 	}
 
 	reqURL := withBetaQuery(c.apiURL)
-	reqCtx := context.WithValue(ctx, oauthModelKey{}, oauthTitleModel)
+	// The title is not the reply: a caller following the turn's stream
+	// must not have this request's text counted into it.
+	reqCtx := client.WithoutStreamProgress(context.WithValue(ctx, oauthModelKey{}, oauthTitleModel))
 	resp, err := auth.DoWithRefresh(reqCtx, c.provider, func(token string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, bytes.NewReader(payload))
 		if err != nil {

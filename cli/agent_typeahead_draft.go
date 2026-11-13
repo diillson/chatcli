@@ -143,6 +143,8 @@ func (a *AgentMode) announceParkedDraft(draft string) {
 	a.typeaheadMu.Unlock()
 	if !repeat {
 		parked := i18n.T("agent.typeahead.draft_parked", shown)
-		fmt.Println(flatNoticeOr(noticeInfo, parked, colorize("  ✎ "+parked, ColorGray)))
+		a.withLiveRowPaused(func() {
+			fmt.Println(flatNoticeOr(noticeInfo, parked, colorize("  ✎ "+parked, ColorGray)))
+		})
 	}
 }

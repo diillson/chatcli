@@ -79,7 +79,13 @@ func (t *Timer) Stop() time.Duration {
 	defer t.mu.Unlock()
 
 	if !t.running {
-		return 0
+		// Not running is either "never started / already stopped" or
+		// "paused". A paused display still has its ticker, and the pauser
+		// will Resume it: returning here left the display to start again
+		// after its owner had taken it down. Stop it for real.
+		if t.pauseDepth == 0 || t.cancel == nil {
+			return 0
+		}
 	}
 
 	t.stopTime = time.Now()
@@ -87,6 +93,8 @@ func (t *Timer) Stop() time.Duration {
 
 	if t.cancel != nil {
 		t.cancel()
+		// Nothing is left for a late Resume to re-arm.
+		t.cancel = nil
 	}
 	if t.updateTicker != nil {
 		t.updateTicker.Stop()

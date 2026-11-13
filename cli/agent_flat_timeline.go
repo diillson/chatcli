@@ -20,27 +20,94 @@ import (
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/workers"
+	"github.com/diillson/chatcli/cli/metrics"
 	"github.com/diillson/chatcli/i18n"
 	llmclient "github.com/diillson/chatcli/llm/client"
 	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 )
 
-// stdoutIsTerminal is the live-line gate, a variable so a test can stand in
-// for the terminal it does not have.
-var stdoutIsTerminal = kit.StdoutIsTerminal
+// The row a running step repaints has one owner at a time: the turn timer.
+// It already paints the turn's status line, the dispatch panel and the
+// task-graph status, and everything that prints while one of those is up
+// pauses it first (the permission prompts through the policy adapter, the
+// side commands, streamed rows), which erases the row, and resumes it
+// after. The live line of a flat tool call is one more display of that
+// timer, so it inherits every one of those pauses instead of needing its
+// own, and it cannot run next to another display because a timer has one.
 
-// showFlatToolLive paints the running tool call as a live line that its
-// final line will replace. Only an attended, interactive run gets it: a
-// one-shot run and an unattended one (gateway, ACP, web) have nobody
-// watching a repaint, and their output is often a transcript where the
-// escape sequences would be noise. Without it the timeline is unchanged —
-// the final line is printed either way.
-func (a *AgentMode) showFlatToolLive(r *agent.UIRenderer) {
-	if a.isOneShot || a.cli == nil || a.cli.unattended || a.cli.animation == nil {
+// startFlatToolLive paints the running tool call as a live row that its
+// final line will replace, and returns the call that takes it down. Only
+// an attended, interactive run gets it: a one-shot run and an unattended
+// one (gateway, ACP, web) have nobody watching a repaint. The timer itself
+// only ticks when stdout is a terminal. When nothing was painted nothing is
+// erased, so captured output carries no escape sequence from here and the
+// timeline is the same either way: the final line is printed regardless.
+func (a *AgentMode) startFlatToolLive(ctx context.Context, r *agent.UIRenderer) (stop func()) {
+	t := a.turnTimer
+	if a.isOneShot || a.cli == nil || a.cli.unattended || t == nil || t.IsRunning() {
+		return func() {}
+	}
+	// A worker prompt raised during the call pauses whatever timer the
+	// adapter holds; make sure it is this one.
+	if a.policyAdapter != nil {
+		a.policyAdapter.setSpinner(t)
+	}
+	// painted and hadPreview are written by the tick and the pause hook,
+	// both under the timer's mutex, and read after Stop, which takes it.
+	painted, hadPreview := false, false
+	erase := func() {
+		if painted {
+			fmt.Print(metrics.ClearLine())
+			fmt.Print(spinnerPreviewWipe(hadPreview))
+		}
+		painted, hadPreview = false, false
+	}
+	t.SetOnPause(erase)
+	t.Start(ctx, func(time.Duration) {
+		// The type-ahead preview rides under the row exactly as it does
+		// under the turn's status line.
+		var suffix string
+		suffix, hadPreview = formatTypeaheadPreviewBelow(a.typeaheadPreviewSnapshot(), hadPreview)
+		fmt.Print("\r" + kit.Truncate(r.FlatToolLiveFrame(), kit.TermWidth()-1) + "\033[K" + suffix)
+		painted = true
+	})
+	return func() {
+		t.Stop()
+		t.SetOnPause(nil)
+		erase()
+	}
+}
+
+// withLiveRowPaused runs emit with the transient row taken down and puts
+// the row back after, for output that arrives from outside the loop while
+// a flat step is running (a background job's announcement, a parked draft).
+// It is the pause the side commands already use. Framed themes are left as
+// they are: their displays have always been printed over by these notices.
+func (a *AgentMode) withLiveRowPaused(emit func()) {
+	if a != nil && theme.Active().Layout == theme.LayoutFlat {
+		if t := a.turnTimer; t != nil && t.IsRunning() {
+			t.Pause()
+			defer t.Resume()
+		}
+	}
+	emit()
+}
+
+// flatStreamRow prints one row of a running call's output under its line:
+// serialized with the permission prompts, and with the live row down while
+// it is written. hidden is the compact style, which shows no rows and so
+// leaves the live row alone.
+func (a *AgentMode) flatStreamRow(r *agent.UIRenderer, line string, hidden bool) {
+	if hidden {
 		return
 	}
-	a.cli.animation.ShowLiveLine(r.FlatToolLiveFrame)
+	row := func() { a.withLiveRowPaused(func() { r.StreamOutput(line) }) }
+	if a.policyAdapter != nil {
+		a.policyAdapter.withPromptGate(row)
+		return
+	}
+	row()
 }
 
 // liveOutputMeter counts the reply text a model call has streamed so far.
@@ -59,7 +126,14 @@ func (a *AgentMode) withLiveOutput(ctx context.Context) context.Context {
 	if theme.Active().Layout != theme.LayoutFlat {
 		return ctx
 	}
-	return llmclient.WithStreamProgress(ctx, func(chars int) { a.liveOut.chars.Add(int64(chars)) })
+	return llmclient.WithStreamProgress(ctx, func(chars int) {
+		if chars == llmclient.StreamProgressRestart {
+			// A retried attempt re-streams the reply from its start.
+			a.liveOut.reset()
+			return
+		}
+		a.liveOut.chars.Add(int64(chars))
+	})
 }
 
 // liveOutputTokens is the estimate for the call in flight, zero when

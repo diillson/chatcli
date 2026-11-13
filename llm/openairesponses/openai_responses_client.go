@@ -407,6 +407,7 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: msg}
 	}
 
+	client.RestartResponseProgress(resp)
 	var sb strings.Builder
 	scanner := bufio.NewScanner(resp.Body)
 	// Increase buffer for potentially large SSE lines

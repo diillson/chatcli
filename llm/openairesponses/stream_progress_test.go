@@ -40,7 +40,8 @@ func TestProcessStreamResponse_ReportsTextAsItArrives(t *testing.T) {
 	}
 	// Both reasoning forms are counted (billed as output) without joining
 	// the reply text; other deltas are not.
-	if len(pieces) != 4 || pieces[0] != 6 || pieces[1] != 2 || pieces[2] != 3 || pieces[3] != 5 {
-		t.Fatalf("reported pieces = %v, want [6 2 3 5]", pieces)
+	// The decoder first says an attempt is starting.
+	if len(pieces) != 5 || pieces[0] != client.StreamProgressRestart || pieces[1] != 6 || pieces[2] != 2 || pieces[3] != 3 || pieces[4] != 5 {
+		t.Fatalf("reported pieces = %v, want [restart 6 2 3 5]", pieces)
 	}
 }

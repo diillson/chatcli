@@ -47,10 +47,3 @@ func ContentWidth() int {
 	}
 	return w
 }
-
-// StdoutIsTerminal reports whether stdout is a terminal right now. It asks
-// the file, not the color profile: a surface that captures output swaps
-// stdout for a pipe mid-session, and an in-place repaint must notice.
-func StdoutIsTerminal() bool {
-	return term.IsTerminal(int(os.Stdout.Fd()))
-}

@@ -40,7 +40,6 @@ type flatTool struct {
 	verb, arg string
 	started   time.Time
 	open      bool // a call was announced and has not been closed
-	admitted  bool // it passed the permission gate and started running
 	header    bool // its line is already on screen, in the running state
 	streamed  int  // rows of streamed output shown under it
 }
@@ -59,8 +58,8 @@ func (r *UIRenderer) FlatLayout() bool {
 }
 
 // FlatToolQueue announces the next call of a batch. Nothing is printed: the
-// call may still be refused at the permission gate, and a refusal is drawn
-// differently from a failure.
+// call may still be refused before it runs, and FlatToolRefused then draws
+// it with the outcome the loop reports.
 func (r *UIRenderer) FlatToolQueue(tool, subcmd, rawArgs string) {
 	verb, arg := flatToolLabel(tool, subcmd, rawArgs)
 	r.flatMu.Lock()
@@ -68,19 +67,25 @@ func (r *UIRenderer) FlatToolQueue(tool, subcmd, rawArgs string) {
 	r.flatMu.Unlock()
 }
 
-// FlatToolBegin marks the announced call as past the gate and running.
+// FlatToolBegin marks the announced call as running: its clock starts here,
+// after whatever time the permission gate took.
 func (r *UIRenderer) FlatToolBegin() {
 	r.flatMu.Lock()
-	r.flat.admitted = true
 	r.flat.started = time.Now()
 	r.flatMu.Unlock()
 }
 
-// FlatToolLiveFrame is the running call's line, for a live repaint.
+// FlatToolLiveFrame is the running call's line, for a live repaint. Once
+// output hangs from the call its line is already on screen, so the live
+// row is the open end of the rail with the clock.
 func (r *UIRenderer) FlatToolLiveFrame() string {
 	r.flatMu.Lock()
 	t := r.flat
 	r.flatMu.Unlock()
+	if t.header {
+		return "  " + kit.Sym(kit.GlyphGutterEnd) + " " + kit.Sym(kit.GlyphRunning) + " " +
+			kit.Colorize(flatDuration(time.Since(t.started)), theme.RoleMuted)
+	}
 	return flatToolLine(kit.GlyphRunning, t.verb, t.arg, []string{flatDuration(time.Since(t.started))}, kit.ContentWidth())
 }
 
@@ -161,42 +166,78 @@ func (r *UIRenderer) flatResultBody(output string, failed, streamed bool) (strin
 	return output, role
 }
 
-// FlatToolError draws a call that will not produce a result: refused at the
-// gate (denied) or rejected after it (failed). With no call announced the
-// message stands alone.
-func (r *UIRenderer) FlatToolError(msg string) {
-	r.flatMu.Lock()
-	t := r.flat
-	r.flat = flatTool{}
-	r.flatMu.Unlock()
-	if t.open && !t.header {
-		glyph, note := kit.GlyphError, i18n.T("agent.flat.failed")
-		if !t.admitted {
-			glyph, note = kit.GlyphDenied, i18n.T("agent.flat.denied")
-		}
-		fmt.Println(flatToolLine(glyph, t.verb, t.arg, []string{note}, kit.ContentWidth()))
-		flatGutter(strings.TrimSpace(msg), theme.RoleToolError)
-		return
+// FlatOutcome is why a call of the flat timeline produced no result. The
+// loop knows which it was and says so; the renderer does not guess it from
+// how far the call got, because the same point in the loop is reached by a
+// user saying no, a rule, a hook and a plain bad argument.
+type FlatOutcome int
+
+const (
+	// FlatFailed: the call was rejected or broke before it could run.
+	FlatFailed FlatOutcome = iota
+	// FlatDenied: the user was asked and said no.
+	FlatDenied
+	// FlatBlocked: a policy rule or a hook stopped it; nobody was asked.
+	FlatBlocked
+	// FlatSkipped: not attempted, because an earlier call of the batch failed.
+	FlatSkipped
+	// FlatCanceled: the user interrupted the prompt or the run.
+	FlatCanceled
+	// FlatParked: the agent suspended itself on this call.
+	FlatParked
+)
+
+func (o FlatOutcome) word() string {
+	switch o {
+	case FlatDenied:
+		return i18n.T("agent.flat.denied")
+	case FlatBlocked:
+		return i18n.T("agent.flat.blocked")
+	case FlatSkipped:
+		return i18n.T("agent.flat.skipped")
+	case FlatCanceled:
+		return i18n.T("agent.flat.canceled")
+	case FlatParked:
+		return i18n.T("agent.flat.parked")
+	default:
+		return i18n.T("agent.flat.failed")
 	}
-	fmt.Println("  " + kit.Sym(kit.GlyphError) + " " + kit.Colorize(kit.Plain(strings.TrimSpace(msg)), theme.RoleToolError))
 }
 
-// FlatToolAbandon closes a call the loop is leaving without a result (the
-// turn was canceled, the agent parked), so the step is not lost from the
-// timeline. note says why, on the right.
-func (r *UIRenderer) FlatToolAbandon(note string) {
+// glyph is the failure mark for a call that broke and the not-run mark for
+// every outcome in which the call was never attempted or was given up.
+func (o FlatOutcome) glyph() kit.Glyph {
+	if o == FlatFailed {
+		return kit.GlyphError
+	}
+	return kit.GlyphDenied
+}
+
+// FlatToolRefused closes the announced call without a result: its line
+// carries the outcome's glyph and word, and msg, when there is one, says
+// why under the rail. With no call announced a message stands alone.
+func (r *UIRenderer) FlatToolRefused(outcome FlatOutcome, msg string) {
 	r.flatMu.Lock()
 	t := r.flat
 	r.flat = flatTool{}
 	r.flatMu.Unlock()
-	if !t.open {
+	msg = strings.TrimSpace(msg)
+	switch {
+	case !t.open:
+		if msg != "" {
+			fmt.Println("  " + kit.Sym(kit.GlyphError) + " " + kit.Colorize(kit.Plain(msg), theme.RoleToolError))
+		}
 		return
+	case !t.header:
+		fmt.Println(flatToolLine(outcome.glyph(), t.verb, t.arg, []string{outcome.word()}, kit.ContentWidth()))
+	}
+	if msg != "" {
+		flatGutter(msg, theme.RoleToolError)
 	}
 	if t.header {
-		fmt.Println("  " + kit.Sym(kit.GlyphGutterEnd) + " " + kit.Sym(kit.GlyphDenied) + " " + kit.Colorize(note, theme.RoleMuted))
-		return
+		// Output already hangs from the call's line: close the rail.
+		fmt.Println("  " + kit.Sym(kit.GlyphGutterEnd) + " " + kit.Sym(outcome.glyph()) + " " + kit.Colorize(outcome.word(), theme.RoleMuted))
 	}
-	fmt.Println(flatToolLine(kit.GlyphDenied, t.verb, t.arg, []string{note}, kit.ContentWidth()))
 }
 
 // FlatAgentDone draws one dispatched agent the way a tool call is drawn:

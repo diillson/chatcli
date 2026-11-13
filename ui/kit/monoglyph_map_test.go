@@ -73,7 +73,4 @@ func TestMonoglyphKeepsMeaningfulSymbols(t *testing.T) {
 			t.Errorf("Monoglyph(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if StdoutIsTerminal() {
-		t.Log("stdout is a terminal in this run")
-	}
 }

@@ -34,6 +34,32 @@ func TestStreamProgressReachesTheSinkInContext(t *testing.T) {
 	if base := context.Background(); WithStreamProgress(base, nil) != base {
 		t.Fatal("a nil sink must leave the context alone")
 	}
+
+	// A restart reaches the sink as its own value, through either entry.
+	got = nil
+	RestartStreamProgress(ctx)
+	RestartResponseProgress(&http.Response{Request: req})
+	RestartStreamProgress(context.Background())
+	RestartResponseProgress(nil)
+	RestartResponseProgress(&http.Response{})
+	if len(got) != 2 || got[0] != StreamProgressRestart || got[1] != StreamProgressRestart {
+		t.Fatalf("restarts = %v", got)
+	}
+
+	// An auxiliary request opts out: nothing it streams or restarts is seen.
+	got = nil
+	quiet := WithoutStreamProgress(ctx)
+	quietReq, err := http.NewRequestWithContext(quiet, http.MethodPost, "http://example.invalid", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ReportStreamProgress(quiet, 7)
+	RestartStreamProgress(quiet)
+	ReportResponseProgress(&http.Response{Request: quietReq}, 7)
+	RestartResponseProgress(&http.Response{Request: quietReq})
+	if len(got) != 0 {
+		t.Fatalf("an opted-out context reached the sink: %v", got)
+	}
 }
 
 // Every client that streams through the chunk channel reports its text

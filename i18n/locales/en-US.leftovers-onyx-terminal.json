@@ -9,5 +9,7 @@
   "agent.flat.parallel": "%d parallel",
   "agent.flat.agents": "agents",
   "agent.flat.tool_call": "1 tool call",
-  "agent.flat.tool_calls": "%d tool calls"
+  "agent.flat.tool_calls": "%d tool calls",
+  "agent.flat.blocked": "blocked",
+  "agent.flat.skipped": "skipped"
 }

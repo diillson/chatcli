@@ -121,7 +121,7 @@ func TestFlatTimelineFailureAndRefusal(t *testing.T) {
 	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
 	denied := stripANSI(captureStdout(t, func() {
 		r.FlatToolQueue("@coder", "exec", execArgs)
-		r.FlatToolError("blocked by policy")
+		r.FlatToolRefused(FlatDenied, "blocked by policy")
 		r.FlatToolDone("late", true, time.Second, "") // the loop's result step: already closed
 	}))
 	if !strings.HasPrefix(denied, "  ⊘ exec   go test ./...") || !strings.Contains(denied, i18n.T("agent.flat.denied")+"\n  │ blocked by policy\n") {
@@ -134,8 +134,8 @@ func TestFlatTimelineFailureAndRefusal(t *testing.T) {
 	rejected := stripANSI(captureStdout(t, func() {
 		r.FlatToolQueue("@coder", "exec", execArgs)
 		r.FlatToolBegin()
-		r.FlatToolError("args contain line breaks")
-		r.FlatToolError("no call open")
+		r.FlatToolRefused(FlatFailed, "args contain line breaks")
+		r.FlatToolRefused(FlatFailed, "no call open")
 	}))
 	if !strings.HasPrefix(rejected, "  ✗ exec   go test ./...") || !strings.Contains(rejected, i18n.T("agent.flat.failed")+"\n") ||
 		!strings.HasSuffix(rejected, "  ✗ no call open\n") {
@@ -147,16 +147,16 @@ func TestFlatTimelineAbandonedCallStaysInTheTimeline(t *testing.T) {
 	withTheme(t, "onyx")
 	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleFull)
 	out := stripANSI(captureStdout(t, func() {
-		r.FlatToolAbandon("nothing open") // prints nothing
+		r.FlatToolRefused(FlatCanceled, "") // nothing open: prints nothing
 		r.FlatToolQueue("@park", "", `{"until":"10m"}`)
 		r.FlatToolBegin()
-		r.FlatToolAbandon("parked")
+		r.FlatToolRefused(FlatParked, "")
 		r.FlatToolQueue("@coder", "exec", execArgs)
 		r.FlatToolBegin()
 		r.StreamOutput("partial")
-		r.FlatToolAbandon("canceled")
+		r.FlatToolRefused(FlatCanceled, "")
 	}))
-	want := []string{"  ⊘ park", "parked", "  ↻ exec   go test ./...", "  │ partial", "  └ ⊘ canceled"}
+	want := []string{"  ⊘ park", i18n.T("agent.flat.parked"), "  ↻ exec   go test ./...", "  │ partial", "  └ ⊘ " + i18n.T("agent.flat.canceled")}
 	at := 0
 	for _, piece := range want {
 		i := strings.Index(out[at:], piece)
@@ -246,7 +246,7 @@ func TestFramedThemesKeepTheirTimeline(t *testing.T) {
 		t.Fatal("dark is not a flat theme")
 	}
 	silent := captureStdout(t, func() {
-		r.FlatToolAbandon("canceled")
+		r.FlatToolRefused(FlatCanceled, "")
 		r.FlatToolDone("output", false, time.Second, "")
 	})
 	if silent != "" {
@@ -335,4 +335,68 @@ func TestFlatTimelineDispatchedAgents(t *testing.T) {
 	if !strings.HasPrefix(all, "  ✓ ") {
 		t.Errorf("a dispatch with every agent done is marked done: %q", all)
 	}
+}
+
+// The state on a refused call's line is the outcome the loop reports, not a
+// guess from how far the call got: each outcome has its word, the calls
+// that never ran share the not-run glyph, and only a real failure gets the
+// failure glyph.
+func TestFlatTimelineOutcomesAreReportedNotInferred(t *testing.T) {
+	withTheme(t, "onyx")
+	r := NewUIRendererWithStyle(zap.NewNop(), UIStyleCompact)
+	draw := func(outcome FlatOutcome, begun bool, msg string) string {
+		return stripANSI(captureStdout(t, func() {
+			r.FlatToolQueue("@coder", "exec", execArgs)
+			if begun {
+				r.FlatToolBegin()
+			}
+			r.FlatToolRefused(outcome, msg)
+		}))
+	}
+	for _, tc := range []struct {
+		outcome FlatOutcome
+		begun   bool
+		glyph   string
+		word    string
+	}{
+		{FlatDenied, false, "⊘", i18n.T("agent.flat.denied")},   // the user said no at the prompt
+		{FlatDenied, true, "⊘", i18n.T("agent.flat.denied")},    // the user said no to a dangerous command, after the call began
+		{FlatBlocked, false, "⊘", i18n.T("agent.flat.blocked")}, // a policy rule
+		{FlatBlocked, true, "⊘", i18n.T("agent.flat.blocked")},  // a hook, after the call began
+		{FlatSkipped, false, "⊘", i18n.T("agent.flat.skipped")}, // a sibling failed first
+		{FlatCanceled, false, "⊘", i18n.T("agent.flat.canceled")},
+		{FlatCanceled, true, "⊘", i18n.T("agent.flat.canceled")},
+		{FlatParked, true, "⊘", i18n.T("agent.flat.parked")},
+		{FlatFailed, false, "✗", i18n.T("agent.flat.failed")}, // bad arguments, before the call began
+		{FlatFailed, true, "✗", i18n.T("agent.flat.failed")},
+	} {
+		out := draw(tc.outcome, tc.begun, "the reason")
+		first := strings.SplitN(out, "\n", 2)[0]
+		if !strings.HasPrefix(first, "  "+tc.glyph+" exec   go test ./...") || !strings.HasSuffix(first, " "+tc.word) {
+			t.Errorf("outcome %d (begun=%v): %q, want glyph %s and word %q", tc.outcome, tc.begun, first, tc.glyph, tc.word)
+		}
+		if !strings.Contains(out, "\n  │ the reason\n") {
+			t.Errorf("outcome %d: the reason is not under the rail:\n%s", tc.outcome, out)
+		}
+	}
+	words := map[string]bool{}
+	for o := FlatFailed; o <= FlatParked; o++ {
+		words[o.word()] = true
+	}
+	if len(words) != 6 {
+		t.Errorf("every outcome needs its own word, got %v", words)
+	}
+	// A call cancelled with no message (an MCP call, a plugin call) keeps
+	// its line and adds no row.
+	if out := draw(FlatCanceled, true, ""); strings.Count(out, "\n") != 1 || !strings.Contains(out, i18n.T("agent.flat.canceled")) {
+		t.Errorf("cancelled call: %q", out)
+	}
+	// After output streamed, the live row is the open end of the rail.
+	r.FlatToolQueue("@coder", "exec", execArgs)
+	r.FlatToolBegin()
+	_ = captureStdout(t, func() { r.StreamOutput("row") })
+	if frame := stripANSI(r.FlatToolLiveFrame()); !strings.HasPrefix(frame, "  └ ↻ ") || strings.Contains(frame, "exec") {
+		t.Errorf("live row under streamed output: %q", frame)
+	}
+	_ = captureStdout(t, func() { r.FlatToolRefused(FlatCanceled, "") })
 }

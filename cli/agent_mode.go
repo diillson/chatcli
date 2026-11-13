@@ -3610,7 +3610,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// Helper: render error message respecting compact mode
 			renderError := func(msg string) {
 				if isFlat {
-					renderer.FlatToolError(msg)
+					renderer.FlatToolRefused(agent.FlatFailed, msg)
 				} else if isCompact {
 					renderer.CompactError(msg)
 				} else if isMinimal {
@@ -3618,6 +3618,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				} else {
 					renderer.RenderToolResult(msg, true)
 				}
+			}
+
+			// refused is renderError carrying why the call did not run. The
+			// flat timeline shows the reason as the call's state; the
+			// framed styles only ever had the message.
+			refused := func(outcome agent.FlatOutcome) func(string) {
+				if !isFlat {
+					return renderError
+				}
+				return func(msg string) { renderer.FlatToolRefused(outcome, msg) }
 			}
 
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
@@ -3643,13 +3653,13 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				// instead — it could build on the broken step — with a note
 				// that keeps the structured results aligned with the calls.
 				if batchHasError && !a.toolCallIsReadOnly(tc) {
-					turnToolResults = append(turnToolResults, a.skipAfterFailure(i, tc, &batchOutputBuilder, renderError))
+					turnToolResults = append(turnToolResults, a.skipAfterFailure(i, tc, &batchOutputBuilder, refused(agent.FlatSkipped)))
 					continue
 				}
 				// --- SECURITY CHECK START ---
 				if a.isCoderMode {
 					pm, err := coder.NewPolicyManager(a.logger)
-					if a.policyUnavailableBlocked(err, tc.Name, tc.Args, renderError) {
+					if a.policyUnavailableBlocked(err, tc.Name, tc.Args, refused(agent.FlatBlocked)) {
 						batchHasError = true
 						break
 					}
@@ -3657,7 +3667,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						action := a.toolPolicyVerdict(pm, tc.Name, tc.Args)
 						if action == coder.ActionDeny {
 							msg := "AÇÃO BLOQUEADA (Regra de Segurança)"
-							renderError(msg)
+							refused(agent.FlatBlocked)(msg)
 							a.emitBlockedTool(tc.Name, tc.Args, msg)
 							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 							batchHasError = true
@@ -3672,11 +3682,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// nobody can approve, so the action is refused (the
 							// automode opt-in was already applied above). An
 							// explicit ActionDeny above still blocks either way.
-							if a.unattendedAskBlocked(tc.Name, tc.Args, pm, renderError) {
+							if a.unattendedAskBlocked(tc.Name, tc.Args, pm, refused(agent.FlatBlocked)) {
 								batchHasError = true
 								break
 							}
-						} else if action == coder.ActionAsk && a.noTerminalAskBlocked(tc.Name, tc.Args, renderError) {
+						} else if action == coder.ActionAsk && a.noTerminalAskBlocked(tc.Name, tc.Args, refused(agent.FlatBlocked)) {
 							// One-shot without a terminal: nobody can answer
 							// the prompt, so it would block until timeout.
 							batchHasError = true
@@ -3700,17 +3710,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									_ = pm.AddRule(pattern, coder.ActionDeny)
 								}
 								msg := "AÇÃO BLOQUEADA PERMANENTEMENTE"
-								renderError(msg)
+								refused(agent.FlatDenied)(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 								batchHasError = true
 							case coder.DecisionDenyOnce:
 								msg := "AÇÃO NEGADA PELO USUÁRIO"
-								renderError(msg)
+								refused(agent.FlatDenied)(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 								batchHasError = true
 							case coder.DecisionCanceled:
 								msg := "OPERAÇÃO CANCELADA (Ctrl+C)"
-								renderError(msg)
+								refused(agent.FlatCanceled)(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 								batchHasError = true
 							}
@@ -3878,6 +3888,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// unanswered batch left behind is exactly the
 							// dangling shape strict providers 400 on — in
 							// chat mode too, which has no repair pass.
+							renderer.FlatToolRefused(agent.FlatCanceled, "")
 							a.closeNativeBatch(nativeToolCalls, turnToolResults, toolResultNotExecutedCanceled)
 							return ctx.Err()
 						}
@@ -3947,12 +3958,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 										"BLOCKED: Dangerous command detected in @coder exec: %q. "+
 											"This command is forbidden regardless of policy rules. "+
 											"DO NOT retry this command.", shellCmd)
+									outcome := agent.FlatBlocked
 									if asked {
+										outcome = agent.FlatDenied
 										msg = fmt.Sprintf(
 											"BLOCKED: Dangerous command %q was DENIED by the user. "+
 												"DO NOT retry this command.", shellCmd)
 									}
-									renderError(msg)
+									refused(outcome)(msg)
 									a.cli.history = append(a.cli.history, models.Message{
 										Role: "user", Content: "SECURITY BLOCK: " + msg,
 									})
@@ -3978,7 +3991,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								})
 								if hookResult != nil && hookResult.Blocked {
 									msg := fmt.Sprintf("BLOCKED by hook: %s", hookResult.BlockReason)
-									renderError(msg)
+									refused(agent.FlatBlocked)(msg)
 									a.cli.history = append(a.cli.history, models.Message{
 										Role: "user", Content: "HOOK BLOCK: " + msg,
 									})
@@ -4010,8 +4023,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							}
 
 							streamCallback := func(line string) {
-								if isFlat && isCompact {
-									return // rows are hidden: the live line keeps running
+								if isFlat {
+									a.flatStreamRow(renderer, line, isCompact)
+									return
 								}
 								// First real output ends the spinner so streamed
 								// lines don't clash with its carriage-return repaint.
@@ -4119,13 +4133,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									// never feel frozen. Streaming tools stop it on
 									// their first line (see streamCallback); it's
 									// always stopped after the call returns.
+									stopLive := func() {}
 									if isFlat {
-										a.showFlatToolLive(renderer)
+										// The task-graph status owns the row
+										// for the whole run of a @taskgraph.
+										if !taskGraphTimerStarted {
+											stopLive = a.startFlatToolLive(ctx, renderer)
+										}
 									} else if !isCompact {
 										a.cli.animation.ShowThinkingAnimation(spinnerMessage(boxLabel))
 									}
 									toolOutput, execErr = a.executeWithRetry(toolCtx, plugin, toolName, toolArgs, streamCallback)
 									a.cli.animation.StopThinkingAnimation()
+									stopLive()
 								}
 							}
 
@@ -4146,7 +4166,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// sem resposta (o formato que providers estritos
 							// rejeitam com 400, inclusive via chat).
 							if ctx.Err() != nil {
-								renderer.FlatToolAbandon(i18n.T("agent.flat.canceled"))
+								renderer.FlatToolRefused(agent.FlatCanceled, "")
 								a.closeNativeBatch(nativeToolCalls, turnToolResults, toolResultNotExecutedCanceled)
 								return ctx.Err()
 							}
@@ -4164,7 +4184,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// double-close that landed in the user's terminal
 							// as two `╰────╮` rows.
 							if req, parked := park.AsParkError(execErr); parked {
-								renderer.FlatToolAbandon(i18n.T("agent.flat.parked"))
+								renderer.FlatToolRefused(agent.FlatParked, "")
 								var pendingID string
 								var beforeClosure []models.Message
 								if i < len(nativeToolCalls) {

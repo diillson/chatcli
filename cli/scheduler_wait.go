@@ -387,9 +387,11 @@ func (cli *ChatCLI) announceJobEvent(ctx context.Context, evt scheduler.Event) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	fmt.Println()
-	printJobOutcome(j, cycle)
-	fmt.Println()
+	cli.agentMode.withLiveRowPaused(func() {
+		fmt.Println()
+		printJobOutcome(j, cycle)
+		fmt.Println()
+	})
 	cli.markSchedulerDirty()
 	// Redraw the input line the notice was printed over — unless a turn is
 	// streaming, which redraws the prompt itself when it ends.
