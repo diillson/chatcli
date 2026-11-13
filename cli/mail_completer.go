@@ -19,6 +19,8 @@ func mailSubcommandSuggestions() []prompt.Suggest {
 		{Text: "list", Description: i18n.T("complete.mail.list")},
 		{Text: "send", Description: i18n.T("complete.mail.send")},
 		{Text: "pending", Description: i18n.T("complete.mail.pending")},
+		{Text: "peek", Description: i18n.T("complete.mail.peek")},
+		{Text: "history", Description: i18n.T("complete.mail.history")},
 		{Text: "help", Description: i18n.T("complete.mail.help")},
 	}
 }
@@ -47,8 +49,19 @@ func (cli *ChatCLI) getMailSuggestions(d prompt.Document) []prompt.Suggest {
 	if len(args) == 0 || (len(args) == 1 && !trailingSpace) {
 		return prompt.FilterHasPrefix(mailSubcommandSuggestions(), current, true)
 	}
-	if args[0] == "send" && (len(args) == 1 || (len(args) == 2 && !trailingSpace)) {
-		return prompt.FilterHasPrefix(mailRecipientSuggestions(), current, true)
+	firstSlot := len(args) == 1 || (len(args) == 2 && !trailingSpace)
+	switch args[0] {
+	case "send", "peek", "look":
+		if firstSlot {
+			return prompt.FilterHasPrefix(mailRecipientSuggestions(), current, true)
+		}
+		if args[0] != "send" {
+			return nil
+		}
+		if strings.HasPrefix(current, "-") {
+			return squadFlagSuggestions(args[:len(args)-1], current,
+				prompt.Suggest{Text: "--card", Description: i18n.T("complete.mail.flag.card")})
+		}
 	}
 	return nil
 }

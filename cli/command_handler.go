@@ -108,7 +108,7 @@ func (ch *CommandHandler) HandleCommand(ctx context.Context, userInput string) b
 	case userInput == "/agents" || strings.HasPrefix(userInput, "/agents "):
 		// MUST precede the "/agent" prefix case below, which would otherwise
 		// swallow "/agents" into the persona subcommand handler.
-		ch.cli.handleAgentsCommand(userInput)
+		ch.cli.handleAgentsCommand(ctx, userInput)
 		return false
 	case strings.HasPrefix(userInput, "/agent"):
 		// /agent pode ser gerenciamento de personas OU iniciar modo agente

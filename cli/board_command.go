@@ -25,6 +25,9 @@ import (
 // tests can point the command layer at a temp store.
 var squadBoard = board.Default
 
+// boardUsageKey is the /board usage text: every verb with its arguments.
+const boardUsageKey = "board.usage.verbs"
+
 // handleBoardCommand routes /board subcommands.
 func (cli *ChatCLI) handleBoardCommand(userInput string) {
 	args := strings.Fields(strings.TrimSpace(userInput))
@@ -37,6 +40,10 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 		rest = args[2:]
 	}
 
+	// Every successful mutation sets this: the tool path taps the adapter's
+	// onMutate, but a person's edit never crosses the adapter, so without
+	// it the knowledge graph serves the old cards until its cache expires.
+	mutated := false
 	switch sub {
 	case "list", "ls":
 		var filter board.Column
@@ -56,19 +63,8 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			return
 		}
 		cli.boardShow(rest[0])
-	case "create", "add":
-		title := strings.TrimSpace(strings.Join(rest, " "))
-		if title == "" {
-			fmt.Println(colorize("  "+i18n.T("board.title.missing"), ColorYellow))
-			cli.printBoardUsage()
-			return
-		}
-		card, err := squadBoard().Create(title, "", "", "")
-		if err != nil {
-			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
-			return
-		}
-		fmt.Println(colorize("  "+i18n.T("board.create.ok", card.ID), ColorGreen))
+	case "create", "add", "new":
+		mutated = cli.boardCreate(userInput)
 	case "move":
 		if len(rest) < 2 {
 			fmt.Println(colorize("  "+i18n.T("board.move.usage"), ColorYellow))
@@ -84,6 +80,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			return
 		}
 		fmt.Println(colorize("  "+i18n.T("board.move.ok", rest[0], string(col)), ColorGreen))
+		mutated = true
 	case "assign":
 		if len(rest) < 2 {
 			fmt.Println(colorize("  "+i18n.T("board.assign.usage"), ColorYellow))
@@ -94,6 +91,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			return
 		}
 		fmt.Println(colorize("  "+i18n.T("board.assign.ok", rest[0], rest[1]), ColorGreen))
+		mutated = true
 	case "note", "comment":
 		if len(rest) < 2 {
 			fmt.Println(colorize("  "+i18n.T("board.note.usage"), ColorYellow))
@@ -105,6 +103,7 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			return
 		}
 		fmt.Println(colorize("  "+i18n.T("board.note.ok", rest[0]), ColorGreen))
+		mutated = true
 	case "archive", "gc":
 		var age time.Duration
 		if len(rest) > 0 {
@@ -121,12 +120,193 @@ func (cli *ChatCLI) handleBoardCommand(userInput string) {
 			return
 		}
 		fmt.Println(colorize("  "+i18n.T("board.archive.ok", n), ColorGreen))
+		mutated = true
+	case "unassign", "unclaim", "release":
+		mutated = cli.boardUnassign(userInput)
+	case "edit", "update", "rename":
+		mutated = cli.boardEdit(userInput)
+	case "link":
+		mutated = cli.boardLink(userInput)
+	case "delete", "remove", "rm":
+		mutated = cli.boardDelete(userInput)
 	case "help", "-h", "--help":
 		cli.printBoardUsage()
 	default:
 		fmt.Println(colorize("  "+i18n.T("board.unknown", sub), ColorYellow))
 		cli.printBoardUsage()
 	}
+	if mutated {
+		cli.markGraphDirty()
+	}
+}
+
+// boardReport prints the outcome of one board mutation and reports whether
+// it changed the board.
+func boardReport(err error, okMsg string) bool {
+	if err != nil {
+		fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
+		return false
+	}
+	fmt.Println(colorize("  "+okMsg, ColorGreen))
+	return true
+}
+
+// boardArgs parses a verb's tail, printing the problem and the usage when
+// it does not parse.
+func boardArgs(userInput string, spec map[string]squadFlagKind) (squadArgs, bool) {
+	parsed, err := parseSquadTail(userInput, spec)
+	if err != nil {
+		printSquadNotice(err.Error())
+		printSquadUsage(boardUsageKey)
+		return parsed, false
+	}
+	return parsed, true
+}
+
+// boardCreate handles "create <title> [--description T] [--assignee A]
+// [--column C]".
+func (cli *ChatCLI) boardCreate(userInput string) bool {
+	parsed, ok := boardArgs(userInput, map[string]squadFlagKind{
+		"--description": squadFlagText, "--assignee": squadFlagWord, "--column": squadFlagWord,
+	})
+	if !ok {
+		return false
+	}
+	title := parsed.positional(0)
+	if title == "" {
+		printSquadNotice(i18n.T("board.title.missing"))
+		printSquadUsage(boardUsageKey)
+		return false
+	}
+	col := board.ColBacklog
+	if raw := parsed.values["--column"]; raw != "" {
+		var err error
+		if col, err = board.ParseColumn(raw); err != nil {
+			printSquadNotice(i18n.T("board.column.invalid", raw))
+			return false
+		}
+	}
+	card, err := squadBoard().Create(title, parsed.values["--description"], parsed.values["--assignee"], col)
+	if err != nil {
+		return boardReport(err, "")
+	}
+	return boardReport(nil, i18n.T("board.create.done", card.ID, string(card.Column)))
+}
+
+// boardEdit handles "edit <id> [new title] [--title T] [--description T]".
+func (cli *ChatCLI) boardEdit(userInput string) bool {
+	parsed, ok := boardArgs(userInput, map[string]squadFlagKind{
+		"--title": squadFlagText, "--description": squadFlagText,
+	})
+	if !ok {
+		return false
+	}
+	title := parsed.values["--title"]
+	if title != "" && len(parsed.pos) > 1 {
+		printSquadNotice(i18n.T("squad.arg.twice", parsed.positional(1), "--title"))
+		return false
+	}
+	if title == "" {
+		title = parsed.positional(1)
+	}
+	description := parsed.values["--description"]
+	if len(parsed.pos) == 0 || (title == "" && description == "") {
+		printSquadUsage(boardUsageKey)
+		return false
+	}
+	id := parsed.pos[0].text
+	_, err := squadBoard().Update(id, title, description)
+	return boardReport(err, i18n.T("board.edit.ok", id))
+}
+
+// boardUnassign handles "unassign <id>".
+func (cli *ChatCLI) boardUnassign(userInput string) bool {
+	parsed, ok := boardArgs(userInput, nil)
+	if !ok {
+		return false
+	}
+	if len(parsed.pos) != 1 {
+		printSquadUsage(boardUsageKey)
+		return false
+	}
+	id := parsed.pos[0].text
+	_, err := squadBoard().Assign(id, "")
+	return boardReport(err, i18n.T("board.unassign.ok", id))
+}
+
+// boardLink handles "link <id> [run-id] [--run R] [--job J]".
+func (cli *ChatCLI) boardLink(userInput string) bool {
+	parsed, ok := boardArgs(userInput, map[string]squadFlagKind{
+		"--run": squadFlagWord, "--job": squadFlagWord,
+	})
+	if !ok {
+		return false
+	}
+	runID, jobID := parsed.values["--run"], parsed.values["--job"]
+	if runID != "" && len(parsed.pos) == 2 {
+		printSquadNotice(i18n.T("squad.arg.twice", parsed.pos[1].raw, "--run"))
+		return false
+	}
+	if len(parsed.pos) == 2 {
+		runID = parsed.pos[1].text
+	}
+	if len(parsed.pos) == 0 || len(parsed.pos) > 2 || (runID == "" && jobID == "") {
+		printSquadUsage(boardUsageKey)
+		return false
+	}
+	id := parsed.pos[0].text
+	store := squadBoard()
+	// Checked up front so a bad ID links nothing instead of failing between
+	// the run and the job.
+	if _, err := store.Get(id); err != nil {
+		printSquadNotice(i18n.T("board.show.notfound", id))
+		return false
+	}
+	linked := false
+	for _, link := range []struct {
+		value string
+		apply func(id, value string) (board.Card, error)
+	}{{runID, store.LinkRun}, {jobID, store.LinkJob}} {
+		if link.value == "" {
+			continue
+		}
+		if _, err := link.apply(id, link.value); err != nil {
+			fmt.Println(colorize("  ❌ "+err.Error(), ColorRed))
+			return linked
+		}
+		linked = true
+	}
+	return boardReport(nil, i18n.T("board.link.ok", id))
+}
+
+// boardDelete handles "delete <id> [--yes]" in two steps: the first call
+// shows the card and changes nothing, the second (--yes) removes it. No
+// stdin confirmation: the prompt holds the terminal in raw mode while a
+// command runs, and the headless surfaces have no stdin at all.
+func (cli *ChatCLI) boardDelete(userInput string) bool {
+	parsed, ok := boardArgs(userInput, map[string]squadFlagKind{"--yes": squadFlagBool})
+	if !ok {
+		return false
+	}
+	if len(parsed.pos) != 1 {
+		printSquadUsage(boardUsageKey)
+		return false
+	}
+	id := parsed.pos[0].text
+	store := squadBoard()
+	card, err := store.Get(id)
+	if err != nil {
+		printSquadNotice(i18n.T("board.show.notfound", id))
+		return false
+	}
+	if !parsed.set["--yes"] {
+		printSquadNotice(i18n.T("board.delete.preview"))
+		cli.boardShow(id)
+		printSquadNotice(i18n.T("board.delete.rerun", id))
+		return false
+	}
+	_, err = store.Delete(id)
+	return boardReport(err, i18n.T("board.delete.ok", id, truncateForUI(card.Title, 70)))
 }
 
 // boardList renders the kanban grouped by column.
@@ -223,5 +403,5 @@ func boardColumnIcon(col board.Column) string {
 
 // printBoardUsage prints /board usage help.
 func (cli *ChatCLI) printBoardUsage() {
-	fmt.Println(colorize("  "+i18n.T("board.usage"), ColorGray))
+	printSquadUsage(boardUsageKey)
 }

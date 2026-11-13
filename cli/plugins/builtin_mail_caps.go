@@ -40,7 +40,7 @@ func mailSubcommand(args []string) string {
 // (mutating).
 func (p *BuiltinMailPlugin) IsReadOnly(args []string) bool {
 	switch mailSubcommand(args) {
-	case "history", "recent", "log", "peek", "look", "pending":
+	case "history", "recent", "log", "peek", "look", "pending", "overview", "counts", "queues":
 		return true
 	}
 	return false
@@ -58,6 +58,8 @@ func (p *BuiltinMailPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.mail.describe.send")
 	case "history", "recent", "log":
 		return i18n.T("plugins.mail.describe.history")
+	case "overview", "counts", "queues":
+		return i18n.T("plugins.mail.describe.overview")
 	case "peek", "look", "pending":
 		recipient := extractNestedArg(args, "for", "recipient", "to", "agent")
 		if recipient == "" {
@@ -77,7 +79,7 @@ func (p *BuiltinMailPlugin) JSONSchema() string {
 		"oneOf": []map[string]interface{}{
 			{
 				"properties": map[string]interface{}{
-					"cmd": map[string]interface{}{"enum": []string{"inbox", "peek", "history"}},
+					"cmd": map[string]interface{}{"enum": []string{"inbox", "peek", "overview", "history"}},
 					"args": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{

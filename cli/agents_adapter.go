@@ -140,6 +140,71 @@ const (
 	agentsMsgRunFinished  = "RUN %s FINISHED status=%s after %s%s\n%s"
 )
 
+// lookupAgentRun finds a run in this process's registry or, failing that,
+// among the runs other processes mirror through the hub.
+// stale is true for a mirrored run whose owner stopped sending heartbeats.
+func lookupAgentRun(reg *runs.Registry, id string) (info runs.Info, remote, stale, ok bool) {
+	if info, ok := reg.Get(id); ok {
+		return info, false, false, true
+	}
+	if r, found := findRemoteAgentRun(id); found {
+		return r.Info, true, r.Stale, true
+	}
+	return runs.Info{}, false, false, false
+}
+
+// agentWaitOutcome is how a wait on a run ended.
+type agentWaitOutcome int
+
+const (
+	agentWaitFinished    agentWaitOutcome = iota // the run reached a terminal status
+	agentWaitTimedOut                            // the bound elapsed first
+	agentWaitInterrupted                         // ctx ended first; the run goes on
+	agentWaitUnknown                             // no run with that ID
+	agentWaitGone                                // the run left the registry mid-wait
+	agentWaitStale                               // its owning process stopped reporting
+)
+
+// awaitAgentRun blocks until the run is terminal, ctx ends or timeout
+// elapses (timeout <= 0 = no bound), returning the last state it saw. The
+// one wait loop behind @agents wait and /agents wait --block.
+//
+// stopOnStale also ends the wait when the run's owner went silent: a run
+// mirrored from a process that died stays "running" in the hub forever, so
+// a person's hold would last until Ctrl+C. The tool passes false.
+func awaitAgentRun(ctx context.Context, reg *runs.Registry, id string, timeout time.Duration, stopOnStale bool) (runs.Info, bool, agentWaitOutcome) {
+	info, remote, stale, ok := lookupAgentRun(reg, id)
+	if !ok {
+		return info, false, agentWaitUnknown
+	}
+	var deadline <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		deadline = timer.C
+	}
+	tick := time.NewTicker(agentsWaitPoll)
+	defer tick.Stop()
+	for !info.Status.Terminal() {
+		if stale && stopOnStale {
+			return info, remote, agentWaitStale
+		}
+		select {
+		case <-ctx.Done():
+			return info, remote, agentWaitInterrupted
+		case <-deadline:
+			return info, remote, agentWaitTimedOut
+		case <-tick.C:
+		}
+		latest, latestRemote, latestStale, found := lookupAgentRun(reg, id)
+		if !found {
+			return info, remote, agentWaitGone
+		}
+		info, remote, stale = latest, latestRemote, latestStale
+	}
+	return info, remote, agentWaitFinished
+}
+
 // Wait implements plugins.AgentsWatcher: blocks until the run is terminal,
 // ctx ends or timeout elapses. A finished run returns its Show detail; a
 // wait that runs out returns the current state with a hint, not an error.
@@ -147,37 +212,19 @@ func (a *liveAgentsAdapter) Wait(ctx context.Context, id string, timeout time.Du
 	if timeout <= 0 {
 		timeout = 2 * time.Minute
 	}
-	lookup := func() (runs.Info, bool, bool) {
-		if info, ok := a.reg.Get(id); ok {
-			return info, false, true
-		}
-		if r, found := findRemoteAgentRun(id); found {
-			return r.Info, true, true
-		}
-		return runs.Info{}, false, false
-	}
-	info, remote, ok := lookup()
-	if !ok {
-		return "", fmt.Errorf("@agents wait: no run with id %q (use list to see IDs)", id)
-	}
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	tick := time.NewTicker(agentsWaitPoll)
-	defer tick.Stop()
 	started := time.Now()
-	for !info.Status.Terminal() {
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("@agents wait: interrupted after %s while %s was still %s: %w",
-				time.Since(started).Round(time.Second), id, info.Status, ctx.Err())
-		case <-deadline.C:
-			detail, _ := a.Show(id)
-			return fmt.Sprintf(agentsMsgWaitTimedOut, timeout, id, info.Status, detail), nil
-		case <-tick.C:
-		}
-		if info, remote, ok = lookup(); !ok {
-			return "", fmt.Errorf("@agents wait: run %q disappeared from the registry while waiting", id)
-		}
+	info, remote, outcome := awaitAgentRun(ctx, a.reg, id, timeout, false)
+	switch outcome {
+	case agentWaitUnknown:
+		return "", fmt.Errorf("@agents wait: no run with id %q (use list to see IDs)", id)
+	case agentWaitInterrupted:
+		return "", fmt.Errorf("@agents wait: interrupted after %s while %s was still %s: %w",
+			time.Since(started).Round(time.Second), id, info.Status, ctx.Err())
+	case agentWaitTimedOut:
+		detail, _ := a.Show(id)
+		return fmt.Sprintf(agentsMsgWaitTimedOut, timeout, id, info.Status, detail), nil
+	case agentWaitGone:
+		return "", fmt.Errorf("@agents wait: run %q disappeared from the registry while waiting", id)
 	}
 	detail, err := a.Show(id)
 	if err != nil {
