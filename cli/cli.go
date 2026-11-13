@@ -585,6 +585,9 @@ type ChatCLI struct {
 	// cmdInterrupt is the slash command Ctrl+C would cancel right now
 	// (guarded by mu); see command_interrupt.go.
 	cmdInterrupt *commandInterrupt
+	// sideCommandDepth is above zero while a slash command typed during a
+	// turn is executing inside that turn (agent_side_commands.go).
+	sideCommandDepth atomic.Int32
 	// schedulerBridge is the in-process CLIBridge implementation. The
 	// agent loop reaches it via ChatCLI when handling @park parking
 	// (snapshot enqueue) and resume notifications. Nil when the

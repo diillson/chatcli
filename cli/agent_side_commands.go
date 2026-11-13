@@ -124,5 +124,11 @@ func (a *AgentMode) execSideCommand(ctx context.Context, line string) {
 	if a.cli == nil || a.cli.commandHandler == nil {
 		return
 	}
+	// A side command runs inside the turn: on the stdin reader or at the
+	// turn boundary. Mark it so a command that can hold the prompt (a
+	// blocking wait) declines to — a hold here stalls the reader, and with
+	// it the very agents and prompts the turn is waiting on.
+	a.cli.sideCommandDepth.Add(1)
+	defer a.cli.sideCommandDepth.Add(-1)
 	a.cli.commandHandler.HandleCommand(ctx, line)
 }

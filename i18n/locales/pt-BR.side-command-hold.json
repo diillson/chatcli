@@ -1,0 +1,3 @@
+{
+  "scheduler.wait.block_mid_turn": "Há um turno rodando: segurar aqui travaria o próprio turno. O job roda em segundo plano."
+}
