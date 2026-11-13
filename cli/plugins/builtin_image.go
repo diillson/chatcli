@@ -94,7 +94,7 @@ Subcommands (cmd + args):
        mask      optional path to a PNG mask for inpainting
        strength  optional 0..1 — how much to change the input (img2img)
        out       optional output file path or directory
-  models {provider?, live?}
+  models {provider?, catalogOnly?}
        per backend: which models it offers to this account (live listing
        where the provider has one, else the catalog), gen/edit support,
        shutdown dates, Bedrock regions
@@ -107,7 +107,7 @@ Subcommands (cmd + args):
 }
 
 // Version is semver.
-func (*BuiltinImagePlugin) Version() string { return "1.1.0" }
+func (*BuiltinImagePlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinImagePlugin) Path() string { return "" }
@@ -148,7 +148,7 @@ func (*BuiltinImagePlugin) Schema() string {
 				"description": "List image models per backend: availability on this account (live), gen/edit support, shutdown dates, Bedrock regions.",
 				"flags": []map[string]interface{}{
 					{"name": "provider", "type": "string", "required": false, "description": "Only this backend: openai|responses|google|xai|zai|minimax|bedrock|sdwebui|url."},
-					{"name": "live", "type": "boolean", "required": false, "description": "Ask the providers' APIs (default true); false = catalog only, no network."},
+					{"name": "catalogOnly", "type": "boolean", "required": false, "description": "true: answer from the built-in catalog, no network. Omitted: ask the providers' APIs."},
 				},
 				"examples": []string{`{"cmd":"models"}`, `{"cmd":"models","args":{"provider":"bedrock"}}`},
 			},
@@ -200,7 +200,7 @@ func (p *BuiltinImagePlugin) ExecuteWithStream(ctx context.Context, args []strin
 			Live     *bool  `json:"live"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
-		live := in.Live == nil || *in.Live
+		live := (in.Live == nil || *in.Live) && !imageCatalogOnly(inner)
 		if in.Provider != "" {
 			if _, ok := imagegen.LookupBackend(in.Provider); !ok {
 				return "", fmt.Errorf("@image models: unknown provider %q (valid: openai, responses, google, xai, zai, minimax, bedrock, sdwebui, url)", in.Provider)
@@ -448,4 +448,16 @@ func canonicalImageCmd(s string) string {
 		return "use"
 	}
 	return ""
+}
+
+// imageCatalogOnly reports whether a models call asked for the built-in
+// catalog only. It is the positive form of live=false, which the agent
+// loop drops when it flattens the call, so a model could never ask for the
+// offline listing.
+func imageCatalogOnly(inner string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(inner), &raw); err != nil {
+		return false
+	}
+	return jsonBool(raw, "catalogOnly", "catalog_only", "catalog-only", "offline")
 }
