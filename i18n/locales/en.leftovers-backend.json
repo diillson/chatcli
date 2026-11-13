@@ -1,0 +1,7 @@
+{
+  "leftovers.park.describe.prune": "Pruning parked snapshots nobody is waiting on",
+  "leftovers.park_note.usage": "usage: /park-note [--token <token>] <message> — send a directive to a parked agent, delivered when it resumes (without --token: the most recently parked agent of this session)",
+  "leftovers.park_note.unknown_flag": "/park-note: unknown flag %s — the only flag is --token <token>; to send a message that begins with dashes, put -- before it",
+  "leftovers.park_note.queued": "noted for parked agent %s, delivered when it resumes — /resume %s to wake it now",
+  "complete.leftovers.park_note.token": "send the note to this park instead of the most recent one: --token <token> <message>"
+}

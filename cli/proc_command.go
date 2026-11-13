@@ -10,13 +10,15 @@
  * only: starting stays with the model, behind the command validator.
  * Nothing here reads stdin or waits: stop only REQUESTS the stop (the
  * supervisor does TERM→KILL on its own goroutine), so a headless caller or
- * the mid-run stdin reader is never held. The process table belongs to the
- * chatcli PROCESS, not to one session: on a multi-session server every
- * session sees and can stop the same processes, as the tool always could.
+ * the mid-run stdin reader is never held. The supervisor belongs to the
+ * chatcli PROCESS, but each session reads its own table of it: on a
+ * multi-session server /proc lists and stops what THAT session's agent
+ * started, and another session's id answers like one that does not exist.
  */
 package cli
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -90,15 +92,16 @@ func parseProcCommand(userInput string) (procCommandArgs, error) {
 	return out, nil
 }
 
-// handleProcCommand routes /proc subcommands.
-func (cli *ChatCLI) handleProcCommand(userInput string) {
+// handleProcCommand routes /proc subcommands over the process table of the
+// session ctx is marked with (the terminal's when it carries none).
+func (cli *ChatCLI) handleProcCommand(ctx context.Context, userInput string) {
 	args, err := parseProcCommand(userInput)
 	if err != nil {
 		fmt.Println(colorize("  "+err.Error(), ColorYellow))
 		fmt.Println(colorize("  "+i18n.T("proc.cmd.usage"), ColorGray))
 		return
 	}
-	sup := (&procToolAdapter{cli: cli}).supervisor()
+	sup := (&procToolAdapter{cli: cli, owner: proc.OwnerFrom(ctx)}).supervisor()
 	if args.sub == "list" {
 		infos := sup.List()
 		if len(infos) == 0 {
@@ -122,7 +125,7 @@ func (cli *ChatCLI) handleProcCommand(userInput string) {
 }
 
 // procCommandResult renders status, logs or stop of one process.
-func procCommandResult(sup *proc.Supervisor, args procCommandArgs) (string, error) {
+func procCommandResult(sup *proc.Table, args procCommandArgs) (string, error) {
 	switch args.sub {
 	case "stop":
 		info, err := sup.StopAsync(args.id)

@@ -15,7 +15,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/i18n"
@@ -60,13 +62,62 @@ func (cli *ChatCLI) latestActivePark() (activePark, bool) {
 	return cli.activeParks[len(cli.activeParks)-1], true
 }
 
-// handleParkNoteCommand implements /park-note <msg>: persist the text as
-// a directive for the most recently parked agent of this session.
+// parkNoteArgs is one parsed /park-note invocation.
+type parkNoteArgs struct {
+	token    string // prefix given with --token
+	hasToken bool
+	text     string
+}
+
+// parseParkNoteArgs reads "[--token <token>] <message>". Flags are read
+// only at the start, so a message is free text from its first word on; a
+// message that itself begins with dashes goes after a bare "--". An
+// unknown leading flag is an error rather than text: a mistyped --tokne
+// would otherwise be delivered to the wrong agent as part of the note.
+func parseParkNoteArgs(rest string) (parkNoteArgs, error) {
+	rest = strings.TrimSpace(rest)
+	first, tail, _ := strings.Cut(rest, " ")
+	tail = strings.TrimSpace(tail)
+	switch {
+	case first == "--":
+		return parkNoteArgs{text: tail}, nil
+	case first == "--token":
+		value, text, _ := strings.Cut(tail, " ")
+		if value == "" || strings.HasPrefix(value, "--") {
+			return parkNoteArgs{}, errors.New(i18n.T("execparity.flag_needs_value", "--token"))
+		}
+		return parkNoteArgs{token: value, hasToken: true, text: strings.TrimSpace(text)}, nil
+	case strings.HasPrefix(first, "--token="):
+		value := strings.TrimPrefix(first, "--token=")
+		if value == "" {
+			return parkNoteArgs{}, errors.New(i18n.T("execparity.flag_needs_value", "--token"))
+		}
+		return parkNoteArgs{token: value, hasToken: true, text: tail}, nil
+	case strings.HasPrefix(first, "--"):
+		return parkNoteArgs{}, errors.New(i18n.T("leftovers.park_note.unknown_flag", first))
+	}
+	return parkNoteArgs{text: rest}, nil
+}
+
+// handleParkNoteCommand implements /park-note [--token <token>] <msg>:
+// persist the text as a directive for the named park, or without --token
+// for the most recently parked agent of this session.
 func (cli *ChatCLI) handleParkNoteCommand(text string) {
-	if text == "" {
-		fmt.Println(colorize("  "+i18n.T("park.note.usage"), ColorYellow))
+	args, err := parseParkNoteArgs(text)
+	if err != nil {
+		fmt.Println(colorize("  "+err.Error(), ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("leftovers.park_note.usage"), ColorGray))
 		return
 	}
+	if args.text == "" {
+		fmt.Println(colorize("  "+i18n.T("leftovers.park_note.usage"), ColorYellow))
+		return
+	}
+	if args.hasToken {
+		cli.parkNoteByToken(args.token, args.text)
+		return
+	}
+	text = args.text
 	p, ok := cli.latestActivePark()
 	if !ok {
 		fmt.Println(colorize("  "+i18n.T("park.note.none"), ColorYellow))
@@ -88,6 +139,27 @@ func (cli *ChatCLI) handleParkNoteCommand(text string) {
 		short = short[:8]
 	}
 	fmt.Println(colorize("  💬 "+i18n.T("park.directive.queued", p.ResumeAtDisplay, short), ColorCyan))
+}
+
+// parkNoteByToken records text for the park a token (or unique prefix)
+// names, resolved over the snapshots on disk as /resume and /cancel-park
+// do — so it also reaches a park another session created. An unknown or
+// ambiguous token is reported and nothing is recorded.
+func (cli *ChatCLI) parkNoteByToken(prefix, text string) {
+	token, err := cli.resolveParkToken(prefix)
+	if err != nil {
+		fmt.Println(colorize("  "+err.Error(), ColorYellow))
+		return
+	}
+	if err := park.AppendDirective(token, text); err != nil {
+		if cli.logger != nil {
+			cli.logger.Warn("park: directive persist failed", zap.String("token", token), zap.Error(err))
+		}
+		fmt.Println(colorize("  ⚠ "+i18n.T("park.note.failed", err), ColorYellow))
+		return
+	}
+	short := parkShort(token)
+	fmt.Println(colorize("  💬 "+i18n.T("leftovers.park_note.queued", short, short), ColorCyan))
 }
 
 // maybeShowParkNoteHint prints a one-line reminder — once per park — when

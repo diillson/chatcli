@@ -9,7 +9,9 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/diillson/chatcli/cli/agent/park"
 )
@@ -75,6 +77,40 @@ func (a *liveParkAdapter) DiscardPark(token string) (string, error) {
 		out += fmt.Sprintf(" (its scheduler job could not be cancelled: %v)", jobErr)
 	}
 	return out, nil
+}
+
+// PrunePark implements plugins.ParkPruner over the sweep /parked prune runs.
+// Waiting parks are named in the result: the model asked for a cleanup and
+// must learn that those were left alone on purpose, not missed.
+func (a *liveParkAdapter) PrunePark(olderThan string) (string, error) {
+	if a == nil || a.cli == nil {
+		return "", errors.New("park runtime not bound to the CLI")
+	}
+	var age time.Duration
+	scope := "all snapshots"
+	if strings.TrimSpace(olderThan) != "" {
+		d, err := parseParkAge(olderThan)
+		if err != nil {
+			return "", fmt.Errorf("older_than %q is not a positive age (use a duration such as 24h, or whole days such as 7d)", olderThan)
+		}
+		age, scope = d, "snapshots older than "+d.String()
+	}
+	rep := a.cli.sweepDeadParks(age)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "pruned %d parked snapshot(s) nobody was waiting on (%s).", len(rep.removed), scope)
+	if len(rep.live) > 0 {
+		short := make([]string, 0, len(rep.live))
+		for _, token := range rep.live {
+			short = append(short, parkShort(token))
+		}
+		sort.Strings(short)
+		fmt.Fprintf(&sb, "\nkept %d park(s) still waiting, which prune never removes: %s. To end one on purpose use {\"cmd\":\"discard\",\"args\":{\"token\":\"<prefix>\"}}.",
+			len(short), strings.Join(short, ", "))
+	}
+	for _, e := range rep.errs {
+		fmt.Fprintf(&sb, "\ncould not delete %v", e)
+	}
+	return sb.String(), nil
 }
 
 // wakePark resumes a parked agent now with the given outcome, here or in

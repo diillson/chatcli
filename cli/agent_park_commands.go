@@ -445,37 +445,76 @@ func (cli *ChatCLI) dropPendingResume(token string) {
 // snapshot file is dead weight — the agent has either resumed (and
 // the snapshot was kept for forensics) or the job will never fire.
 func (cli *ChatCLI) parkPrune() {
-	snaps, _ := park.List()
-	if len(snaps) == 0 {
+	if snaps, _ := park.List(); len(snaps) == 0 {
 		fmt.Println(colorize("  "+i18n.T("park.list.empty"), ColorGray))
 		return
 	}
-	removed := 0
-	kept := 0
-	for _, s := range snaps {
-		terminal := false
-		if cli.scheduler != nil && s.SchedulerJobID != "" {
-			j, err := cli.scheduler.Query(scheduler.JobID(s.SchedulerJobID))
-			if err != nil || j == nil {
-				// Missing job means the snapshot is orphaned — prune it.
-				terminal = true
-			} else {
-				terminal = j.Status.IsTerminal()
-			}
-		} else {
-			// No scheduler reference → treat as orphaned.
-			terminal = true
-		}
-		if terminal {
-			if err := park.Delete(s.Token); err == nil {
-				removed++
-			}
-		} else {
-			kept++
-		}
+	rep := cli.sweepDeadParks(0)
+	for _, e := range rep.errs {
+		fmt.Println(colorize("  ⚠ "+e.Error(), ColorYellow))
 	}
 	fmt.Printf("  %s: %d removed, %d still pending\n",
-		colorize("✓ parked prune", ColorGreen), removed, kept)
+		colorize("✓ parked prune", ColorGreen), len(rep.removed), len(rep.live))
+}
+
+// parkSweepReport is what one sweep of the snapshot directory did.
+type parkSweepReport struct {
+	removed []string // tokens deleted
+	live    []string // tokens kept: an agent is still waiting on them
+	errs    []error  // snapshots that could not be deleted
+}
+
+// sweepDeadParks deletes the snapshots no agent is waiting on any more and
+// never a live one. With olderThan > 0 only snapshots created before that
+// age are looked at. The one body of /parked prune and @park prune.
+func (cli *ChatCLI) sweepDeadParks(olderThan time.Duration) parkSweepReport {
+	var rep parkSweepReport
+	snaps, _ := park.List()
+	cutoff := time.Now().Add(-olderThan)
+	for _, s := range snaps {
+		if olderThan > 0 && !s.CreatedAt.Before(cutoff) {
+			continue
+		}
+		if cli.parkStillWaiting(s) {
+			rep.live = append(rep.live, s.Token)
+			continue
+		}
+		if err := park.Delete(s.Token); err != nil {
+			rep.errs = append(rep.errs, fmt.Errorf("%s: %w", parkShort(s.Token), err))
+			continue
+		}
+		rep.removed = append(rep.removed, s.Token)
+	}
+	return rep
+}
+
+// parkStillWaiting reports whether an agent can still be woken through s.
+// A park with a turn blocked on it or a resume already queued here, or that
+// another live process mirrors, is waiting whatever this scheduler says: a
+// fired job is terminal while its resume still needs the snapshot, and the
+// other process's job is unknown here — reading "missing" as "orphaned"
+// deleted the snapshot under an agent about to resume. Otherwise the
+// scheduler job decides: terminal, missing or absent means nobody wakes it.
+func (cli *ChatCLI) parkStillWaiting(s *park.Snapshot) bool {
+	if cli.parkWaiter(s.Token) != nil || cli.hasPendingResume(s.Token) {
+		return true
+	}
+	if _, alive := remoteParkLiveOwner(s.Token); alive {
+		return true
+	}
+	if cli.scheduler == nil || s.SchedulerJobID == "" {
+		return false
+	}
+	j, err := cli.scheduler.Query(scheduler.JobID(s.SchedulerJobID))
+	if err != nil || j == nil {
+		return false
+	}
+	return !j.Status.IsTerminal()
+}
+
+// parkShort is the 8-character token prefix every park listing shows.
+func parkShort(token string) string {
+	return token[:min(8, len(token))]
 }
 
 // parkGC removes snapshots older than a Go duration regardless of

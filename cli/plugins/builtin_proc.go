@@ -67,6 +67,14 @@ type ProcWaiter interface {
 	LogsGrep(id, pattern string, tail int) (string, error)
 }
 
+// ProcScoper is an OPTIONAL capability of the wired ProcAdapter: one
+// process table per session. ForContext returns the adapter bound to the
+// session ctx belongs to, so a call on a multi-session server lists, reads
+// and stops only what that session started.
+type ProcScoper interface {
+	ForContext(ctx context.Context) ProcAdapter
+}
+
 type procAdapterHolder struct{ a ProcAdapter }
 
 var procAdapterAtom atomic.Value // procAdapterHolder
@@ -121,12 +129,17 @@ Workflow: start the server, wait {"id":"p1","pattern":"listening on"} until it
 is ready, exercise it (e.g. @coder exec curl), read logs (grep "error" for
 the failures), stop it when done. Interactive flow:
 start {"command":"python3","pty":true} → stdin {"id":"p1","text":"1+1"} →
-logs to read the REPL's answer. Everything still running dies with the
-session.`
+logs to read the REPL's answer. The ids are this session's own: processes
+other sessions of the same chatcli started are not listed and cannot be
+reached. Everything still running dies with chatcli.
+
+Only the arguments listed above are read: an unknown one, or one missing
+its value, is an error and nothing starts or stops. The command to run is
+ONE value — its own flags go inside it ("npm run dev -- --port 3000").`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinProcPlugin) Version() string { return "1.1.0" }
+func (*BuiltinProcPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinProcPlugin) Path() string { return "" }
@@ -213,6 +226,9 @@ func (p *BuiltinProcPlugin) ExecuteWithStream(ctx context.Context, args []string
 	adapter := currentProcAdapter()
 	if adapter == nil {
 		return "", errors.New("@proc: no process adapter wired in this session")
+	}
+	if scoper, ok := adapter.(ProcScoper); ok {
+		adapter = scoper.ForContext(ctx)
 	}
 	if len(args) == 0 {
 		return "", errors.New(`@proc: empty args. Example: <tool_call name="@proc" args='{"cmd":"list"}' />`)
@@ -307,7 +323,7 @@ func (p *BuiltinProcPlugin) ExecuteWithStream(ctx context.Context, args []string
 	case "list":
 		return adapter.List()
 	default:
-		return "", fmt.Errorf("@proc: unknown cmd %q (valid: start|stdin|status|logs|stop|remove|list)", cmd)
+		return "", fmt.Errorf("@proc: unknown cmd %q (valid: %s)", cmd, procValidCmds)
 	}
 }
 
@@ -333,7 +349,7 @@ func procInvocationCmd(args []string) string {
 func parseProcInvocation(args []string) (string, string, error) {
 	payload := strings.TrimSpace(strings.Join(args, " "))
 	if payload == "" {
-		return "", "", fmt.Errorf(`missing cmd (valid: start|status|logs|stop|remove|list). Expected {"cmd":"start","args":{"command":"..."}}`)
+		return "", "", fmt.Errorf(`missing cmd (valid: start|stdin|wait|status|logs|stop|remove|list). Expected {"cmd":"start","args":{"command":"..."}}`)
 	}
 
 	if strings.HasPrefix(payload, "{") {
@@ -347,7 +363,7 @@ func parseProcInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalProcCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: start|status|logs|stop|remove|list)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: %s)", cmdStr, procValidCmds)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -357,49 +373,22 @@ func parseProcInvocation(args []string) (string, string, error) {
 			b, _ := json.Marshal(raw)
 			inner = string(b)
 		}
-		return canon, inner, nil
+		inner, err := procCheckEnvelope(canon, inner)
+		return canon, inner, err
 	}
 
 	canon := canonicalProcCmd(args[0])
 	if canon == "" {
-		return "", "", fmt.Errorf("unknown cmd %q (valid: start|status|logs|stop|remove|list)", args[0])
+		return "", "", fmt.Errorf("unknown cmd %q (valid: %s)", args[0], procValidCmds)
 	}
 	// The agent flattener delivers the {cmd,args} envelope as "--flag value"
-	// pairs (folding the "command" key onto "cmd"); the legacy positional
-	// forms ("start npm run dev" / "logs p1") stay supported when no flag
-	// token is present.
-	tail := args[1:]
-	if !hasFlagToken(tail) {
-		in := map[string]interface{}{}
-		if len(tail) > 0 {
-			if canon == "start" {
-				in["command"] = strings.Join(tail, " ")
-			} else {
-				in["id"] = tail[0]
-			}
-		}
-		b, _ := json.Marshal(in)
-		return canon, string(b), nil
-	}
-	primary := "id"
-	if canon == "start" {
-		primary = "command"
-	}
-	inner := argvInner(tail, primary, nil, map[string]bool{"tail": true})
-	var m map[string]interface{}
-	if err := json.Unmarshal([]byte(inner), &m); err == nil {
-		if v, ok := m["cmd"]; ok {
-			if _, has := m["command"]; !has {
-				m["command"] = v
-			}
-			delete(m, "cmd")
-			if b, err := json.Marshal(m); err == nil {
-				inner = string(b)
-			}
-		}
-	}
-	return canon, inner, nil
+	// pairs; the positional forms ("start npm run dev" / "logs p1") stay.
+	inner, err := procArgvToInner(canon, args[1:])
+	return canon, inner, err
 }
+
+// procValidCmds names the subcommands in the errors about an unknown one.
+const procValidCmds = "start|stdin|wait|status|logs|stop|remove|list"
 
 // canonicalProcCmd folds aliases onto the canonical subcommand names.
 func canonicalProcCmd(cmd string) string {

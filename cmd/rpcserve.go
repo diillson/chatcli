@@ -924,7 +924,7 @@ func (b *rpcBackend) RunCommand(ctx context.Context, session, line string) (stri
 			return b.runSessionCommand(ctx, session, []string{"new"})
 		}
 	}
-	return b.cli.RunSlashCommandRPC(ctx, line)
+	return b.cli.RunSlashCommandRPC(cli.WithProcSession(ctx, session), line)
 }
 
 type errCLI string

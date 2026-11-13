@@ -1,0 +1,7 @@
+{
+  "leftovers.park.describe.prune": "Removendo snapshots estacionados que ninguém está aguardando",
+  "leftovers.park_note.usage": "uso: /park-note [--token <token>] <mensagem> — envia uma diretiva a um agent estacionado, entregue quando ele retomar (sem --token: o agent estacionado mais recente desta sessão)",
+  "leftovers.park_note.unknown_flag": "/park-note: flag desconhecida %s — a única flag é --token <token>; para enviar uma mensagem que começa com hifens, coloque -- antes dela",
+  "leftovers.park_note.queued": "anotado para o agent estacionado %s, entregue quando ele retomar — /resume %s para acordá-lo agora",
+  "complete.leftovers.park_note.token": "envia a nota a este park em vez do mais recente: --token <token> <mensagem>"
+}

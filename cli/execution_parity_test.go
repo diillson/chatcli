@@ -374,7 +374,7 @@ func TestDetachedTaskGraphRunAsksOnlyALiveTurn(t *testing.T) {
 			defer coder.SetSecurityPromptSalvage(nil)
 			pa.setStdinCh(stale) // what a finished turn leaves behind
 			live := map[bool]chan string{true: stdin}[c.reading]
-			pa.liveStdin = func() <-chan string { return live }
+			pa.liveStdin = func() (<-chan string, <-chan struct{}) { return live, nil }
 			got := make(chan string, 2)
 			var once sync.Once // the reviewer's dispatch would ask again
 			a := newTestTaskGraphAdapter(t)

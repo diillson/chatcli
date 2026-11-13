@@ -38,7 +38,9 @@ func TestProcCommandParseRejects(t *testing.T) {
 func TestProcCommandSeesAndStopsWhatTheToolStarted(t *testing.T) {
 	cli := &ChatCLI{logger: zap.NewNop()}
 	t.Cleanup(cli.shutdownProcSupervisor)
-	run := func(line string) string { return captureStdout(t, func() { cli.handleProcCommand(line) }) }
+	run := func(line string) string {
+		return captureStdout(t, func() { cli.handleProcCommand(context.Background(), line) })
+	}
 	if out := run("/proc"); !strings.Contains(out, i18n.T("proc.cmd.none_tracked")) {
 		t.Fatalf("empty list: %q", out)
 	}

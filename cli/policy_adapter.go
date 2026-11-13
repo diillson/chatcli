@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
@@ -36,8 +37,9 @@ type workerPolicyAdapter struct {
 	stdinCh <-chan string
 
 	// liveStdin is the agent loop's stdin channel while its reader runs, nil
-	// otherwise. A detached run asks through it: stdinCh outlives the turn.
-	liveStdin func() <-chan string
+	// otherwise, with the channel that reader's teardown closes. A detached
+	// run asks through it: stdinCh outlives the turn.
+	liveStdin func() (<-chan string, <-chan struct{})
 
 	// unattended marks a run with no human to answer an "ask" prompt
 	// (gateway, server, RPC surfaces): PromptSecurityCheck would block on a
@@ -87,11 +89,52 @@ func (a *workerPolicyAdapter) setStdinCh(ch <-chan string) {
 	a.stdinCh = ch
 }
 
-// liveStdinLines is the stdin channel while the reader goroutine runs.
-func (a *AgentMode) liveStdinLines() <-chan string {
+// liveStdinLines is the stdin channel while the reader goroutine runs, with
+// the channel that same reader's teardown closes.
+func (a *AgentMode) liveStdinLines() (<-chan string, <-chan struct{}) {
 	a.stdinMu.Lock()
 	defer a.stdinMu.Unlock()
-	return a.stdinLines
+	if a.stdinLines == nil {
+		return nil, nil
+	}
+	return a.stdinLines, a.stdinDone
+}
+
+// chanClosed reports whether ch is closed; a nil channel never is.
+func chanClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// promptWhileReaderLives runs ask, ending it as soon as readerGone closes.
+// A detached run's prompt reads the turn's stdin channel; once the turn
+// tears its reader down nothing feeds it again, and the prompt held the
+// worker until its timeout. abandoned: it ended that way, not by an answer.
+func promptWhileReaderLives(ctx context.Context, readerGone <-chan struct{}, ask func(context.Context) coder.SecurityDecision) (decision coder.SecurityDecision, abandoned bool) {
+	if readerGone == nil {
+		return ask(ctx), false
+	}
+	promptCtx, cancel := context.WithCancel(ctx)
+	var left atomic.Bool
+	watcher := make(chan struct{})
+	go func() {
+		defer close(watcher)
+		select {
+		case <-readerGone:
+			left.Store(true)
+			cancel()
+		case <-promptCtx.Done():
+		}
+	}()
+	decision = ask(promptCtx)
+	cancel()
+	<-watcher
+	// An answer given as the reader left is still the user's answer.
+	return decision, left.Load() && decision == coder.DecisionCanceled
 }
 
 // pauseSpinner stops the spinner output. The Timer.onPause callback
@@ -180,9 +223,10 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		// A detached task-graph run is the same case, unless the agent turn
 		// that started it is reading stdin NOW (else nobody feeds the prompt).
 		stdinCh, nobody := a.stdinCh, a.unattended
+		var readerGone <-chan struct{}
 		if detached, fromTurn := plugins.TaskGraphDetached(ctx); detached {
 			if stdinCh = nil; fromTurn && a.liveStdin != nil {
-				stdinCh = a.liveStdin()
+				stdinCh, readerGone = a.liveStdin()
 			}
 			nobody = nobody || stdinCh == nil
 		}
@@ -220,6 +264,14 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 			return false, "AÇÃO BLOQUEADA (Regra de Segurança). NÃO TENTE NOVAMENTE."
 		}
 
+		// The turn may have ended while this call queued behind another
+		// worker's prompt: do not draw a box nobody can answer.
+		if chanClosed(readerGone) {
+			a.logger.Info("Worker tool call denied (the turn's stdin reader went away before the prompt)",
+				zap.String("tool", toolName))
+			return false, i18n.T("agent.policy.unattended_denied", toolName)
+		}
+
 		// Pause spinner so the prompt renders cleanly
 		a.pauseSpinner()
 
@@ -227,7 +279,9 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		secCtx := buildSecurityContext(ctx)
 
 		// Prompt the user with full context
-		decision := coder.PromptSecurityCheckWithContextGuarded(ctx, toolName, args, secCtx, stdinCh)
+		decision, abandoned := promptWhileReaderLives(ctx, readerGone, func(promptCtx context.Context) coder.SecurityDecision {
+			return coder.PromptSecurityCheckWithContextGuarded(promptCtx, toolName, args, secCtx, stdinCh)
+		})
 		pattern := coder.GetSuggestedPattern(toolName, args)
 
 		// Clear the prompt area and resume spinner
@@ -235,6 +289,13 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		a.resumeSpinner()
 		if a.restoreInput != nil {
 			a.restoreInput()
+		}
+		if abandoned {
+			// The turn ended between the liveness check and the answer:
+			// nobody is left to ask, which is the unattended case.
+			a.logger.Info("Worker tool call denied (the turn's stdin reader went away before an answer)",
+				zap.String("tool", toolName))
+			return false, i18n.T("agent.policy.unattended_denied", toolName)
 		}
 
 		switch decision {

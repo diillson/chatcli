@@ -37,11 +37,15 @@ type WaitResult struct {
 // output counts, including lines written before the wait began: a server
 // that announced its port a second ago is ready now.
 func (s *Supervisor) WaitFor(ctx context.Context, id string, re *regexp.Regexp, timeout time.Duration) (WaitResult, error) {
+	return s.waitForOwned(ctx, nil, id, re, timeout)
+}
+
+func (s *Supervisor) waitForOwned(ctx context.Context, owner *string, id string, re *regexp.Regexp, timeout time.Duration) (WaitResult, error) {
 	s.mu.Lock()
 	mp, ok := s.procs[id]
-	if !ok {
+	if !ok || !mp.ownedBy(owner) {
 		defer s.mu.Unlock()
-		return WaitResult{}, s.unknownIDErrLocked(id)
+		return WaitResult{}, s.unknownIDErrLocked(owner, id)
 	}
 	s.mu.Unlock()
 
@@ -99,11 +103,15 @@ func firstMatchingLine(out string, re *regexp.Regexp) (string, bool) {
 // LogsMatching returns the lines of the process's output that re matches
 // (the last tailLines of them), with the count of matches and of lines.
 func (s *Supervisor) LogsMatching(id string, re *regexp.Regexp, tailLines int) (lines []string, matched, total int, info Info, err error) {
+	return s.logsMatchingFor(nil, id, re, tailLines)
+}
+
+func (s *Supervisor) logsMatchingFor(owner *string, id string, re *regexp.Regexp, tailLines int) (lines []string, matched, total int, info Info, err error) {
 	s.mu.Lock()
 	mp, ok := s.procs[id]
-	if !ok {
+	if !ok || !mp.ownedBy(owner) {
 		defer s.mu.Unlock()
-		return nil, 0, 0, Info{}, s.unknownIDErrLocked(id)
+		return nil, 0, 0, Info{}, s.unknownIDErrLocked(owner, id)
 	}
 	info = mp.info
 	s.mu.Unlock()
