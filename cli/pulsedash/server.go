@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/pkg/pulse"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 //go:embed assets/dash.html
@@ -68,6 +69,7 @@ type Server struct {
 	host  string
 	url   string
 	page  []byte
+	raw   []byte
 	srv   *http.Server
 
 	mu        sync.Mutex
@@ -94,7 +96,7 @@ func Start(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("pulsedash: listening: %w", err)
 	}
 
-	s := &Server{opts: opts, token: hex.EncodeToString(tok[:]), host: ln.Addr().String()}
+	s := &Server{opts: opts, token: hex.EncodeToString(tok[:]), host: ln.Addr().String(), raw: raw}
 	s.url = "http://" + s.host + "/?t=" + s.token
 	if s.page, err = renderPage(raw, opts); err != nil {
 		_ = ln.Close()
@@ -119,6 +121,9 @@ type boot struct {
 	Theme   map[string]string `json:"theme"`
 	Strings map[string]string `json:"strings"`
 	Self    string            `json:"self"`
+	// WebTheme is the terminal theme for the page's theme switch. It also
+	// travels on every instances poll, so an open page follows a change.
+	WebTheme theme.WebPayload `json:"web_theme"`
 }
 
 func renderPage(raw []byte, opts Options) ([]byte, error) {
@@ -128,7 +133,7 @@ func renderPage(raw []byte, opts Options) ([]byte, error) {
 	}
 	// json.Marshal escapes <, > and & as < etc., so the payload cannot
 	// close the script element it is injected into.
-	payload, err := json.Marshal(boot{Lang: lang, Theme: opts.Theme, Strings: opts.Strings, Self: opts.Self})
+	payload, err := json.Marshal(boot{Lang: lang, Theme: opts.Theme, Strings: opts.Strings, Self: opts.Self, WebTheme: theme.ActiveWebPayload()})
 	if err != nil {
 		return nil, fmt.Errorf("pulsedash: encoding boot data: %w", err)
 	}
@@ -190,7 +195,13 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(s.page)
+	// Rendered per request: a reload after a theme change must paint the new
+	// theme at once, not the one the server started under.
+	page, err := renderPage(s.raw, s.opts)
+	if err != nil {
+		page = s.page
+	}
+	_, _ = w.Write(page)
 }
 
 // guard enforces method, Host and token on the API, and counts a valid call
@@ -224,7 +235,7 @@ func (s *Server) handleInstances(w http.ResponseWriter, _ *http.Request) {
 	for _, m := range metas {
 		rows = append(rows, instanceRow{Meta: m, Alive: m.Alive(now)})
 	}
-	writeJSON(w, map[string]interface{}{"instances": rows, "now": now})
+	writeJSON(w, map[string]interface{}{"instances": rows, "now": now, "theme": theme.ActiveWebPayload()})
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

@@ -21,12 +21,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 // apiError is the JSON body of every failed API call.
@@ -80,10 +82,11 @@ type apiRoute struct {
 var routes = []apiRoute{
 	{http.MethodGet, "boot", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleBoot(w, r) }},
 	{http.MethodGet, "status", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) {
-		writeJSON(w, http.StatusOK, s.opts.Backend.Status())
+		writeJSON(w, http.StatusOK, statusPayload{Status: s.opts.Backend.Status(), WebTheme: theme.ActiveWebPayload()})
 	}},
 	{http.MethodGet, "providers", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) { s.handleProviders(w) }},
 	{http.MethodPost, "defaults", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleDefaults(w, r) }},
+	{http.MethodPost, cli.WebThemeResource, 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleTheme(w, r) }},
 	{http.MethodPost, "turn", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleTurn(w, r) }},
 	{http.MethodPost, "runs", 2, func(s *Server, w http.ResponseWriter, r *http.Request, rest []string) {
 		s.handleRunAction(w, r, rest[0], rest[1])
@@ -211,6 +214,22 @@ func (s *Server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 	s.opts.Backend.SetDefaults(strings.TrimSpace(req.Provider), strings.TrimSpace(req.Model))
 	p, m := s.opts.Backend.Defaults()
 	writeJSON(w, http.StatusOK, map[string]string{"provider": p, "model": m})
+}
+
+// handleTheme takes the theme the terminal switched to. This process is a
+// child of the terminal and inherited its theme only at spawn; the terminal
+// posts every later change here, and the next status poll carries it to the
+// page. An unknown name changes nothing.
+func (s *Server) handleTheme(w http.ResponseWriter, r *http.Request) {
+	var req cli.WebThemeRequest
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if err := theme.SetActive(req.Theme); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_theme", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"theme": theme.Active().Name})
 }
 
 // turnRequest is what the page sends to start a turn.

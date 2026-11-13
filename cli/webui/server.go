@@ -26,6 +26,7 @@ import (
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 const (
@@ -101,7 +102,6 @@ type Server struct {
 	token string
 	host  string
 	url   string
-	page  []byte
 	srv   *http.Server
 	log   *zap.Logger
 	voice *voiceState
@@ -159,7 +159,6 @@ func Start(opts Options) (*Server, error) {
 
 	s := &Server{opts: opts, token: hex.EncodeToString(tok[:]), host: ln.Addr().String(), log: opts.Logger, voice: newVoiceState(opts)}
 	s.url = "http://" + s.host + "/?t=" + s.token
-	s.page = s.renderPage()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -223,7 +222,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(s.page)
+	// Rendered per request: a reload after a theme change must paint the new
+	// theme at once, not the one the server started under.
+	_, _ = w.Write(s.renderPage())
 }
 
 // pageTokenParam is the query parameter that carries the token on the page
@@ -254,6 +255,15 @@ type boot struct {
 	ThemeVars map[string]string            `json:"theme_vars,omitempty"`
 	Version   string                       `json:"version"`
 	Features  features                     `json:"features"`
+	// WebTheme feeds the page's theme switch; it also travels on every
+	// status poll, so an open page follows a theme change in this process.
+	WebTheme theme.WebPayload `json:"web_theme"`
+}
+
+// statusPayload is the status poll: the backend status plus the theme.
+type statusPayload struct {
+	Status
+	WebTheme theme.WebPayload `json:"web_theme"`
 }
 
 type features struct {
@@ -279,7 +289,7 @@ func (s *Server) bootData() boot {
 	if lang == "" {
 		lang = "en"
 	}
-	return boot{Lang: lang, Strings: s.opts.Strings, Catalogs: UICatalogs(), ThemeName: s.opts.ThemeName, ThemeVars: s.opts.ThemeVars, Version: s.opts.Version, Features: s.features()}
+	return boot{Lang: lang, Strings: s.opts.Strings, Catalogs: UICatalogs(), ThemeName: s.opts.ThemeName, ThemeVars: s.opts.ThemeVars, Version: s.opts.Version, Features: s.features(), WebTheme: theme.ActiveWebPayload()}
 }
 
 func (s *Server) renderPage() []byte {

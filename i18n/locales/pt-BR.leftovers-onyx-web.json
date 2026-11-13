@@ -1,0 +1,11 @@
+{
+  "web.ui.skin": "Tema",
+  "web.ui.skin.terminal": "terminal",
+  "web.ui.skin.default": "padrão",
+  "web.ui.skin.attach": "anexar",
+  "web.ui.skin.image": "imagem",
+  "web.ui.skin.mic": "microfone",
+  "dash.ui.skin": "Tema",
+  "dash.ui.skin.terminal": "terminal",
+  "dash.ui.skin.default": "padrão"
+}

@@ -263,6 +263,7 @@ var dashStringKeys = []string{
 	"tile.cost", "tile.requests", "tile.active", "tile.ctx", "tile.errors", "recent_min", "brand_sub", "processes",
 	"kind.session", "kind.agent", "kind.turn", "kind.llm", "kind.tool", "kind.skill", "kind.mcp", "kind.pattern",
 	"kind.background", "kind.conn", "kind.rpc",
+	"skin", "skin.terminal", "skin.default",
 }
 
 func dashStrings() map[string]string {

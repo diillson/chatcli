@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli/taskgraph"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 //go:embed assets/dash.html
@@ -48,6 +49,25 @@ var dashHTML []byte
 
 // readHeaderTimeout bounds header reads on the local listener.
 const readHeaderTimeout = 10 * time.Second
+
+// bootPlaceholder is where the page receives its boot JSON.
+const bootPlaceholder = "__TASKGRAPH_BOOT__"
+
+// boot is what the page receives at load. The theme also travels on every
+// events poll, so an open page follows a terminal theme change.
+type boot struct {
+	WebTheme theme.WebPayload `json:"web_theme"`
+}
+
+// renderPage injects the boot JSON. json.Marshal escapes <, > and &, so the
+// payload cannot close the script element it lands in.
+func renderPage(raw []byte) []byte {
+	payload, err := json.Marshal(boot{WebTheme: theme.ActiveWebPayload()})
+	if err != nil {
+		payload = []byte("{}")
+	}
+	return bytes.Replace(raw, []byte(bootPlaceholder), payload, 1)
+}
 
 const (
 	tokenHeader = "X-Dash-Token" // #nosec G101 -- the NAME of the request header, not a credential; the token is random per server
@@ -148,7 +168,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(dashHTML)
+	_, _ = w.Write(renderPage(dashHTML))
 }
 
 // handleRuns lists persisted runs, newest first.
@@ -232,7 +252,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		next = i + 1
 	}
-	writeJSON(w, map[string]interface{}{"events": events, "next": next})
+	writeJSON(w, map[string]interface{}{"events": events, "next": next, "theme": theme.ActiveWebPayload()})
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
