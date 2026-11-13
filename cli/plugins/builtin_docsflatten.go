@@ -135,7 +135,8 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
             stays Markdown, code/config chunk structurally, other text windows.
   maxPages  max pages to crawl when using url (default: 50)
   maxDepth  max BFS link depth from the seed when using url (default: 2)
-  sameHost  only follow links on the seed's host when crawling (default: true)
+  crossHost follow links to other hosts too when crawling (default: only
+            the seed's host)
   branch    branch to clone (default: main)
   subdir    docs subdirectory inside the repo (e.g. "docs")
   format    text | jsonl | json | yaml (default: text; use jsonl for
@@ -144,7 +145,8 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
   maxSize   skip files larger than this many bytes (default: 1048576 = 1 MiB)
   include   comma-separated globs to include (** supported, e.g. src/**/*.go)
   exclude   comma-separated globs to exclude
-  stripFrontMatter  remove front matter, keep title as heading (default: true)
+  keepFrontMatter   keep the front matter as is (default: removed, with
+                    its title kept as a heading)
   images    describe | markers | estimate (default: describe). Diagrams
             (mermaid, PlantUML, dot, d2, draw.io, SVG) always get a text
             summary of their flows and image references become
@@ -166,7 +168,7 @@ Flags (flat JSON or {"cmd":"flatten","args":{...}} envelope):
 }
 
 // Version is semver. 2.x marks the builtin port of the 1.x external example.
-func (*BuiltinDocsFlattenPlugin) Version() string { return "2.2.0" }
+func (*BuiltinDocsFlattenPlugin) Version() string { return "2.3.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinDocsFlattenPlugin) Path() string { return "" }
@@ -189,7 +191,7 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 					{"name": "kind", "type": "string", "description": "docs | code | auto. Default: docs (Markdown only, legacy). code = ingest source/Terraform/YAML/shell with structure-aware chunking and symbol titles — use this for an app/infra/GitOps repo. auto = per-file (Markdown stays Markdown, code/config chunk structurally, other text windows)."},
 					{"name": "maxPages", "type": "integer", "description": "Max pages to crawl when using url. Default: 50."},
 					{"name": "maxDepth", "type": "integer", "description": "Max BFS link depth from the seed when using url. Default: 2."},
-					{"name": "sameHost", "type": "boolean", "description": "When crawling url, only follow links on the seed's host. Default: true."},
+					{"name": "crossHost", "type": "boolean", "description": "true: when crawling url, also follow links to other hosts. Omitted: only the seed's host."},
 					{"name": "branch", "type": "string", "description": "Branch to clone (only with repo). Default: main."},
 					{"name": "subdir", "type": "string", "description": "Subdirectory inside the repo (only with repo), e.g. 'docs' or 'modules'."},
 					{"name": "format", "type": "string", "description": "text | jsonl | json | yaml. Default: text. Use jsonl for knowledge corpora."},
@@ -197,7 +199,7 @@ func (*BuiltinDocsFlattenPlugin) Schema() string {
 					{"name": "maxSize", "type": "integer", "description": "Skip files larger than this many bytes. Default: 1048576 (1 MiB)."},
 					{"name": "include", "type": "string", "description": "Comma-separated include globs, ** crosses directories (e.g. 'src/**/*.go'). Bare names match by basename."},
 					{"name": "exclude", "type": "string", "description": "Comma-separated exclude globs (e.g. 'node_modules/**,*.lock')."},
-					{"name": "stripFrontMatter", "type": "boolean", "description": "Strip YAML/TOML front matter, re-emitting its title as a heading. Default: true."},
+					{"name": "keepFrontMatter", "type": "boolean", "description": "true: keep YAML/TOML front matter as is. Omitted: it is stripped and its title re-emitted as a heading."},
 					{"name": "images", "type": "string", "description": "describe | markers | estimate. Diagrams (mermaid, PlantUML, dot, d2, draw.io, SVG) always get a text summary of their flows and image references become [image: alt — path] markers. Default describe: ALSO describe every referenced image (PNG, JPEG, GIF, WebP; BMP and TIFF are converted to PNG — architecture diagrams, screenshots) with the session's vision model into its own chunk, so the corpus keeps what the pictures show; cached, so re-runs are free. markers: no model call (the corpus only knows each image's alt text and path). estimate: count images and tokens, no model call."},
 					{"name": "maxImages", "type": "integer", "description": "Optional cap on images described per run. Default: no cap, every referenced image is described."},
 					{"name": "confirmImages", "type": "boolean", "description": "Set to true ONLY after the user agreed to describe all the images. When more than 20 images still need a vision description, the run STOPS before describing (nothing is written) and reports how many and the estimated tokens: ask the user (use @ask) whether to describe them all, then re-run with confirmImages=true, or maxImages=N, or images=markers."},
@@ -338,6 +340,22 @@ type docsFlattenProvenance struct {
 	Commit  string
 }
 
+// docsFlattenStripFrontMatter reads whether front matter is stripped, def
+// being the default. keepFrontMatter is the positive spelling of
+// stripFrontMatter=false: a false boolean does not survive the flattening
+// the agent loop applies to a tool call, so the only way to turn the
+// default off was the one value that never arrived.
+func docsFlattenStripFrontMatter(raw map[string]json.RawMessage, def bool) bool {
+	strip := def
+	if v, present := jsonBoolLookup(raw, "stripFrontMatter", "strip-front-matter"); present {
+		strip = v
+	}
+	if jsonBool(raw, "keepFrontMatter", "keep-front-matter", "keep_front_matter") {
+		strip = false
+	}
+	return strip
+}
+
 // parseDocsFlattenArgs supports flat JSON, the {"cmd","args"} envelope and
 // --flag argv form.
 func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
@@ -391,9 +409,7 @@ func parseDocsFlattenArgs(args []string) (docsFlattenArgs, error) {
 	}
 	out.Include = splitDocsFlattenCSV(jsonString(raw, "include"))
 	out.Exclude = splitDocsFlattenCSV(jsonString(raw, "exclude"))
-	if v, present := jsonBoolLookup(raw, "stripFrontMatter", "strip-front-matter"); present {
-		out.StripFrontMatter = v
-	}
+	out.StripFrontMatter = docsFlattenStripFrontMatter(raw, out.StripFrontMatter)
 	out.Output = jsonString(raw, "output", "out")
 	if v := strings.ToLower(jsonString(raw, "kind")); v != "" {
 		out.Kind = v
@@ -463,6 +479,10 @@ func parseDocsFlattenCrawlArgs(raw map[string]json.RawMessage, out *docsFlattenA
 	if v, present := jsonBoolLookup(raw, "sameHost", "same-host"); present {
 		out.SameHost = v
 	}
+	// Positive spelling: see keepFrontMatter.
+	if jsonBool(raw, "crossHost", "cross-host", "cross_host", "anyHost") {
+		out.SameHost = false
+	}
 }
 
 // validateDocsFlattenSource enforces that exactly one of root|repo|url is set
@@ -529,12 +549,20 @@ func docsFlattenArgvToMap(args []string) (map[string]json.RawMessage, error) {
 		}
 		key := strings.TrimPrefix(a, "--")
 		val := ""
-		if eq := strings.Index(key, "="); eq >= 0 {
+		switch eq := strings.Index(key, "="); {
+		case eq >= 0:
 			val = key[eq+1:]
 			key = key[:eq]
-		} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+		case i+1 < len(args) && !strings.HasPrefix(args[i+1], "--"):
 			val = args[i+1]
 			i++
+		default:
+			// A flag with no value is a true boolean: that is how the
+			// agent loop writes one when it flattens a call. Stored as an
+			// empty string it read as false, so confirmImages=true (and
+			// every other boolean) never reached this tool in agent mode.
+			raw[key] = json.RawMessage("true")
+			continue
 		}
 		v, _ := json.Marshal(trimQuotes(val))
 		raw[key] = v

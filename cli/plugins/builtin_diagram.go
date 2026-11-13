@@ -359,8 +359,10 @@ render — DOT source to an image. Use this for architecture/flow diagrams; writ
 
 gomod — render the REAL import graph of a Go module (no manual enumeration).
   root          module directory to analyze (default: ".")
-  internalOnly  only edges between packages of this module (default: true)
-  cluster       group packages into clusters by top-level directory (default: true)
+  allDeps       also draw third-party dependencies (default: only edges
+                between packages of this module)
+  ungrouped     do not group packages into clusters by top-level directory
+                (default: grouped)
   style         dark | light | plain (default: dark)
   dotOnly       return the generated DOT source instead of an image (default: false)
   format/engine/dpi/output  same as render
@@ -373,7 +375,7 @@ identical to a system render); the embedded raster path uses bundled Go fonts.`
 }
 
 // Version is semver. 1.x: initial builtin.
-func (*BuiltinDiagramPlugin) Version() string { return "1.0.0" }
+func (*BuiltinDiagramPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinDiagramPlugin) Path() string { return "" }
@@ -411,8 +413,8 @@ func (*BuiltinDiagramPlugin) Schema() string {
 					"Point root at the module directory. Labels are the actual package paths, grouped into clusters by top-level directory. Use dotOnly=true to get the DOT source for further editing.",
 				"flags": []map[string]interface{}{
 					{"name": "root", "type": "string", "description": "Module directory to analyze. Default: '.'."},
-					{"name": "internalOnly", "type": "boolean", "description": "Only edges between packages of this module (drop third-party deps). Default: true."},
-					{"name": "cluster", "type": "boolean", "description": "Group packages into clusters by top-level directory. Default: true."},
+					{"name": "allDeps", "type": "boolean", "description": "true: also draw third-party dependencies. Omitted: only edges between packages of this module."},
+					{"name": "ungrouped", "type": "boolean", "description": "true: do not group packages into clusters. Omitted: grouped by top-level directory."},
 					{"name": "style", "type": "string", "description": "dark | light | plain. Default: dark."},
 					{"name": "dotOnly", "type": "boolean", "description": "Return the generated DOT source instead of rendering an image. Default: false."},
 					{"name": "format", "type": "string", "description": "png | svg | jpg. Default: png."},
@@ -424,7 +426,7 @@ func (*BuiltinDiagramPlugin) Schema() string {
 				"examples": []string{
 					`{"cmd":"gomod","root":".","output":"/tmp/imports.svg","format":"svg"}`,
 					`{"cmd":"gomod","root":"./cli","dotOnly":true}`,
-					`{"cmd":"gomod","root":".","internalOnly":false,"dpi":300}`,
+					`{"cmd":"gomod","root":".","allDeps":true,"dpi":300}`,
 				},
 			},
 		},
@@ -668,6 +670,16 @@ func parseDiagramArgs(args []string) (diagramArgs, error) {
 	}
 	if v, present := jsonBoolLookup(raw, "cluster"); present {
 		out.Cluster = v
+	}
+	// The positive spellings exist because a false boolean does not
+	// survive the flattening the agent loop applies to a tool call: the
+	// only way to turn these defaults off was the one value that never
+	// arrived.
+	if jsonBool(raw, "allDeps", "all-deps", "all_deps", "externalDeps") {
+		out.InternalOnly = false
+	}
+	if jsonBool(raw, "ungrouped", "noCluster", "no-cluster", "no_cluster") {
+		out.Cluster = false
 	}
 	if v, present := jsonBoolLookup(raw, "dotOnly", "dot-only"); present {
 		out.DOTOnly = v

@@ -26,12 +26,10 @@ type connectArgs struct {
 	useLocalAuth, useTLS                           bool
 }
 
-// parseConnectArgs parses the flags of /connect <address> [flags] starting at
-// args[2]. Unknown flags are ignored (same lenient pattern as /switch).
-func parseConnectArgs(args []string) connectArgs {
-	var p connectArgs
-	// valueFlags maps each value-taking flag to the field it fills.
-	valueFlags := map[string]*string{
+// connectValueFlags maps each value-taking /connect flag to the field of p
+// it fills.
+func connectValueFlags(p *connectArgs) map[string]*string {
+	return map[string]*string{
 		"--token":      &p.token,
 		"--provider":   &p.provider,
 		"--model":      &p.model,
@@ -43,6 +41,39 @@ func parseConnectArgs(args []string) connectArgs {
 		"--agent-id":   &p.agentID,
 		"--ollama-url": &p.ollamaURL,
 	}
+}
+
+// connectArgsProblem returns what is wrong with a /connect line, as a
+// message for the user, or "" when it can be acted on. The parser below is
+// lenient by construction, and for this command that was dangerous as well
+// as confusing: a mistyped --tls connected in clear text, and a --token
+// with its value missing connected with no credentials — neither said so.
+func connectArgsProblem(args []string) string {
+	if len(args) < 2 || strings.HasPrefix(args[1], "-") {
+		return i18n.T("connect.error.address_missing")
+	}
+	var scratch connectArgs
+	valueFlags := connectValueFlags(&scratch)
+	for i := 2; i < len(args); i++ {
+		if _, ok := valueFlags[args[i]]; ok {
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				return i18n.T("connect.error.missing_value", args[i])
+			}
+			i++
+			continue
+		}
+		if args[i] != "--use-local-auth" && args[i] != "--tls" {
+			return i18n.T("connect.error.unknown_arg", args[i])
+		}
+	}
+	return ""
+}
+
+// parseConnectArgs parses the flags of /connect <address> [flags] starting at
+// args[2]. It assumes connectArgsProblem found nothing wrong.
+func parseConnectArgs(args []string) connectArgs {
+	var p connectArgs
+	valueFlags := connectValueFlags(&p)
 	for i := 2; i < len(args); i++ {
 		if dst, ok := valueFlags[args[i]]; ok {
 			if i+1 < len(args) {
@@ -79,7 +110,11 @@ func (ch *CommandHandler) handleConnectCommand(ctx context.Context, userInput st
 		return
 	}
 
-	// Parse arguments manually (same pattern as /switch)
+	if problem := connectArgsProblem(args); problem != "" {
+		fmt.Println(colorize(problem, ColorRed))
+		fmt.Println(colorize(i18n.T("connect.usage.main"), ColorYellow))
+		return
+	}
 	address := args[1]
 	parsed := parseConnectArgs(args)
 	token, provider, model, llmKey, caCert := parsed.token, parsed.provider, parsed.model, parsed.llmKey, parsed.caCert

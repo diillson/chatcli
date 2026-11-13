@@ -1,0 +1,5 @@
+{
+  "connect.error.address_missing": " ❌ /connect needs the server address first: /connect <host:port> [flags].",
+  "connect.error.missing_value": " ❌ %s needs a value.",
+  "connect.error.unknown_arg": " ❌ /connect does not understand %q. Nothing was connected."
+}
