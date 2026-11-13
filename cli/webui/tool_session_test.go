@@ -41,17 +41,23 @@ func TestDirectToolCallsCarryTheWebSession(t *testing.T) {
 	for name, c := range map[string]struct {
 		path string
 		body map[string]string
+		want string
 	}{
-		"inline @tool in a turn": {"/api/turn", map[string]string{"mode": "chat", "text": "@read x", "session": "s1"}},
-		"tools endpoint":         {"/api/tools/read", map[string]string{"args": "x", "session": "s1"}},
+		"inline @tool in a turn": {"/api/turn", map[string]string{"mode": "chat", "text": "@read x", "session": "s1"}, "session:s1"},
+		"tools endpoint":         {"/api/tools/read", map[string]string{"args": "x", "session": "s1"}, "session:s1"},
+		// No session named: the page's default session, as a turn resolves
+		// it — the same table for the tools endpoint and for turns.
+		"inline @tool, default session": {"/api/turn", map[string]string{"mode": "chat", "text": "@read x"}, "session:web"},
+		"tools endpoint, no session":    {"/api/tools/read", map[string]string{"args": "x"}, "session:web"},
+		"tools endpoint, blank session": {"/api/tools/read", map[string]string{"args": "x", "session": "  "}, "session:web"},
 	} {
 		if status, body := call(t, srv, http.MethodPost, c.path, c.body, true); status != http.StatusOK {
 			t.Fatalf("%s: status %d %s", name, status, body)
 		}
 		select {
 		case got := <-be.owners:
-			if got != "session:s1" {
-				t.Errorf("%s ran on the table of %q, want the web session's", name, got)
+			if got != c.want {
+				t.Errorf("%s ran on the table of %q, want %q", name, got, c.want)
 			}
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%s never reached the backend", name)

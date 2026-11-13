@@ -28,7 +28,6 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/lsp"
-	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
 	"github.com/diillson/chatcli/cli/agent/workers"
@@ -269,6 +268,8 @@ type ChatCLI struct {
 	replActive            bool   // true only inside the interactive Start() loop (gates the palette trigger)
 	promptRunning         bool   // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
 	themeReloadPending    bool   // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
+	promptDraft           string // initial text of the next prompt built (see offerPromptDraft); guarded by promptDraftMu
+	promptDraftMu         sync.Mutex
 	paletteRequested      bool   // a handler asked to open the command palette; the executor runs it in place
 	paletteTarget         string // command to scope the palette to ("" opens the categorized root)
 	suppressPaletteOnce   bool   // skip the palette trigger for the next handled command (the palette's own selection)
@@ -613,10 +614,7 @@ type ChatCLI struct {
 	// finished resuming (guarded by pendingResumeMu). They are in neither
 	// the queue nor, once their run starts, the active set — and their
 	// snapshots are exactly what the rest of the drain is about to load.
-	resumingParks map[string]bool
-	// resumeRun replaces AgentMode.RunResumed in runResumeForToken; nil in
-	// production. Tests drive the real drain with it instead of an LLM.
-	resumeRun func(ctx context.Context, snap *park.Snapshot, outcome, detail string) error
+	resumingParks map[string]int
 
 	// parkOutcomes carries the (outcome, detail) tuple from the
 	// NotifyParkComplete call to the consumer that runs RunResumed,
@@ -1389,6 +1387,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				cli.completer,
 				prompt.OptionParser(pasteParser),
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
+				// What a finished turn handed back (a line typed for a prompt
+				// that was withdrawn): on the input line, not submitted.
+				prompt.OptionInitialBufferText(cli.takePromptDraft()),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
 				// Input line + completion dropdown, painted from the ACTIVE
 				// theme (see prompt_theme.go). These used to be literals, so
@@ -1658,8 +1659,10 @@ func (cli *ChatCLI) restoreTerminal() {
 
 // Helper para executar lógica do agente com cancelamento via Ctrl+C
 func (cli *ChatCLI) runWithCancellation(parent context.Context, taskName string, fn func(context.Context) error) {
-	// Cria contexto cancelável derivado do contexto pai
-	ctx, cancel := context.WithCancel(parent)
+	// Cria contexto cancelável derivado do contexto pai. Every turn goes
+	// through here, so this is where a prompt command's operator mark stops:
+	// the turn it started is the model's, not the operator's.
+	ctx, cancel := context.WithCancel(withoutLocalOperator(parent))
 
 	// Registra o cancelamento na struct para acesso global se necessário
 	cli.mu.Lock()

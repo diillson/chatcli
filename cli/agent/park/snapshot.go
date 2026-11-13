@@ -46,6 +46,23 @@ type Snapshot struct {
 	// none and are simply never judged by it.
 	OwnerPID  int    `json:"owner_pid,omitempty"`
 	OwnerHost string `json:"owner_host,omitempty"`
+	// OwnerPIDNS is the pid namespace OwnerPID was read in (Linux; empty
+	// elsewhere). Two containers can share a hostname and this directory
+	// while their pids mean different processes: a pid is only ever
+	// checked from the namespace that recorded it.
+	OwnerPIDNS string `json:"owner_pid_ns,omitempty"`
+
+	// ResumeState is how far a resume of this snapshot got: empty when
+	// none was ever attempted, ResumeRunning while one runs, ResumeDone
+	// when it completed (the run parked again and left this one behind),
+	// ResumeRetry when it failed and the snapshot was kept for /resume.
+	// LastResumeAt alone only says a resume STARTED. Resumer* name the
+	// process running it, so a resume whose process died is not read as
+	// in progress forever. Additive.
+	ResumeState  string `json:"resume_state,omitempty"`
+	ResumerPID   int    `json:"resumer_pid,omitempty"`
+	ResumerHost  string `json:"resumer_host,omitempty"`
+	ResumerPIDNS string `json:"resumer_pid_ns,omitempty"`
 
 	// History is the cli.history at park time. Restored verbatim.
 	History []models.Message `json:"history"`
@@ -112,6 +129,13 @@ type Snapshot struct {
 	PendingUserDirectives []string `json:"pending_user_directives,omitempty"`
 }
 
+// The values of Snapshot.ResumeState.
+const (
+	ResumeRunning = "running"
+	ResumeDone    = "done"
+	ResumeRetry   = "retry"
+)
+
 var (
 	// ErrSnapshotNotFound is returned by Load when the token has no file.
 	ErrSnapshotNotFound = errors.New("park: snapshot not found")
@@ -169,7 +193,6 @@ func (s *Snapshot) Save() error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
 
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -181,13 +204,14 @@ func (s *Snapshot) Save() error {
 		return fmt.Errorf("park: encrypt snapshot: %w", err)
 	}
 
-	// #nosec G304 -- tmp path is built from s.Token which is validated
-	// against tokenRegexp ([a-zA-Z0-9._-]{8,128}) before reaching here;
-	// directory traversal is not possible.
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	// A temp file of this save's own (created 0600): two saves of one
+	// token sharing "<file>.tmp" could rename each other's half-written
+	// bytes into place.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("park: open tmp: %w", err)
 	}
+	tmp := f.Name()
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
@@ -210,21 +234,21 @@ func (s *Snapshot) Save() error {
 }
 
 // AppendDirective durably records a user message typed while the park
-// identified by token was waiting. Load-modify-save keeps the atomic-write
-// guarantees of Save; the interactive REPL is single-writer for a given
-// token, so no cross-process locking is needed. maxDirectives caps the
-// queue so a pathological session cannot balloon the snapshot.
+// identified by token was waiting. The load-modify-save runs under the
+// token's lock (see Update), so notes from the command, the tool and the
+// resume that consumes them never overwrite one another in this process;
+// across processes the caller must not write a park another one owns.
+// maxDirectives caps the queue so a pathological session cannot balloon
+// the snapshot.
 func AppendDirective(token, text string) error {
 	const maxDirectives = 20
-	snap, err := Load(token)
-	if err != nil {
-		return err
-	}
-	if len(snap.PendingUserDirectives) >= maxDirectives {
-		return fmt.Errorf("park: directive queue full (%d)", maxDirectives)
-	}
-	snap.PendingUserDirectives = append(snap.PendingUserDirectives, text)
-	return snap.Save()
+	return Update(token, func(snap *Snapshot) error {
+		if len(snap.PendingUserDirectives) >= maxDirectives {
+			return fmt.Errorf("park: directive queue full (%d)", maxDirectives)
+		}
+		snap.PendingUserDirectives = append(snap.PendingUserDirectives, text)
+		return nil
+	})
 }
 
 // Load reads a snapshot by token. ErrSnapshotNotFound when missing,

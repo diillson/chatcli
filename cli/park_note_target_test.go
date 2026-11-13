@@ -7,11 +7,13 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/diillson/chatcli/cli/agent/park"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
@@ -33,7 +35,7 @@ func TestParkNoteRefusesAParkThatWillNotReadIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snap.LastResumeAt = time.Now().Add(-time.Minute)
+	snap.LastResumeAt, snap.ResumeState = time.Now().Add(-time.Minute), park.ResumeDone
 	if err := snap.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +59,24 @@ func TestParkNoteRefusesAParkThatWillNotReadIt(t *testing.T) {
 	if out := note(remote); !strings.Contains(out, "gateway") {
 		t.Errorf("the refusal must name the surface that owns the park: %q", out)
 	}
+	// The @park note tool follows the same rules, from flattened argv.
+	plugins.SetParkCanceller(newLiveParkAdapter(cli))
+	t.Cleanup(func() { plugins.SetParkCanceller(nil) })
+	tool := plugins.NewBuiltinParkPlugin()
+	for name, token := range map[string]string{"resumed": resumed, "finished": finished, "remote": remote} {
+		out, err := tool.Execute(context.Background(), []string{"note", "--text", "from the model", "--token", token[:12]})
+		if err == nil || !strings.Contains(err.Error(), "othing was recorded") || parkDirectives(t, token) != "" {
+			t.Errorf("%s park: the tool's note must be refused and not written: %q %v", name, out, err)
+		}
+	}
+	if _, err := tool.Execute(context.Background(), []string{"note", "--text", "from the model", "--token", waiting[:12]}); err != nil || parkDirectives(t, waiting) != "from the model" {
+		t.Errorf("the tool's note for a waiting park must be recorded: %v", err)
+	}
+	if err := park.Delete(waiting); err != nil {
+		t.Fatal(err)
+	}
+	waiting = saveParkAged(t, time.Hour, enqueueParkJob(t, cli, false))
+
 	// A park that is still waiting, and that nobody else holds, takes it.
 	if out := note(waiting); !strings.Contains(out, i18n.T("leftovers.park_note.queued", parkShort(waiting), parkShort(waiting))) || parkDirectives(t, waiting) != "please read this" {
 		t.Errorf("a waiting park must take the note: %q", out)

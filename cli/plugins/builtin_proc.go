@@ -138,11 +138,15 @@ one table among themselves). Everything still running dies with chatcli.
 
 Only the arguments listed above are read: an unknown one, or one missing
 its value, is an error and nothing starts or stops. The command to run is
-ONE value — its own flags go inside it ("npm run dev -- --port 3000").`
+ONE value — its own flags go inside it ("npm run dev -- --port 3000") — and
+that value is passed to the shell exactly as given. Anything with
+shell syntax (pipes, redirections, quotes, $(...), several commands)
+belongs there, not in separate positional words, which are only re-quoted
+by best effort.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinProcPlugin) Version() string { return "1.2.1" }
+func (*BuiltinProcPlugin) Version() string { return "1.2.2" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinProcPlugin) Path() string { return "" }

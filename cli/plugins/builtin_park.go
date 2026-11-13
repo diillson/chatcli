@@ -69,7 +69,9 @@ Subcommands:
   list     {}                      — inspect parked agents (token, mode, wait, pending directives)
   note     {token?:"<prefix>", text:"..."} — leave a directive for a parked agent
             (newest park when token omitted; delivered at its resume — use it to
-            inform, redirect, or ask it to change its park cadence next cycle)
+            inform, redirect, or ask it to change its park cadence next cycle).
+            Refused, with nothing recorded, for a park that already resumed,
+            is finished, or is owned by another live process
   cancel   {token?:"<prefix>", reason?:"..."} — cancel a parked wait NOW: the
             scheduled wake is dropped and the agent resumes immediately with
             outcome=cancelled (newest park when token omitted). The user's
@@ -84,9 +86,10 @@ Subcommands:
             (their scheduler job ended, they already resumed, or the process
             that parked them is gone), as the user's /parked prune does.
             older_than limits it to snapshots older than that age. A park
-            that is still waiting, or whose state cannot be established from
-            here, is NEVER removed, at any age: it is listed as kept — use
-            discard to end one on purpose
+            that is still waiting, whose resume failed (the user may retry
+            it with /resume), or whose state cannot be established from here,
+            is NEVER removed, at any age: it is listed as kept — use discard
+            to end one on purpose
 
 cancel and resume both CONTINUE the parked agent (they differ in the outcome
 it is told); discard ENDS it. Durations always carry a unit ("30s", "5m").
@@ -106,7 +109,7 @@ cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.
-func (*BuiltinParkPlugin) Version() string { return "1.4.1" }
+func (*BuiltinParkPlugin) Version() string { return "1.4.2" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinParkPlugin) Path() string { return "" }
@@ -389,6 +392,13 @@ type ParkManager interface {
 	DiscardPark(token string) (string, error)
 }
 
+// ParkNoter is the optional part of the runtime hook behind note: it
+// records a directive for a park only when that park will read it and no
+// other live process owns its snapshot.
+type ParkNoter interface {
+	NotePark(token, text string) error
+}
+
 // ParkPruner is the optional part of the runtime hook behind prune — the
 // tool-side half of /parked prune. olderThan is "" or an age ("24h", "7d").
 type ParkPruner interface {
@@ -649,7 +659,14 @@ func executeParkNote(inner string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := park.AppendDirective(target.Token, text); err != nil {
+	// The runtime knows which parks will read a note and which belong to
+	// another process; without one (no CLI bound) the write is still
+	// serialized per token.
+	record := park.AppendDirective
+	if noter, ok := currentParkCanceller().(ParkNoter); ok {
+		record = noter.NotePark
+	}
+	if err := record(target.Token, text); err != nil {
 		return "", fmt.Errorf("note: %w", err)
 	}
 	return fmt.Sprintf(i18n.T("park.note.recorded"), parkShortToken(target.Token)), nil

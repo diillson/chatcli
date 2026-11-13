@@ -125,6 +125,10 @@ type Supervisor struct {
 	seq    map[string]int
 	procs  map[procKey]*managedProcess
 	closed bool
+	// handles gives each named owner a short stable name (o1, o2, ...) in
+	// the order they first started something. An owner is an arbitrary
+	// string a client chose; the operator addresses it by the handle.
+	handles map[string]int
 }
 
 // procKey names one tracked process: ids repeat across owners.
@@ -162,6 +166,7 @@ func NewSupervisor(validate Validator, logger *zap.Logger) *Supervisor {
 		logger:   logger,
 		validate: validate,
 		seq:      map[string]int{},
+		handles:  map[string]int{},
 		procs:    map[procKey]*managedProcess{},
 	}
 }
@@ -196,8 +201,7 @@ func (s *Supervisor) startFor(owner, command, dir string) (Info, error) {
 	}
 	setProcessGroup(cmd)
 
-	s.seq[owner]++
-	id := fmt.Sprintf("p%d", s.seq[owner])
+	id := s.nextIDLocked(owner)
 	mp := &managedProcess{
 		info:  Info{ID: id, Owner: owner, Command: command, Dir: dir, State: StateRunning, Started: time.Now()},
 		cmd:   cmd,
@@ -273,8 +277,7 @@ func (s *Supervisor) startPTYFor(owner, command, dir string) (Info, error) {
 		return Info{}, fmt.Errorf("start pty: %w", err)
 	}
 
-	s.seq[owner]++
-	id := fmt.Sprintf("p%d", s.seq[owner])
+	id := s.nextIDLocked(owner)
 	mp := &managedProcess{
 		info:  Info{ID: id, Owner: owner, Command: command, Dir: dir, State: StateRunning, Started: time.Now(), PTY: true},
 		cmd:   cmd,
@@ -556,13 +559,85 @@ func (s *Supervisor) admitLocked(owner string) error {
 		return nil
 	}
 	namedRunning, namedTracked := s.countLocked(named)
-	if namedRunning >= maxRunningHost {
-		return errHostAtCapacity
-	}
-	if namedTracked >= maxRetainedHost && s.evictableForLocked(owner) == (procKey{}) {
+	if namedRunning >= maxRunningHost || (namedTracked >= maxRetainedHost && s.evictableForLocked(owner) == (procKey{})) {
+		// The client is told nothing about the others; the server log is
+		// where whoever runs this host learns who holds the table — a
+		// headless server has no prompt to ask /proc list --all at.
+		s.logger.Warn("proc: start refused, host at capacity for session processes",
+			zap.String("refused", s.ownerLabelLocked(owner)),
+			zap.Int("running", namedRunning), zap.Int("running_ceiling", maxRunningHost),
+			zap.Int("tracked", namedTracked), zap.Int("tracked_ceiling", maxRetainedHost),
+			zap.String("holders", s.holdersLocked()))
 		return errHostAtCapacity
 	}
 	return nil
+}
+
+// nextIDLocked issues owner's next process id and, the first time a named
+// owner starts something, its handle.
+func (s *Supervisor) nextIDLocked(owner string) string {
+	if owner != "" && s.handles[owner] == 0 {
+		s.handles[owner] = len(s.handles) + 1
+	}
+	s.seq[owner]++
+	return fmt.Sprintf("p%d", s.seq[owner])
+}
+
+// ownerLabelLocked is an owner as the operator reads it: handle and name.
+func (s *Supervisor) ownerLabelLocked(owner string) string {
+	if n := s.handles[owner]; n > 0 {
+		return fmt.Sprintf("o%d %s", n, owner)
+	}
+	return owner
+}
+
+// holdersLocked lists every named owner with what it holds, for the log.
+func (s *Supervisor) holdersLocked() string {
+	type held struct{ running, tracked int }
+	byOwner := map[string]*held{}
+	for _, mp := range s.procs {
+		if mp.owner == "" {
+			continue
+		}
+		h := byOwner[mp.owner]
+		if h == nil {
+			h = &held{}
+			byOwner[mp.owner] = h
+		}
+		h.tracked++
+		if mp.info.State == StateRunning {
+			h.running++
+		}
+	}
+	parts := make([]string, 0, len(byOwner))
+	for owner, h := range byOwner {
+		parts = append(parts, fmt.Sprintf("%s running=%d tracked=%d", s.ownerLabelLocked(owner), h.running, h.tracked))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "; ")
+}
+
+// OwnerHandle returns the short stable handle of a named owner ("o1"), ""
+// for the terminal or an owner that never started a process.
+func (s *Supervisor) OwnerHandle(owner string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n := s.handles[owner]; n > 0 {
+		return fmt.Sprintf("o%d", n)
+	}
+	return ""
+}
+
+// OwnerOfHandle resolves a handle OwnerHandle issued back to its owner.
+func (s *Supervisor) OwnerOfHandle(handle string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for owner, n := range s.handles {
+		if fmt.Sprintf("o%d", n) == handle {
+			return owner, true
+		}
+	}
+	return "", false
 }
 
 // named selects the processes of the sessions, as opposed to the terminal's.

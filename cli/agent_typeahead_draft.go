@@ -143,8 +143,19 @@ func (a *AgentMode) announceParkedDraft(draft string) {
 	a.typeaheadMu.Unlock()
 	if !repeat {
 		parked := i18n.T("agent.typeahead.draft_parked", shown)
-		a.withLiveRowPaused(func() {
-			fmt.Println(flatNoticeOr(noticeInfo, parked, colorize("  ✎ "+parked, ColorGray)))
-		})
+		a.typeaheadNotice(flatNoticeOr(noticeInfo, parked, colorize("  ✎ "+parked, ColorGray)))
 	}
+}
+
+// typeaheadNotice prints the notices about what the user typed that the
+// loop did not take as typed: a draft set aside, a line handed back. They
+// are written from outside the loop's own rendering, so they share this
+// one way out to the terminal, which takes the live row down while it
+// writes: otherwise the row repaints over the notice.
+func (a *AgentMode) typeaheadNotice(lines ...string) {
+	a.withLiveRowPaused(func() {
+		for _, line := range lines {
+			fmt.Println(line)
+		}
+	})
 }

@@ -70,13 +70,13 @@ func TestProcCommandSeesAndStopsWhatTheToolStarted(t *testing.T) {
 	complete := func(line string) []string {
 		return suggestTexts(cli.getProcSuggestions(docWithCursor(line, len(line))))
 	}
-	if got := strings.Join(complete("/proc "), " "); got != "list status logs stop" {
+	if got := strings.Join(complete("/proc "), " "); got != "list status logs stop remove" {
 		t.Errorf("subcommands: %q", got)
 	}
 	if got := complete("/proc stop "); len(got) != 1 || got[0] != "p1" {
 		t.Errorf("live ids: %v", got)
 	}
-	if got := strings.Join(complete("/proc logs p1 "), " "); got != "--grep --tail" {
+	if got := strings.Join(complete("/proc logs p1 "), " "); got != "--grep --tail --owner" {
 		t.Errorf("logs flags: %q", got)
 	}
 	// stop only requests the stop; the supervisor terminates on its own.

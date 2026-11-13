@@ -20,7 +20,9 @@ package proc
 import (
 	"context"
 	"regexp"
+	"strings"
 	"time"
+	"unicode"
 )
 
 type ownerKey struct{}
@@ -28,7 +30,21 @@ type ownerKey struct{}
 // WithOwner returns ctx marked with the session whose process table the
 // calls made under it use.
 func WithOwner(ctx context.Context, owner string) context.Context {
-	return context.WithValue(ctx, ownerKey{}, owner)
+	return context.WithValue(ctx, ownerKey{}, CleanOwner(owner))
+}
+
+// CleanOwner strips control characters from an owner name. A session id is
+// whatever a client sent, and it ends up on the operator's terminal and in
+// telemetry attributes: an escape sequence in it would be executed by the
+// terminal that lists it. Applied where an owner enters (WithOwner), so
+// the table key, the listing and the telemetry all carry the clean name.
+func CleanOwner(owner string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, owner)
 }
 
 // OwnerFrom returns the session ctx was marked with, "" when none was.

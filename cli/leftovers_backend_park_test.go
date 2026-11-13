@@ -115,11 +115,11 @@ func newParkFleet(t *testing.T) parkFleet {
 		return remoteParkOwner{Instance: "other"}, token == f.remote
 	}})
 	t.Cleanup(func() { setRemoteParkProvider(nil) })
-	// A resume already consumed this one; it is kept for forensics.
+	// A resume of this one completed; it is kept for forensics.
 	f.resumed = saveParkAged(t, old, "job-purged-from-history")
 	snap, err := park.Load(f.resumed)
 	if err == nil {
-		snap.LastResumeAt = time.Now().Add(-time.Hour)
+		snap.LastResumeAt, snap.ResumeState = time.Now().Add(-time.Hour), park.ResumeDone
 		err = snap.Save()
 	}
 	if err != nil {

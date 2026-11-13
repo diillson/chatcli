@@ -519,14 +519,14 @@ func (s *Server) handleTool(w http.ResponseWriter, r *http.Request, name string)
 	var req struct {
 		Args string `json:"args"`
 		// Session scopes the call to a web session's state (its process
-		// table). Optional: a call without one gets the backend's table
-		// for sessionless callers, never the terminal's.
+		// table). Optional: resolved like a turn's, so a call without one
+		// runs for the page's default session.
 		Session string `json:"session"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	out, err := s.opts.Backend.CallTool(proc.WithSession(r.Context(), req.Session), name, req.Args)
+	out, err := s.opts.Backend.CallTool(proc.WithSession(r.Context(), s.sessionOf(req.Session)), name, req.Args)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "tool", err.Error())
 		return

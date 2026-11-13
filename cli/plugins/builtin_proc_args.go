@@ -162,25 +162,44 @@ func procArgvToInner(sub string, argv []string) (string, error) {
 }
 
 // procCommandLine turns the positional words of a start into the line the
-// shell runs. One word is already a whole line ("npm run dev") and stays
-// as it is. Several words are an argv, and one of them that carries
-// whitespace, or is empty, was a single quoted argument where it was
-// typed: joined bare it would split again (`sh -c "echo hi; sleep 5"`
-// became `sh -c echo hi; sleep 5`), so it is quoted for the shell. Words
-// without whitespace are left alone — `&&`, `|` and `>` typed between
-// commands keep meaning what they meant.
+// shell runs. The words were separate arguments where they were typed, and
+// joined bare they split again (`sh -c "echo hi; sleep 5"` became
+// `sh -c echo hi; sleep 5`), so a later word that the shell would re-read
+// is quoted. This is a best effort over argv; a line with real shell
+// syntax belongs in the command value, which is passed as it is.
 func procCommandLine(words []string) string {
-	if len(words) == 1 {
-		return words[0]
-	}
 	out := make([]string, len(words))
 	for i, w := range words {
 		out[i] = w
-		if w == "" || strings.ContainsAny(w, " \t\n") {
+		// The first word is the command, or a whole fragment of a command
+		// line ("npm run dev", "FOO=1 ./run.sh"): quoting it would make the
+		// shell look for a program of that full name.
+		if i > 0 && procNeedsQuoting(w) {
 			out[i] = procShellQuote(w)
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+// procShellOperators are the words that are shell syntax when they stand
+// alone between the words of a command line.
+var procShellOperators = map[string]bool{
+	"&&": true, "||": true, "|": true, "|&": true, ";": true, "&": true,
+	">": true, ">>": true, "<": true, "<<": true, "2>": true, "2>>": true,
+	"&>": true, "&>>": true, "2>&1": true, "1>&2": true, ">&2": true, ">&1": true,
+	"(": true, ")": true, "{": true, "}": true, "!": true,
+}
+
+// procNeedsQuoting reports whether a later positional word must be quoted
+// to reach the child as the one argument it was typed as: it is empty, or
+// carries whitespace, a quote, a backtick, a command substitution or a
+// command separator. A word that is itself an operator, a plain $VAR or a
+// glob is what the user meant the shell to read, and stays.
+func procNeedsQuoting(w string) bool {
+	if procShellOperators[w] {
+		return false
+	}
+	return w == "" || strings.ContainsAny(w, " \t\n\r'\"`;") || strings.Contains(w, "$(")
 }
 
 // procShellQuote quotes one argument for the platform shell the supervisor

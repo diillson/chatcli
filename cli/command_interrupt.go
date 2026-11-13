@@ -85,5 +85,9 @@ func (cli *ChatCLI) interruptCommandLocked() {
 func (cli *ChatCLI) runInterruptibleCommand(line string) bool {
 	ctx, release := cli.beginInterruptible(context.Background())
 	defer release()
-	return cli.commandHandler.HandleCommand(withLocalOperator(ctx), line)
+	// The person at the prompt typed this: the operator, for exactly as
+	// long as the handler runs.
+	ctx, done := withLocalOperator(ctx)
+	defer done()
+	return cli.commandHandler.HandleCommand(ctx, line)
 }

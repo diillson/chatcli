@@ -105,10 +105,37 @@ func (a *liveParkAdapter) PrunePark(olderThan string) (string, error) {
 		fmt.Fprintf(&sb, "\nkept %d park(s) whose state is unknown here (no scheduler in this process knows their job and no owner answered — they may be waiting in another process, or were created moments ago): %s. Prune never removes these; only the user can, by age, with /parked gc <age>.",
 			len(rep.unknown), strings.Join(parkShorts(rep.unknown), ", "))
 	}
+	if len(rep.retry) > 0 {
+		shorts := parkShorts(rep.retry)
+		fmt.Fprintf(&sb, "\nkept %d park(s) whose resume failed or was interrupted — the user was told to retry them and prune never removes these: %s. The user retries one with /resume %s; to end one on purpose use discard.",
+			len(shorts), strings.Join(shorts, ", "), shorts[0])
+	}
 	for _, e := range rep.errs {
 		fmt.Fprintf(&sb, "\ncould not delete %v", e)
 	}
 	return sb.String(), nil
+}
+
+// NotePark implements plugins.ParkNoter: the tool's note, under the rules
+// /park-note --token follows. A note for a park that will not read it, or
+// that another live process owns, is refused instead of written.
+func (a *liveParkAdapter) NotePark(token, text string) error {
+	if a == nil || a.cli == nil {
+		return errors.New("park runtime not bound to the CLI")
+	}
+	snap, err := park.Load(token)
+	if err != nil {
+		return err
+	}
+	switch st := a.cli.parkStatusOf(snap); {
+	case st.resumed:
+		return fmt.Errorf("park %s already resumed (or is resuming now): nobody would read the note; nothing was recorded", parkShort(token))
+	case st.verdict == parkFinished:
+		return fmt.Errorf("park %s is finished (its scheduled wake ended): nobody would read the note; nothing was recorded", parkShort(token))
+	case st.heldBy != "":
+		return fmt.Errorf("park %s is owned by another live process (%s), which rewrites its snapshot without a lock this process shares; the note must be sent from there. Nothing was recorded", parkShort(token), st.heldBy)
+	}
+	return park.AppendDirective(token, text)
 }
 
 // wakePark resumes a parked agent now with the given outcome, here or in
@@ -121,7 +148,10 @@ func (a *liveParkAdapter) wakePark(token, outcome, reason string) (string, error
 	if err != nil {
 		return "", err
 	}
-	if a.cli.hasPendingResume(token) || a.cli.wasRecentlyResumed(token) {
+	// The same notion the sweep uses: queued, taken by a drain, running or
+	// just resumed. A token the drain already took is in neither the queue
+	// nor the recent set, and waking it queued a second resume.
+	if a.cli.isResuming(token) {
 		return "", fmt.Errorf("park %s is already resuming", token)
 	}
 	reason = strings.TrimSpace(reason)

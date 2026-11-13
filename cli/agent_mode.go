@@ -96,6 +96,10 @@ type AgentMode struct {
 	isCoderMode      bool
 	isOneShot        bool
 	coderBannerShown bool
+	// resumeLoop replaces the ReAct loop of a resumed run; nil in production.
+	// Tests drive the real resume path (drain, inline wait, snapshot
+	// bookkeeping) with it instead of an LLM.
+	resumeLoop func(ctx context.Context) error
 	// inlineParkToken names the park this run is waiting on IN-TURN, set by
 	// handleAgentPark on unattended surfaces (ACP / MCP server / gateway)
 	// where no REPL exists to drain the resume queue. Run() sees the park
@@ -205,6 +209,9 @@ type AgentMode struct {
 	// back from one (guarded by stdinMu). See noteDetachedPrompt.
 	detachedPrompts      atomic.Int32
 	withdrawnPromptLines []string
+	// withdrawnCarry is the carry of the last teardown when it holds lines
+	// taken back from a withdrawn prompt, "" otherwise (guarded by stdinMu).
+	withdrawnCarry string
 	// stdinCarry is the half-typed line (no Enter yet) a teardown
 	// interrupted; the next reader spawn — or the line-editing prompt —
 	// picks it up so a suspend never eats keystrokes. Guarded by stdinMu.
@@ -521,6 +528,13 @@ func (a *AgentMode) stopStdinReader() {
 		return
 	}
 	a.teardownStdinReaderLocked()
+	// The turn is over: no later reader of this loop will pick the carry
+	// up. What a withdrawn permission prompt left on it goes to the next
+	// REPL prompt instead of being dropped right after it was announced.
+	if a.withdrawnCarry != "" && a.cli != nil {
+		a.cli.offerPromptDraft(a.withdrawnCarry)
+	}
+	a.withdrawnCarry = ""
 	a.stdinCarry = ""
 	coder.SetSecurityPromptSalvage(nil)
 	coder.SetSecurityPromptDraftParker(nil)
@@ -553,8 +567,12 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		// to nil the channel with the user's follow-up still inside it.
 		left := drainLinesNonBlocking(a.stdinLines)
 		a.stdinCarry = a.typeaheadPreviewSnapshot()
+		a.withdrawnCarry = ""
 		if promptOpen {
 			a.stdinCarry = a.parkWithdrawnPromptLines(left, a.stdinCarry)
+			if len(a.withdrawnPromptLines) > 0 {
+				a.withdrawnCarry = a.stdinCarry
+			}
 		} else {
 			a.salvageTypeahead(left)
 		}

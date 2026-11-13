@@ -142,10 +142,11 @@ func (a *AgentMode) announceWithdrawnPrompt() {
 	if len(lines) == 0 || (a.cli != nil && a.cli.unattended) {
 		return
 	}
-	fmt.Printf("\n  %s\n", colorize("⚠ "+i18n.T("leftovers.prompt.withdrawn"), ColorYellow))
+	notice := []string{"", colorize("  ⚠ "+i18n.T("leftovers.prompt.withdrawn"), ColorYellow)}
 	for _, line := range lines {
-		fmt.Printf("    %s\n", colorize("❯ "+sanitizeTypeaheadPreview(line), ColorGray))
+		notice = append(notice, colorize("    ❯ "+sanitizeTypeaheadPreview(line), ColorGray))
 	}
+	a.typeaheadNotice(notice...)
 }
 
 // chanClosed reports whether ch is closed; a nil channel never is.

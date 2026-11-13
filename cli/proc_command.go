@@ -23,6 +23,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -42,9 +43,10 @@ type procCommandArgs struct {
 	id   string
 	grep *regexp.Regexp
 	tail int
-	// all (list) and owner (stop) look across process-table owners; only
-	// the terminal's prompt may. byOwner tells "--owner terminal" (the
-	// empty owner) from no --owner at all.
+	// all (list) and owner (status, logs, stop, remove) look across
+	// process-table owners; only the terminal's prompt may. owner is as
+	// typed — a handle, a name or "terminal" — and byOwner tells it from no
+	// --owner at all.
 	all     bool
 	owner   string
 	byOwner bool
@@ -56,17 +58,23 @@ const procTerminalOwner = "terminal"
 
 // procCommandFlags are the flags each /proc subcommand reads.
 var procCommandFlags = map[string]map[string]bool{
-	"list": {"--all": true},
-	"logs": {"--grep": true, "--tail": true},
-	"stop": {"--owner": true},
+	"list":   {"--all": true},
+	"status": {"--owner": true},
+	"logs":   {"--grep": true, "--tail": true, "--owner": true},
+	"stop":   {"--owner": true},
+	"remove": {"--owner": true},
 }
 
 // parseProcCommand reads "/proc <sub> [id] [--grep re] [--tail N]". What it
 // does not understand is an error: a mistyped stop must never act.
 func parseProcCommand(userInput string) (procCommandArgs, error) {
-	fields := strings.Fields(userInput)[1:]
 	out := procCommandArgs{sub: "list"}
-	if len(fields) == 0 {
+	// Quote-aware: an owner is an arbitrary string and may hold spaces.
+	fields, err := splitContextArgs(userInput)
+	if err != nil {
+		return out, err
+	}
+	if fields = fields[1:]; len(fields) == 0 {
 		return out, nil
 	}
 	switch sub := strings.ToLower(fields[0]); sub {
@@ -77,6 +85,8 @@ func parseProcCommand(userInput string) (procCommandArgs, error) {
 		out.sub = "stop"
 	case "status", "st":
 		out.sub = "status"
+	case "remove", "rm":
+		out.sub = "remove"
 	default:
 		return out, fmt.Errorf("%s", i18n.T("proc.cmd.unknown_sub", fields[0]))
 	}
@@ -92,10 +102,7 @@ func parseProcCommand(userInput string) (procCommandArgs, error) {
 			return out, fmt.Errorf("%s", i18n.T("execparity.flag_needs_value", tok))
 		case tok == "--owner":
 			i++
-			out.byOwner = true
-			if out.owner = fields[i]; out.owner == procTerminalOwner {
-				out.owner = ""
-			}
+			out.byOwner, out.owner = true, fields[i]
 		case tok == "--grep":
 			i++
 			re, err := regexp.Compile("(?i)" + fields[i])
@@ -129,6 +136,7 @@ func (cli *ChatCLI) handleProcCommand(ctx context.Context, userInput string) {
 	if err != nil {
 		fmt.Println(colorize("  "+err.Error(), ColorYellow))
 		fmt.Println(colorize("  "+i18n.T("proc.cmd.usage"), ColorGray))
+		fmt.Println(colorize("  "+i18n.T("leftovers.proc.usage_remove"), ColorGray))
 		if isLocalOperator(ctx) {
 			fmt.Println(colorize("  "+i18n.T("leftovers.proc.usage_operator"), ColorGray))
 		}
@@ -144,10 +152,10 @@ func (cli *ChatCLI) handleProcCommand(ctx context.Context, userInput string) {
 			return
 		}
 		if args.all {
-			printProcAllOwners(adapter.processSupervisor().List())
+			printProcAllOwners(adapter.processSupervisor())
 			return
 		}
-		adapter.owner = args.owner
+		adapter.owner = resolveProcOwner(adapter.processSupervisor(), args.owner)
 	}
 	sup := adapter.supervisor()
 	if args.sub == "list" {
@@ -161,9 +169,14 @@ func (cli *ChatCLI) handleProcCommand(ctx context.Context, userInput string) {
 		return
 	}
 	out, err := procCommandResult(sup, args)
+	if errors.Is(err, errProcStillRunning) {
+		fmt.Println(colorize("  "+i18n.T("leftovers.proc.remove_running", args.id), ColorYellow))
+		return
+	}
 	if err != nil {
-		// The supervisor only fails on an id it does not track, and words
-		// that for the model ("use @proc start"): answer in /proc terms.
+		// Otherwise the supervisor only fails on an id it does not track,
+		// and words that for the model ("use @proc start"): answer in
+		// /proc terms.
 		fmt.Println(colorize("  "+i18n.T("proc.cmd.unknown_id", args.id), ColorYellow))
 		return
 	}
@@ -172,30 +185,57 @@ func (cli *ChatCLI) handleProcCommand(ctx context.Context, userInput string) {
 	}
 }
 
+// errProcStillRunning refuses the removal of a process that still runs.
+var errProcStillRunning = errors.New("process is running")
+
 // printProcAllOwners is /proc list --all: every tracked process, each
-// under the owner whose table holds it.
-func printProcAllOwners(infos []proc.Info) {
+// under the owner whose table holds it, with the handle to address it by.
+func printProcAllOwners(sup *proc.Supervisor) {
+	infos := sup.List()
 	if len(infos) == 0 {
 		fmt.Println(colorize("  "+i18n.T("proc.cmd.none_tracked"), ColorGray))
 		return
 	}
 	sort.SliceStable(infos, func(i, j int) bool { return infos[i].Owner < infos[j].Owner })
 	for _, info := range infos {
-		fmt.Printf("  - [%s] %s\n", procOwnerName(info.Owner), procHumanLine(info))
+		fmt.Printf("  - [%s] %s\n", procOwnerLabel(sup, info.Owner), procHumanLine(info))
 	}
 }
 
-// procOwnerName is an owner as the operator reads and types it.
-func procOwnerName(owner string) string {
+// procOwnerLabel is an owner as the operator reads it: "terminal", or the
+// handle followed by the name. The name is a string a client chose: it is
+// printed with control characters stripped, whatever it went through.
+func procOwnerLabel(sup *proc.Supervisor, owner string) string {
 	if owner == "" {
 		return procTerminalOwner
 	}
-	return owner
+	return strings.TrimSpace(sup.OwnerHandle(owner) + " " + proc.CleanOwner(owner))
+}
+
+// resolveProcOwner reads what the operator typed after --owner: the
+// terminal, a handle from /proc list --all, or the owner's name itself.
+func resolveProcOwner(sup *proc.Supervisor, typed string) string {
+	if typed == procTerminalOwner {
+		return ""
+	}
+	if owner, ok := sup.OwnerOfHandle(typed); ok {
+		return owner
+	}
+	return typed
 }
 
 // procCommandResult renders status, logs or stop of one process.
 func procCommandResult(sup *proc.Table, args procCommandArgs) (string, error) {
 	switch args.sub {
+	case "remove":
+		info, err := sup.Status(args.id)
+		if err != nil {
+			return "", err
+		}
+		if info.State == proc.StateRunning {
+			return "", errProcStillRunning
+		}
+		return i18n.T("leftovers.proc.removed", args.id), sup.Remove(args.id)
 	case "stop":
 		info, err := sup.StopAsync(args.id)
 		if err != nil || info.State != proc.StateRunning {
@@ -247,10 +287,11 @@ func (cli *ChatCLI) getProcSuggestions(d prompt.Document) []prompt.Suggest {
 			{Text: "status", Description: i18n.T("complete.proc.status")},
 			{Text: "logs", Description: i18n.T("complete.proc.logs")},
 			{Text: "stop", Description: i18n.T("complete.proc.stop")},
+			{Text: "remove", Description: i18n.T("complete.leftovers.proc.remove")},
 		}, current, true)
 	}
 	switch args[0] {
-	case "logs", "stop", "status":
+	case "logs", "stop", "status", "remove":
 	case "list":
 		// The completer only runs at the terminal's prompt, which is where
 		// the operator flags work.
@@ -267,40 +308,52 @@ func (cli *ChatCLI) getProcSuggestions(d prompt.Document) []prompt.Suggest {
 		}
 		return prompt.FilterHasPrefix(out, current, true)
 	}
-	if args[0] == "stop" {
-		return cli.getProcOwnerSuggestions(args, current, trailingSpace)
+	if owners, done := cli.getProcOwnerValues(args, current, trailingSpace); done {
+		return owners
 	}
-	if args[0] != "logs" {
-		return nil
+	var flags []prompt.Suggest
+	if args[0] == "logs" {
+		flags = append(flags,
+			prompt.Suggest{Text: "--grep", Description: i18n.T("complete.proc.grep")},
+			prompt.Suggest{Text: "--tail", Description: i18n.T("complete.proc.tail")})
 	}
-	return prompt.FilterHasPrefix([]prompt.Suggest{
-		{Text: "--grep", Description: i18n.T("complete.proc.grep")},
-		{Text: "--tail", Description: i18n.T("complete.proc.tail")},
-	}, current, true)
+	if !procArgsHave(args, "--owner") {
+		flags = append(flags, prompt.Suggest{Text: "--owner", Description: i18n.T("complete.leftovers.proc.owner")})
+	}
+	return prompt.FilterHasPrefix(flags, current, true)
 }
 
-// getProcOwnerSuggestions completes "/proc stop <id> --owner <owner>": the
-// flag after the id, then the owners that have a process.
-func (cli *ChatCLI) getProcOwnerSuggestions(args []string, current string, trailingSpace bool) []prompt.Suggest {
+// getProcOwnerValues completes the value of --owner: the handles of the
+// owners that have a process, and the terminal. done reports that the
+// cursor is on that value, whether or not anything matches.
+func (cli *ChatCLI) getProcOwnerValues(args []string, current string, trailingSpace bool) (out []prompt.Suggest, done bool) {
 	last := args[len(args)-1]
-	if (last == "--owner" && trailingSpace) || (len(args) >= 2 && args[len(args)-2] == "--owner" && !trailingSpace) {
-		seen := map[string]bool{}
-		var out []prompt.Suggest
-		for _, info := range (&procToolAdapter{cli: cli}).processSupervisor().List() {
-			if name := procOwnerName(info.Owner); !seen[name] {
-				seen[name] = true
-				out = append(out, prompt.Suggest{Text: name})
-			}
-		}
-		sort.Slice(out, func(i, j int) bool { return out[i].Text < out[j].Text })
-		return prompt.FilterHasPrefix(out, current, true)
+	onValue := (last == "--owner" && trailingSpace) || (len(args) >= 2 && args[len(args)-2] == "--owner" && !trailingSpace)
+	if !onValue {
+		return nil, false
 	}
-	for _, a := range args {
-		if a == "--owner" {
-			return nil
+	sup := (&procToolAdapter{cli: cli}).processSupervisor()
+	seen := map[string]bool{}
+	for _, info := range sup.List() {
+		name := procTerminalOwner
+		if info.Owner != "" {
+			name = sup.OwnerHandle(info.Owner)
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, prompt.Suggest{Text: name, Description: proc.CleanOwner(info.Owner)})
 		}
 	}
-	return prompt.FilterHasPrefix([]prompt.Suggest{
-		{Text: "--owner", Description: i18n.T("complete.leftovers.proc.owner")},
-	}, current, true)
+	sort.Slice(out, func(i, j int) bool { return out[i].Text < out[j].Text })
+	return prompt.FilterHasPrefix(out, current, true), true
+}
+
+// procArgsHave reports whether list holds s.
+func procArgsHave(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

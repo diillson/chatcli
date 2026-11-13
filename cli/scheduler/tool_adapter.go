@@ -144,6 +144,7 @@ func (t *ToolAdapter) ScheduleJob(ctx context.Context, owner Owner, rawIn string
 	if err != nil {
 		return jsonError(err)
 	}
+	applyTrustedTags(ctx, job)
 	created, err := t.s.Enqueue(ctx, job)
 	if err != nil {
 		return jsonError(err)
@@ -178,6 +179,7 @@ func (t *ToolAdapter) WaitUntil(ctx context.Context, owner Owner, rawIn string) 
 	if err != nil {
 		return jsonError(err)
 	}
+	applyTrustedTags(ctx, job)
 	created, err := t.s.Enqueue(ctx, job)
 	if err != nil {
 		return jsonError(err)
@@ -468,6 +470,13 @@ func buildJobFromInput(in *ToolInput, owner Owner) (*Job, error) {
 		act.Payload["skills"] = in.Skills
 	}
 
+	// Checked on the decoded input: the JSON decoder matches "tags" in any
+	// letter case, so a check on the raw key missed "Tags".
+	for key := range in.Tags {
+		if reservedTag(key) {
+			return nil, fmt.Errorf("tag %q: the %q prefix is reserved for tags chatcli sets itself", key, ReservedTagPrefix)
+		}
+	}
 	job := NewJob(in.Name, owner, sched, act)
 	job.Wait = wait
 	job.Description = in.Description

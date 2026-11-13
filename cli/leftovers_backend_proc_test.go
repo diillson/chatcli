@@ -165,7 +165,7 @@ func TestOnlyTheTerminalPromptSeesEveryOwner(t *testing.T) {
 	}
 
 	all := prompt("/proc list --all")
-	for _, want := range []string{"[session:alice]", "sleep 41", "[" + procTerminalOwner + "]", "sleep 42"} {
+	for _, want := range []string{"[o1 session:alice]", "sleep 41", "[" + procTerminalOwner + "]", "sleep 42"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("/proc list --all must show every owner's process with its owner (%q missing): %q", want, all)
 		}
@@ -180,12 +180,16 @@ func TestOnlyTheTerminalPromptSeesEveryOwner(t *testing.T) {
 	for name, run := range map[string]func(line string) string{
 		"a session over RPC": func(line string) string { out, _ := cli.RunSlashCommandRPC(alice, line); return out },
 		"a headless caller":  func(line string) string { out, _ := cli.RunSlashCommandRPC(terminal, line); return out },
-		"a command issued mid-turn": func(line string) string {
-			return captureStdout(t, func() { cli.commandHandler.HandleCommand(terminal, line) })
+		"a prompt command after it returned": func(line string) string {
+			ctx, done := withLocalOperator(terminal)
+			done()
+			return captureStdout(t, func() { cli.commandHandler.HandleCommand(ctx, line) })
 		},
 		"a scheduled job": func(line string) string { out, _, _ := bridge.ExecuteSlashCommand(terminal, line, false); return out },
 		"a prompt marker under a session": func(line string) string {
-			return captureStdout(t, func() { cli.commandHandler.HandleCommand(withLocalOperator(alice), line) })
+			ctx, done := withLocalOperator(alice)
+			defer done()
+			return captureStdout(t, func() { cli.commandHandler.HandleCommand(ctx, line) })
 		},
 	} {
 		for _, line := range []string{"/proc list --all", "/proc stop p1 --owner session:alice", "/proc stop p1 --owner terminal"} {
@@ -234,42 +238,21 @@ func TestOnlyTheTerminalPromptSeesEveryOwner(t *testing.T) {
 	if got := complete("/proc stop p1 "); got != "--owner" {
 		t.Errorf("stop flags: %q", got)
 	}
-	if got := complete("/proc stop p1 --owner "); got != "session:alice terminal" {
+	if got := complete("/proc stop p1 --owner "); got != "o1 terminal" {
 		t.Errorf("owners: %q", got)
 	}
 }
 
 // A job is created under its session's context and fires under the
 // scheduler's. The session's process table travels on the job: a scheduled
-// /proc acts on the table of the session that scheduled it, and neither a
-// model nor a --tag can aim a job at someone else's.
+// /proc acts on the table of the session that scheduled it. (That no input
+// can set the tag is TestReservedJobTagsCannotBeSetFromInput.)
 func TestScheduledJobActsOnItsSessionTable(t *testing.T) {
 	cli, tool := procTestCLI(t)
 	terminal := context.Background()
 	alice := WithProcSession(terminal, "alice")
 	tool(alice, "start", "--command", "sleep 51")
 	tool(terminal, "start", "--command", "sleep 52")
-
-	forged := map[string]string{procOwnerJobTag: "session:bob", "team": "x"}
-	if got := stampProcOwner(alice, forged); got[procOwnerJobTag] != "session:alice" || got["team"] != "x" {
-		t.Fatalf("the creating session must be recorded over a forged value: %v", got)
-	}
-	if got := stampProcOwner(terminal, map[string]string{procOwnerJobTag: "session:bob"}); got[procOwnerJobTag] != "" {
-		t.Fatalf("a job created at the terminal must not keep a forged owner: %v", got)
-	}
-	if got := stampProcOwner(alice, nil); got[procOwnerJobTag] != "session:alice" {
-		t.Fatalf("a job with no tags still gets its owner: %v", got)
-	}
-	in := `{"name":"n","when":"+1m","do":"/proc list","tags":{"chatcli.proc_owner":"session:bob"}}`
-	if got := stampProcOwnerJSON(alice, in); !strings.Contains(got, `"chatcli.proc_owner":"session:alice"`) || strings.Contains(got, "session:bob") {
-		t.Fatalf("tool input: %s", got)
-	}
-	if got := stampProcOwnerJSON(terminal, in); strings.Contains(got, "chatcli.proc_owner") {
-		t.Fatalf("tool input at the terminal: %s", got)
-	}
-	if got := stampProcOwnerJSON(alice, "not json"); got != "not json" {
-		t.Fatalf("unparsable input must pass through: %s", got)
-	}
 
 	bridge := &schedulerBridge{cli: cli}
 	fire := func(tags map[string]string) string {
@@ -279,7 +262,7 @@ func TestScheduledJobActsOnItsSessionTable(t *testing.T) {
 		}
 		return out
 	}
-	if out := fire(stampProcOwner(alice, nil)); !strings.Contains(out, "sleep 51") || strings.Contains(out, "sleep 52") {
+	if out := fire(map[string]string{procOwnerJobTag: procSessionOwner("alice")}); !strings.Contains(out, "sleep 51") || strings.Contains(out, "sleep 52") {
 		t.Fatalf("a job alice scheduled must list alice's processes: %q", out)
 	}
 	if out := fire(nil); !strings.Contains(out, "sleep 52") || strings.Contains(out, "sleep 51") {

@@ -70,7 +70,8 @@ func (a *schedulerPluginAdapter) Owner() plugins.SchedulerOwner {
 }
 
 func (a *schedulerPluginAdapter) ScheduleJob(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
-	inputJSON = stampProcOwnerJSON(ctx, a.withDefaultSkills(inputJSON))
+	inputJSON = a.withDefaultSkills(inputJSON)
+	ctx = withProcOwnerJobTag(ctx)
 	return a.dispatch(ctx, owner, inputJSON, "schedule", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.ScheduleJob(ctx, so, inputJSON)
 	})
@@ -103,7 +104,7 @@ func (a *schedulerPluginAdapter) withDefaultSkills(inputJSON string) string {
 }
 
 func (a *schedulerPluginAdapter) WaitUntil(ctx context.Context, owner plugins.SchedulerOwner, inputJSON string) (string, error) {
-	inputJSON = stampProcOwnerJSON(ctx, inputJSON)
+	ctx = withProcOwnerJobTag(ctx)
 	return a.dispatch(ctx, owner, inputJSON, "wait", func(t *scheduler.ToolAdapter, so scheduler.Owner) (string, error) {
 		return t.WaitUntil(ctx, so, inputJSON)
 	})
