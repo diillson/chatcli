@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -117,6 +118,10 @@ type UIRenderer struct {
 	logger              *zap.Logger
 	skipClearOnNextDraw bool
 	style               UIStyle
+	// flat is the tool call the flat timeline is drawing; flatMu guards it
+	// because the live line reads it from the animation goroutine.
+	flatMu sync.Mutex
+	flat   flatTool
 }
 
 // NewUIRenderer cria uma nova instância do renderizador de UI; o estilo
@@ -152,6 +157,10 @@ func (r *UIRenderer) IsMinimal() bool { return r.style == UIStyleMinimal }
 // StreamOutput emite uma linha de output streamado sob o título da seção
 // (sóbrio: indentação em vez de barra lateral).
 func (r *UIRenderer) StreamOutput(line string) {
+	if r.flatToolActive() {
+		r.flatToolOutput(line)
+		return
+	}
 	const prefix = "    "
 
 	// Largura útil para quebrar linhas muito longas (ex.: `kubectl -o
@@ -547,10 +556,15 @@ func (r *UIRenderer) renderTimelineEventInner(icon, title, content, color string
 			bodyBuilder.WriteString(ln)
 		}
 	}
-	bodyRendered := bodyBuilder.String()
+	// The body is tool output or model prose and arrives with its own
+	// emoji; a monoglyph theme that keeps its frames reaches this card.
+	bodyRendered := kit.Plain(bodyBuilder.String())
 
 	header := fmt.Sprintf("%s %s", icon, title)
 	topLine := titleIndent + r.Colorize(header, color+ColorBold)
+	if r.FlatLayout() {
+		topLine = flatBlockTitle(title, color)
+	}
 
 	fmt.Println()
 	fmt.Println(topLine)
@@ -789,6 +803,9 @@ func (r *UIRenderer) RenderBatchSummary(successCount, total int, hasError bool) 
 // StreamOutput. No frame to close, so RenderStreamBoxEnd only restores
 // breathing room.
 func (r *UIRenderer) RenderStreamBoxStart(icon, title, color string) {
+	if r.flatToolActive() {
+		return // the call's own line is the section title
+	}
 	fmt.Println()
 	fmt.Println("  " + r.Colorize(fmt.Sprintf("%s %s", icon, title), color+ColorBold))
 }
@@ -797,6 +814,9 @@ func (r *UIRenderer) RenderStreamBoxStart(icon, title, color string) {
 // (the sóbrio treatment has no frame to mirror).
 func (r *UIRenderer) RenderStreamBoxEnd(color string) {
 	_ = color
+	if r.flatToolActive() {
+		return
+	}
 	fmt.Println()
 }
 

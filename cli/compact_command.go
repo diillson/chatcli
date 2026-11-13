@@ -52,7 +52,7 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 		// Live progress so the user knows what's happening, especially
 		// during the LLM-driven summarization (can take 30-90s).
 		cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
-			fmt.Printf("  %s %s\n", colorize("│", ColorCyan), colorize(msg, ColorGray))
+			printTurnNotice(noticeProgress, msg, false)
 		})
 		cli.flushMemoryBeforeCompaction(ctx)
 		compacted, err := cli.historyCompactor.Compact(cli.compactionCtx(ctx), cli.history, cli.Client, cfg)
@@ -71,8 +71,8 @@ func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) 
 		cli.history = compacted
 		cli.noteCompactionApplied(ctx, compactTriggerManual)
 		after := len(cli.history)
-		fmt.Printf("  %s %s\n",
-			colorize("📦", ""), i18n.T("compact.success", before, after))
+		compactedMsg := i18n.T("compact.success", before, after)
+		fmt.Println(flatNoticeOr(noticeDone, compactedMsg, "  "+colorize("📦", "")+" "+compactedMsg))
 		return
 	}
 

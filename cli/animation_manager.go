@@ -24,6 +24,39 @@ type AnimationManager struct {
 	currentMessage string         // Mensagem atual sendo exibida
 	isRunning      bool           // Estado da animação
 	suppressed     bool           // When true, ShowThinkingAnimation won't start the goroutine
+	// liveFrame, when set, replaces the "message... glyph" spinner with a
+	// caller-drawn line (see ShowLiveLine). The line is transient: stopping
+	// it erases it and leaves the cursor where it was, with no blank row,
+	// so whatever is printed next takes its place.
+	liveFrame func() string
+}
+
+// ShowLiveLine repaints frame() on the current line ten times a second
+// until the animation is stopped. It shares the spinner's goroutine, its
+// terminal gate and its stop calls, so every place that already stops the
+// spinner before printing also retires this line and nothing else has to
+// learn about it. It does nothing while a spinner is already running.
+func (am *AnimationManager) ShowLiveLine(frame func() string) {
+	if !stdoutIsTerminal() {
+		return // captured output: the caller's final line is all there is
+	}
+	am.mu.Lock()
+	running := am.isRunning
+	if !running {
+		am.liveFrame = frame
+	}
+	am.mu.Unlock()
+	if !running {
+		am.ShowThinkingAnimation("")
+	}
+}
+
+// paintLiveFrame draws one repaint of the caller-drawn line, clamped to one
+// terminal row for the reason given in the spinner loop.
+func paintLiveFrame(frame func() string) {
+	fmt.Print("\r\033[K" + kit.Truncate(frame(), terminalCols()-1))
+	_ = os.Stdout.Sync()
+	time.Sleep(100 * time.Millisecond)
 }
 
 func NewAnimationManager() *AnimationManager {
@@ -54,6 +87,7 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 	// noise in a pipe / CI log (the message is still recorded for callers
 	// that surface it some other way).
 	if am.suppressed || !theme.ActiveProfile().IsTerminal() {
+		am.liveFrame = nil
 		return
 	}
 
@@ -82,7 +116,12 @@ func (am *AnimationManager) ShowThinkingAnimation(message string) {
 				// Acesso seguro à mensagem atual
 				am.mu.Lock()
 				currentMsg := am.currentMessage
+				live := am.liveFrame
 				am.mu.Unlock()
+				if live != nil {
+					paintLiveFrame(live)
+					continue
+				}
 
 				// Message tinted with the theme accent (matches reasoning
 				// cards); the glyph carries the same accent so the spinner
@@ -152,6 +191,8 @@ func (am *AnimationManager) StopThinkingAnimation() {
 	// Marca que solicitamos parada e sinaliza o encerramento
 	am.stopRequested = true
 	am.isRunning = false
+	wasLive := am.liveFrame != nil
+	am.liveFrame = nil
 
 	// Mantém referência local ao canal antes de desbloqueá-lo
 	done := am.done
@@ -167,6 +208,11 @@ func (am *AnimationManager) StopThinkingAnimation() {
 	fmt.Print("\033[0m") // Reset de cores
 	_ = os.Stdout.Sync()
 
+	// A live line is replaced by what is printed next; the spinner keeps
+	// the blank row it has always left behind.
+	if wasLive {
+		return
+	}
 	// Adiciona uma nova linha para garantir espaçamento adequado
 	fmt.Println()
 }

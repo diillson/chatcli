@@ -142,6 +142,7 @@ func (a *AgentMode) announceParkedDraft(draft string) {
 	a.draftNoticed, a.draftNoticedAt = draft, time.Now()
 	a.typeaheadMu.Unlock()
 	if !repeat {
-		fmt.Println(colorize("  ✎ "+i18n.T("agent.typeahead.draft_parked", shown), ColorGray))
+		parked := i18n.T("agent.typeahead.draft_parked", shown)
+		fmt.Println(flatNoticeOr(noticeInfo, parked, colorize("  ✎ "+parked, ColorGray)))
 	}
 }

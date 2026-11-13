@@ -37,6 +37,16 @@ var monoStatus = map[rune]Glyph{
 // monoArrows maps the emoji arrows to their plain forms.
 var monoArrows = map[rune]string{'⬆': "↑", '⬇': "↓", '➡': "→", '⬅': "←", '➤': "→"}
 
+// monoSymbols maps the pictographs that are the whole message where they
+// appear: a lock in front of a sensitive field, the badges of the prompt.
+// Dropping them as decoration would drop what they say. The stars and
+// ballot boxes map to themselves: they sit in the block terminals paint in
+// color, but they are text symbols and list markers depend on them.
+var monoSymbols = map[rune]string{
+	'🔒': "▣", '🔐': "▣", '🌐': "⊕", '🅿': "P",
+	'★': "★", '☆': "☆", '☐': "☐", '☑': "☑", '☒': "☒",
+}
+
 // isDecorativeEmoji reports whether r is a pictograph with no plain-text
 // form worth keeping: the emoji blocks, plus the few symbols in the older
 // ranges that terminals paint in color.
@@ -96,6 +106,11 @@ func Monoglyph(s string) string {
 		if a, ok := monoArrows[r]; ok {
 			b.WriteString(a)
 			changed = true
+			continue
+		}
+		if sym, ok := monoSymbols[r]; ok {
+			b.WriteString(sym)
+			changed = changed || sym != string(r)
 			continue
 		}
 		if isDecorativeEmoji(r) {

@@ -131,14 +131,16 @@ func (cli *ChatCLI) handleParkNoteCommand(text string) {
 			cli.logger.Warn("park: directive persist failed",
 				zap.String("token", p.Token), zap.Error(err))
 		}
-		fmt.Println(colorize("  ⚠ "+i18n.T("park.note.failed", err), ColorYellow))
+		noteFailed := i18n.T("park.note.failed", err)
+		fmt.Println(flatNoticeOr(noticeWarn, noteFailed, colorize("  ⚠ "+noteFailed, ColorYellow)))
 		return
 	}
 	short := p.Token
 	if len(short) > 8 {
 		short = short[:8]
 	}
-	fmt.Println(colorize("  💬 "+i18n.T("park.directive.queued", p.ResumeAtDisplay, short), ColorCyan))
+	queued := i18n.T("park.directive.queued", p.ResumeAtDisplay, short)
+	fmt.Println(flatNoticeOr(noticeInfo, queued, colorize("  💬 "+queued, ColorCyan)))
 }
 
 // parkNoteByToken records text for the park a token (or unique prefix)
@@ -180,5 +182,6 @@ func (cli *ChatCLI) maybeShowParkNoteHint() {
 	if len(short) > 8 {
 		short = short[:8]
 	}
-	fmt.Println(colorize("  ℹ "+i18n.T("park.note.hint", last.ResumeAtDisplay, short), ColorGray))
+	noteHint := i18n.T("park.note.hint", last.ResumeAtDisplay, short)
+	fmt.Println(flatNoticeOr(noticeInfo, noteHint, colorize("  ℹ "+noteHint, ColorGray)))
 }

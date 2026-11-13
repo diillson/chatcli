@@ -43,6 +43,12 @@ const (
 	GlyphAssistant
 	// GlyphEllipsis marks truncation.
 	GlyphEllipsis
+	// GlyphDenied marks an action that was refused before it ran.
+	GlyphDenied
+	// GlyphGutter is the thin rail output hangs from in a flat timeline.
+	GlyphGutter
+	// GlyphGutterEnd closes that rail.
+	GlyphGutterEnd
 )
 
 // glyphTable maps each glyph to its Unicode form, ASCII fallback and role.
@@ -60,6 +66,9 @@ var glyphTable = [...]struct {
 	GlyphRunning:   {"↻", "~", theme.RoleAction},
 	GlyphAssistant: {"◆", "*", theme.RoleReasoning},
 	GlyphEllipsis:  {"…", "...", theme.RoleMuted},
+	GlyphDenied:    {"⊘", "-", theme.RoleWarning},
+	GlyphGutter:    {"│", "|", theme.RoleBorder},
+	GlyphGutterEnd: {"└", "`", theme.RoleBorder},
 }
 
 // String returns the glyph's textual form under the active profile: Unicode

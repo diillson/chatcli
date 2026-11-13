@@ -434,6 +434,12 @@ func (c *OpenAIResponsesClient) processStreamResponse(resp *http.Response) (stri
 
 		if event.Type == "response.output_text.delta" && event.Delta != "" {
 			sb.WriteString(event.Delta)
+			client.ReportResponseProgress(resp, len(event.Delta))
+		}
+		// Reasoning is billed as output: a caller following the reply must
+		// not see it stall while the model reasons. Only measured, not kept.
+		if event.Type == "response.reasoning_text.delta" || event.Type == "response.reasoning_summary_text.delta" {
+			client.ReportResponseProgress(resp, len(event.Delta))
 		}
 
 		// Extract usage from the response.completed event. Responses API

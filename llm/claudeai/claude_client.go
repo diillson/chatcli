@@ -600,8 +600,9 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 		var evt struct {
 			Type  string `json:"type"`
 			Delta *struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				Thinking string `json:"thinking"`
 			} `json:"delta"`
 			ContentBlock *struct {
 				Type string `json:"type"`
@@ -629,6 +630,13 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 		}
 		if evt.Type == "content_block_delta" && evt.Delta != nil && evt.Delta.Type == "text_delta" {
 			out.WriteString(evt.Delta.Text)
+			client.ReportResponseProgress(resp, len(evt.Delta.Text))
+		}
+		if evt.Type == "content_block_delta" && evt.Delta != nil && evt.Delta.Type == "thinking_delta" {
+			// Thinking is billed as output: a caller following the reply
+			// must not see it stall while the model reasons. The text is
+			// only measured here, never kept.
+			client.ReportResponseProgress(resp, len(evt.Delta.Thinking))
 		}
 		if evt.Type == "message_stop" && err == io.EOF {
 			break

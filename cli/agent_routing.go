@@ -7,7 +7,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -205,7 +204,7 @@ func (cli *ChatCLI) maybeReroute(ctx context.Context, label, task string) bool {
 		zap.String("reason", classification.reason))
 
 	hint := i18n.T("agent.early_exit.chat_hint")
-	fmt.Printf("  %s %s\n", colorize("ℹ", ColorGray), colorize(hint, ColorGray))
+	printTurnNotice(noticeInfo, hint, false)
 
 	if mode != smartRoutingAuto {
 		return false

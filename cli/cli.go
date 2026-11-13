@@ -1947,7 +1947,7 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 
 		var prefix string
 		if len(icons) > 0 {
-			prefix = "[" + strings.Join(icons, " ") + "] "
+			prefix = kit.Plain("[" + strings.Join(icons, " ") + "] ")
 		}
 		if cli.currentSessionName != "" {
 			prefix += cli.currentSessionName + " "

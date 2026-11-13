@@ -414,26 +414,33 @@ func printJobOutcome(j *scheduler.Job, cycle bool) {
 	took := shortDuration(jobElapsed(j))
 	switch {
 	case cycle:
-		fmt.Println(colorize("  🔔 "+i18n.T("scheduler.notify.cycle", j.Name, j.ID, j.CycleCount), ColorCyan+ColorBold))
+		cycleMsg := i18n.T("scheduler.notify.cycle", j.Name, j.ID, j.CycleCount)
+		fmt.Println(flatNoticeOr(noticeInfo, cycleMsg, colorize("  🔔 "+cycleMsg, ColorCyan+ColorBold)))
 		printJobActionOutput(j)
 	case j.Status == scheduler.StatusCompleted:
 		key := "scheduler.notify.completed"
 		if j.Wait != nil {
 			key = "scheduler.notify.wait_met"
 		}
-		fmt.Println(colorize("  🔔 "+i18n.T(key, j.Name, j.ID, took), ColorGreen+ColorBold))
+		doneMsg := i18n.T(key, j.Name, j.ID, took)
+		fmt.Println(flatNoticeOr(noticeDone, doneMsg, colorize("  🔔 "+doneMsg, ColorGreen+ColorBold)))
 		printJobActionOutput(j)
 	case j.Status == scheduler.StatusTimedOut:
-		fmt.Println(colorize("  ⏱ "+i18n.T("scheduler.notify.timed_out", j.Name, j.ID, took), ColorYellow+ColorBold))
+		timedOut := i18n.T("scheduler.notify.timed_out", j.Name, j.ID, took)
+		fmt.Println(flatNoticeOr(noticeWarn, timedOut, colorize("  ⏱ "+timedOut, ColorYellow+ColorBold)))
 		if d := lastConditionDetail(j); d != "" {
-			fmt.Println(colorize("    "+i18n.T("scheduler.notify.last_check", d), ColorGray))
+			lastCheck := i18n.T("scheduler.notify.last_check", d)
+			fmt.Println(flatDetailOr(lastCheck, colorize("    "+lastCheck, ColorGray)))
 		}
 	case j.Status == scheduler.StatusCancelled:
-		fmt.Println(colorize("  ⊘ "+i18n.T("scheduler.notify.cancelled", j.Name, j.ID), ColorYellow))
+		cancelled := i18n.T("scheduler.notify.cancelled", j.Name, j.ID)
+		fmt.Println(flatNoticeOr(noticeWarn, cancelled, colorize("  ⊘ "+cancelled, ColorYellow)))
 	default:
-		fmt.Println(colorize("  ✗ "+i18n.T("scheduler.notify.failed", j.Name, j.ID, jobEndReason(j)), ColorRed+ColorBold))
+		failedMsg := i18n.T("scheduler.notify.failed", j.Name, j.ID, jobEndReason(j))
+		fmt.Println(flatNoticeOr(noticeError, failedMsg, colorize("  ✗ "+failedMsg, ColorRed+ColorBold)))
 	}
-	fmt.Println(colorize("    "+i18n.T("scheduler.notify.hint", j.ID), ColorGray))
+	hint := i18n.T("scheduler.notify.hint", j.ID)
+	fmt.Println(flatDetailOr(hint, colorize("    "+hint, ColorGray)))
 }
 
 // printJobActionOutput shows what the job's action ran and the head of
@@ -449,7 +456,8 @@ func printJobActionOutput(j *scheduler.Job) {
 			break
 		}
 	}
-	fmt.Println(colorize("    "+i18n.T("scheduler.notify.ran", truncateBridge(label, 100)), ColorGray))
+	ran := i18n.T("scheduler.notify.ran", truncateBridge(label, 100))
+	fmt.Println(flatDetailOr(ran, colorize("    "+ran, ColorGray)))
 	if j.LastResult == nil || strings.TrimSpace(j.LastResult.Output) == "" {
 		return
 	}
@@ -460,10 +468,11 @@ func printJobActionOutput(j *scheduler.Job) {
 		shown = shown[:maxLines]
 	}
 	for _, l := range shown {
-		fmt.Println(colorize("      "+truncateBridge(l, 160), ColorGray))
+		fmt.Println(flatDetailOr("  "+truncateBridge(l, 160), colorize("      "+truncateBridge(l, 160), ColorGray)))
 	}
 	if len(lines) > maxLines {
-		fmt.Println(colorize("      "+i18n.T("scheduler.notify.more_lines", len(lines)-maxLines), ColorGray))
+		more := i18n.T("scheduler.notify.more_lines", len(lines)-maxLines)
+		fmt.Println(flatDetailOr("  "+more, colorize("      "+more, ColorGray)))
 	}
 }
 

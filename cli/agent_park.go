@@ -407,7 +407,8 @@ func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, out
 	// client through the event sink.
 	if !a.cli.unattended {
 		fmt.Println()
-		fmt.Println(colorize("  ▶️  "+i18n.T("park.banner.resumed", snap.Token, outcome), ColorGreen+ColorBold))
+		resumed := i18n.T("park.banner.resumed", snap.Token, outcome)
+		fmt.Println(flatNoticeOr(noticeRunning, resumed, colorize("  ▶️  "+resumed, ColorGreen+ColorBold)))
 		fmt.Println()
 	}
 
@@ -505,6 +506,9 @@ func buildParkResumeMessage(req park.Request, outcome, detail string) string {
 // i18n-required policy. Field labels are localized; tokens, durations
 // and timestamps are not (they are identity values).
 func renderParkBanner(snap *park.Snapshot, req park.Request) {
+	if renderFlatParkBanner(snap, req) {
+		return
+	}
 	short := snap.Token
 	if len(short) > 8 {
 		short = short[:8]

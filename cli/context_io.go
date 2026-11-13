@@ -255,8 +255,8 @@ func printSelectedChunksFeedback(ctx *ctxmgr.FileContext, selected []int) {
 		chunk := ctx.Chunks[chunkNum-1] // índice base-0
 		totalFiles += len(chunk.Files)
 		totalSize += chunk.TotalSize
-		fmt.Printf("    📦 %s\n",
-			i18n.T("context.io.chunk_detail", chunkNum, chunk.Description, len(chunk.Files), float64(chunk.TotalSize)/1024))
+		fmt.Println(kit.Plain("    📦 " +
+			i18n.T("context.io.chunk_detail", chunkNum, chunk.Description, len(chunk.Files), float64(chunk.TotalSize)/1024)))
 	}
 	fmt.Printf("  %s %s\n",
 		colorize(i18n.T("context.io.label.total_attached"), ColorCyan),
