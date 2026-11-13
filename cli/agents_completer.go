@@ -20,6 +20,8 @@ func agentsSubcommandSuggestions() []prompt.Suggest {
 		{Text: "list", Description: i18n.T("complete.agents.list")},
 		{Text: "show", Description: i18n.T("complete.agents.show")},
 		{Text: "cancel", Description: i18n.T("complete.agents.cancel")},
+		{Text: "wait", Description: i18n.T("complete.agents.wait")},
+		{Text: "transcript", Description: i18n.T("complete.agents.transcript")},
 		{Text: "help", Description: i18n.T("complete.agents.help")},
 	}
 }
@@ -37,7 +39,7 @@ func (cli *ChatCLI) getAgentsSuggestions(d prompt.Document) []prompt.Suggest {
 	}
 
 	switch args[0] {
-	case "show", "cancel":
+	case "show", "info", "cancel", "stop", "wait", "transcript":
 		if len(args) == 1 || (len(args) == 2 && !trailingSpace) {
 			var suggestions []prompt.Suggest
 			for _, info := range runs.Default().Active() {
@@ -46,7 +48,7 @@ func (cli *ChatCLI) getAgentsSuggestions(d prompt.Document) []prompt.Suggest {
 					Description: string(info.Kind) + "/" + info.Agent + " — " + truncateForUI(info.Task, 40),
 				})
 			}
-			if args[0] == "show" {
+			if finished := args[0]; finished == "show" || finished == "info" || finished == "transcript" {
 				for _, info := range runs.Default().Recent(5) {
 					suggestions = append(suggestions, prompt.Suggest{
 						Text:        info.ID,
@@ -55,6 +57,19 @@ func (cli *ChatCLI) getAgentsSuggestions(d prompt.Document) []prompt.Suggest {
 				}
 			}
 			return prompt.FilterHasPrefix(suggestions, current, true)
+		}
+		used := args
+		if !trailingSpace {
+			used = args[:len(args)-1] // the word being typed is not "used" yet
+		}
+		switch args[0] {
+		case "wait":
+			return squadFlagSuggestions(used, current,
+				prompt.Suggest{Text: "--block", Description: i18n.T("complete.agents.flag.block")},
+				prompt.Suggest{Text: "--timeout", Description: i18n.T("complete.agents.flag.timeout")})
+		case "transcript":
+			return squadFlagSuggestions(used, current,
+				prompt.Suggest{Text: "--tail", Description: i18n.T("complete.agents.flag.tail")})
 		}
 	}
 	return nil

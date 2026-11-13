@@ -40,26 +40,26 @@ func TestHandleAgentsCommandFlows(t *testing.T) {
 	cli := &ChatCLI{}
 
 	// Empty registry: list renders the empty state.
-	cli.handleAgentsCommand("/agents")
+	cli.handleAgentsCommand(context.Background(), "/agents")
 
 	ctx, orch := reg.Begin(context.Background(), runs.Info{Kind: runs.KindOrchestrator, Agent: "coder", Task: "goal", Origin: "repl"})
 	_, worker := reg.Begin(ctx, runs.Info{Kind: runs.KindWorker, Agent: "reviewer", Task: "review the diff"})
 	worker.SetTurn(3, 30)
 	worker.SetAction("git-diff")
 
-	cli.handleAgentsCommand("/agents list")
-	cli.handleAgentsCommand("/agents show " + worker.ID())
-	cli.handleAgentsCommand("/agents show run-999") // not found path
-	cli.handleAgentsCommand("/agents show")         // missing ID path
-	cli.handleAgentsCommand("/agents help")
-	cli.handleAgentsCommand("/agents bogus")
+	cli.handleAgentsCommand(context.Background(), "/agents list")
+	cli.handleAgentsCommand(context.Background(), "/agents show "+worker.ID())
+	cli.handleAgentsCommand(context.Background(), "/agents show run-999") // not found path
+	cli.handleAgentsCommand(context.Background(), "/agents show")         // missing ID path
+	cli.handleAgentsCommand(context.Background(), "/agents help")
+	cli.handleAgentsCommand(context.Background(), "/agents bogus")
 
 	// Cancel a live run, then observe the finished paths.
-	cli.handleAgentsCommand("/agents cancel " + worker.ID())
+	cli.handleAgentsCommand(context.Background(), "/agents cancel "+worker.ID())
 	worker.End(context.Canceled)
-	cli.handleAgentsCommand("/agents cancel " + worker.ID()) // already finished
-	cli.handleAgentsCommand("/agents cancel run-999")        // unknown
-	cli.handleAgentsCommand("/agents cancel")                // missing ID
+	cli.handleAgentsCommand(context.Background(), "/agents cancel "+worker.ID()) // already finished
+	cli.handleAgentsCommand(context.Background(), "/agents cancel run-999")      // unknown
+	cli.handleAgentsCommand(context.Background(), "/agents cancel")              // missing ID
 
 	failed := func() *runs.Run {
 		_, r := reg.Begin(ctx, runs.Info{Kind: runs.KindSubagent, Agent: "subagent"})
@@ -67,7 +67,7 @@ func TestHandleAgentsCommandFlows(t *testing.T) {
 	}()
 	failed.End(errors.New("boom"))
 	orch.End(nil)
-	cli.handleAgentsCommand("/agents") // recent history rendering (all statuses)
+	cli.handleAgentsCommand(context.Background(), "/agents") // recent history rendering (all statuses)
 }
 
 func TestHandleBoardCommandFlows(t *testing.T) {

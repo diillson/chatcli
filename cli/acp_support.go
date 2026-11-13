@@ -50,6 +50,9 @@ type ACPCommandInfo struct {
 // opt-in --block is declined on headless surfaces (schedulerHeadless),
 // where a held command would pin the capture slot every session shares.
 //
+// /agents, /board and /mail are here on the same terms: /agents wait
+// declines --block when headless and /board delete confirms with --yes.
+//
 // /agent, /coder and /run are NOT here: the ACP prompt handler drains them
 // first as session mode switches (they panic-request mode in the REPL).
 var acpCommandAllow = map[string]bool{

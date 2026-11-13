@@ -114,8 +114,8 @@ func (a *AgentMode) applySideCommands(ctx context.Context) {
 }
 
 // execSideCommand routes one line through the command handler (or the test
-// seam). The allowlisted handlers ignore their context and never panic
-// mode-switch sentinels.
+// seam). The allowlisted handlers never hold on their context (/agents wait
+// declines --block while a turn runs) and never panic mode-switch sentinels.
 func (a *AgentMode) execSideCommand(ctx context.Context, line string) {
 	if a.sideCmdExec != nil {
 		a.sideCmdExec(line)

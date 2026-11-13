@@ -17,8 +17,8 @@ func TestGetAgentsSuggestions(t *testing.T) {
 
 	// Root: subcommands offered.
 	got := cli.getAgentsSuggestions(docAt("/agents "))
-	if len(got) != 4 {
-		t.Fatalf("expected 4 root suggestions, got %d: %v", len(got), got)
+	if len(got) != 6 {
+		t.Fatalf("expected 6 root suggestions, got %d: %v", len(got), got)
 	}
 	// Prefix filter narrows.
 	got = cli.getAgentsSuggestions(docAt("/agents ca"))
@@ -50,8 +50,8 @@ func TestGetBoardSuggestions(t *testing.T) {
 	cli := &ChatCLI{}
 
 	got := cli.getBoardSuggestions(docAt("/board "))
-	if len(got) != 8 {
-		t.Fatalf("expected 8 root suggestions, got %d: %v", len(got), got)
+	if len(got) != 12 {
+		t.Fatalf("expected 12 root suggestions, got %d: %v", len(got), got)
 	}
 	got = cli.getBoardSuggestions(docAt("/board mo"))
 	if len(got) != 1 || got[0].Text != "move" {
@@ -80,8 +80,8 @@ func TestGetBoardSuggestions(t *testing.T) {
 func TestGetMailSuggestions(t *testing.T) {
 	cli := &ChatCLI{}
 	got := cli.getMailSuggestions(docAt("/mail "))
-	if len(got) != 4 {
-		t.Fatalf("expected 4 root suggestions, got %d: %v", len(got), got)
+	if len(got) != 6 {
+		t.Fatalf("expected 6 root suggestions, got %d: %v", len(got), got)
 	}
 	got = cli.getMailSuggestions(docAt("/mail send "))
 	if len(got) == 0 {

@@ -8,6 +8,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/diillson/chatcli/cli/agent/mail"
@@ -65,6 +66,26 @@ func (a *liveMailAdapter) Peek(recipient string) (string, error) {
 			fmt.Fprintf(&b, " card=%s", m.CardID)
 		}
 		fmt.Fprintf(&b, " at=%s: %s\n", m.At.Format("15:04:05"), truncateForUI(m.Text, 200))
+	}
+	return b.String(), nil
+}
+
+// Overview implements plugins.MailOverviewer: how many messages each
+// recipient has queued, without reading or draining any of them.
+func (a *liveMailAdapter) Overview() (string, error) {
+	pending := a.reg.Pending()
+	if len(pending) == 0 {
+		return "no pending mail for any recipient", nil
+	}
+	recipients := make([]string, 0, len(pending))
+	for r := range pending {
+		recipients = append(recipients, r)
+	}
+	sort.Strings(recipients)
+	var b strings.Builder
+	fmt.Fprintf(&b, "PENDING MAIL PER RECIPIENT (%d inbox(es); counts only, nothing drained — use peek to read one):\n", len(recipients))
+	for _, r := range recipients {
+		fmt.Fprintf(&b, "%s: %d\n", r, pending[r])
 	}
 	return b.String(), nil
 }

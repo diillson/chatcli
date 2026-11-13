@@ -44,6 +44,13 @@ type MailPeeker interface {
 	Peek(recipient string) (string, error)
 }
 
+// MailOverviewer is the optional extension a MailAdapter may implement to
+// report how many messages each recipient has queued. The plugin
+// type-asserts it at call time so older adapters keep working.
+type MailOverviewer interface {
+	Overview() (string, error)
+}
+
 // mailDefaultRecipient is the inbox peek looks at when none is given — the
 // plugin runs inside the orchestrator loop.
 const mailDefaultRecipient = "orchestrator"
@@ -74,8 +81,8 @@ func NewBuiltinMailPlugin() *BuiltinMailPlugin { return &BuiltinMailPlugin{} }
 
 func (p *BuiltinMailPlugin) Name() string        { return "@mail" }
 func (p *BuiltinMailPlugin) Description() string { return i18n.T("plugins.mail.description") }
-func (p *BuiltinMailPlugin) Usage() string       { return "@mail send|inbox|peek|history" }
-func (p *BuiltinMailPlugin) Version() string     { return "1.1.1" }
+func (p *BuiltinMailPlugin) Usage() string       { return "@mail send|inbox|peek|overview|history" }
+func (p *BuiltinMailPlugin) Version() string     { return "1.2.0" }
 func (p *BuiltinMailPlugin) Path() string        { return "[builtin]" }
 
 // Schema documents the tool for the agent system prompt catalog.
@@ -106,6 +113,12 @@ func (p *BuiltinMailPlugin) Schema() string {
 					{"name": "for", "type": "string", "required": false, "description": "recipient to inspect (default orchestrator; a worker agent type like coder)"},
 				},
 				"examples": []string{`{"cmd":"peek"}`, `{"cmd":"peek","args":{"for":"coder"}}`, `peek coder`},
+			},
+			{
+				"name":        "overview",
+				"description": "Count the pending (undelivered) messages of every recipient at once, to see who has mail waiting. Read-only and takes no arguments; use peek to read one inbox.",
+				"flags":       []map[string]interface{}{},
+				"examples":    []string{`{"cmd":"overview"}`, `overview`},
 			},
 			{
 				"name":        "history",
@@ -159,6 +172,8 @@ func (p *BuiltinMailPlugin) ExecuteWithStream(_ context.Context, args []string, 
 			recipient = mailDefaultRecipient
 		}
 		return peeker.Peek(recipient)
+	case "overview", "counts", "queues":
+		return executeMailOverview(adapter, payload)
 	case "history", "recent", "log":
 		limit := jsonInt(payload, "limit", "n", "count")
 		if limit <= 0 {
@@ -166,8 +181,24 @@ func (p *BuiltinMailPlugin) ExecuteWithStream(_ context.Context, args []string, 
 		}
 		return adapter.History(limit)
 	default:
-		return "", fmt.Errorf("@mail: unknown subcommand %q (expected send|inbox|peek|history)", sub)
+		return "", fmt.Errorf("@mail: unknown subcommand %q (expected send|inbox|peek|overview|history)", sub)
 	}
+}
+
+// executeMailOverview runs the per-recipient pending count. It takes no
+// arguments, and says so: an argument here means the caller wanted one
+// inbox, which is peek — answering with every queue would look like success.
+func executeMailOverview(adapter MailAdapter, payload map[string]json.RawMessage) (string, error) {
+	overviewer, ok := adapter.(MailOverviewer)
+	if !ok {
+		return "", errors.New("@mail overview: not supported by the wired mail adapter")
+	}
+	for key := range payload {
+		if key != "cmd" && key != "args" {
+			return "", fmt.Errorf(`@mail overview: takes no arguments (got %q); to read one inbox use {"cmd":"peek","args":{"for":"<recipient>"}}`, key)
+		}
+	}
+	return overviewer.Overview()
 }
 
 // parseMailInvocation resolves subcommand + payload from the canonical JSON

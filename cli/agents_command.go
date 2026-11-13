@@ -15,7 +15,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +33,7 @@ var agentRunsRegistry = runs.Default
 const agentsCommandRecentN = 10
 
 // handleAgentsCommand routes /agents subcommands.
-func (cli *ChatCLI) handleAgentsCommand(userInput string) {
+func (cli *ChatCLI) handleAgentsCommand(ctx context.Context, userInput string) {
 	args := strings.Fields(strings.TrimSpace(userInput))
 	sub := "list"
 	if len(args) >= 2 {
@@ -55,6 +57,10 @@ func (cli *ChatCLI) handleAgentsCommand(userInput string) {
 			return
 		}
 		cli.agentsCancel(args[2])
+	case "wait", "join", "await":
+		cli.agentsWait(ctx, userInput)
+	case "transcript", "log", "activity", "tail":
+		cli.agentsTranscript(userInput)
 	case "help", "-h", "--help":
 		cli.printAgentsUsage()
 	default:
@@ -263,7 +269,143 @@ func (cli *ChatCLI) agentsCancel(id string) {
 	fmt.Println(colorize("  "+i18n.T("agents.show.notfound", id), ColorYellow))
 }
 
+// agentsWait handles "wait <id> [--block [--timeout D]]". It reports where
+// the run stands and returns: an agent can run for many minutes and a held
+// prompt is a person who cannot type. --block opts into holding, where
+// there is a prompt to hold.
+func (cli *ChatCLI) agentsWait(ctx context.Context, userInput string) {
+	parsed, err := parseSquadTail(userInput, map[string]squadFlagKind{
+		"--block": squadFlagBool, "--timeout": squadFlagWord,
+	})
+	if err != nil || len(parsed.pos) != 1 {
+		if err != nil {
+			printSquadNotice(err.Error())
+		}
+		cli.printAgentsUsage()
+		return
+	}
+	timeout := agentsHoldDefault
+	if raw := parsed.values["--timeout"]; raw != "" {
+		if timeout, err = time.ParseDuration(raw); err != nil || timeout <= 0 {
+			printSquadNotice(i18n.T("agents.wait.timeout_invalid", raw))
+			return
+		}
+		if !parsed.set["--block"] {
+			printSquadNotice(i18n.T("agents.wait.timeout_needs_block"))
+			return
+		}
+	}
+	id := parsed.pos[0].text
+	info, _, _, ok := lookupAgentRun(agentRunsRegistry(), id)
+	if !ok {
+		printSquadNotice(i18n.T("agents.show.notfound", id))
+		return
+	}
+	switch {
+	case info.Status.Terminal():
+		cli.agentsShow(id)
+	case !parsed.set["--block"]:
+		cli.agentsShow(id)
+		fmt.Println(colorize("  "+i18n.T("agents.wait.hint", id, id, id), ColorGray))
+	case cli.schedulerHeadless():
+		// A held command would pin this surface's single command slot for
+		// every session until the run ends.
+		printSquadNotice(i18n.T("agents.wait.block_unavailable"))
+		cli.agentsShow(id)
+	case cli.isExecuting.Load():
+		// Typed while a turn runs, the command executes inside that turn
+		// (the stdin reader or the loop's turn boundary): holding there
+		// would stall the very agents being waited for.
+		printSquadNotice(i18n.T("agents.wait.block_busy"))
+		cli.agentsShow(id)
+	default:
+		cli.agentsHold(ctx, id, timeout)
+	}
+}
+
+// agentsHoldDefault bounds a hold given no --timeout, so that no hold is
+// ever open-ended; it matches the longest wait the @agents tool allows.
+const agentsHoldDefault = 30 * time.Minute
+
+// agentsHold holds the prompt until the run ends, the timeout elapses or
+// the command is interrupted — which only lets go of the prompt.
+func (cli *ChatCLI) agentsHold(ctx context.Context, id string, timeout time.Duration) {
+	// The REPL registers every slash command as interruptible; a hold
+	// started any other way registers itself (a no-op when nested).
+	ctx, release := cli.beginInterruptible(ctx)
+	defer release()
+	fmt.Println(colorize("  "+i18n.T("agents.wait.holding", id, timeout.String()), ColorGray))
+	_, _, outcome := awaitAgentRun(ctx, agentRunsRegistry(), id, timeout, true)
+	switch outcome {
+	case agentWaitInterrupted:
+		printSquadNotice(i18n.T("agents.wait.detached", id, id))
+		return
+	case agentWaitGone, agentWaitUnknown:
+		printSquadNotice(i18n.T("agents.show.notfound", id))
+		return
+	case agentWaitTimedOut:
+		printSquadNotice(i18n.T("agents.wait.timed_out", timeout.String(), id))
+	case agentWaitStale:
+		printSquadNotice(i18n.T("agents.wait.stale", id))
+	}
+	cli.agentsShow(id)
+}
+
+// agentsTranscript handles "transcript <id> [--tail N]": the run's activity
+// log (turns, actions, final status), newest N entries.
+func (cli *ChatCLI) agentsTranscript(userInput string) {
+	parsed, err := parseSquadTail(userInput, map[string]squadFlagKind{"--tail": squadFlagWord})
+	if err != nil || len(parsed.pos) != 1 {
+		if err != nil {
+			printSquadNotice(err.Error())
+		}
+		cli.printAgentsUsage()
+		return
+	}
+	tail := runs.DefaultActivityCap // all the registry keeps per run
+	if raw := parsed.values["--tail"]; raw != "" {
+		if tail, err = strconv.Atoi(raw); err != nil || tail <= 0 {
+			printSquadNotice(i18n.T("agents.transcript.tail_invalid", raw))
+			return
+		}
+	}
+	id := parsed.pos[0].text
+	reg := agentRunsRegistry()
+	info, _ := reg.Get(id)
+	log, local := reg.ActivityLog(id)
+	var remote *remoteAgentRun
+	if !local {
+		// Not ours: read the tail the owning process mirrors through the hub.
+		r, found := findRemoteAgentRun(id)
+		if !found {
+			printSquadNotice(i18n.T("agents.show.notfound", id))
+			return
+		}
+		mirrored := false
+		if log, mirrored = remoteAgentRunActivity(id); !mirrored {
+			printSquadNotice(i18n.T("agents.transcript.not_mirrored", id, remoteRunOrigin(r)))
+			return
+		}
+		info, remote = r.Info, &r
+	}
+	total := len(log)
+	if tail < total {
+		log = log[total-tail:]
+	}
+	title := i18n.T("agents.transcript.title", id, i18n.T("agents.status."+string(info.Status)), len(log), total)
+	fmt.Println(colorize("  "+title, ColorCyan+ColorBold))
+	if remote != nil {
+		fmt.Println(colorize("  "+i18n.T("agents.transcript.remote", remoteRunOrigin(*remote), runsHubActivityTail), ColorGray))
+	}
+	if total == 0 {
+		fmt.Println(colorize("    "+i18n.T("agents.list.none"), ColorGray))
+	}
+	for _, e := range log {
+		fmt.Printf("    %s %s\n", colorize(e.At.Format("15:04:05"), ColorGray), e.Text)
+	}
+}
+
 // printAgentsUsage prints /agents usage help.
 func (cli *ChatCLI) printAgentsUsage() {
-	fmt.Println(colorize("  "+i18n.T("agents.usage"), ColorGray))
+	printSquadUsage("agents.usage.verbs")
 }
