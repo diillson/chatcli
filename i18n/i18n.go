@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -167,6 +168,31 @@ func ActiveTag() language.Tag {
 // intactos ao fmt.Errorf do chamador.
 // Se o sistema i18n não for inicializado, retorna a chave como fallback.
 func T(key string, args ...interface{}) string {
+	out := translate(key, args...)
+	if fn := renderer.Load(); fn != nil {
+		return (*fn)(out)
+	}
+	return out
+}
+
+// renderer, when set, has the last word on every translated string.
+var renderer atomic.Pointer[func(string) string]
+
+// SetRenderer installs a function applied to every string T returns, or
+// removes it with nil. The interface layer uses it to render messages in
+// the active theme's glyph style: the catalogs carry emoji, and a theme
+// that shows none cannot rewrite three thousand messages one call site at
+// a time. The function must be cheap and safe for concurrent use.
+func SetRenderer(fn func(string) string) {
+	if fn == nil {
+		renderer.Store(nil)
+		return
+	}
+	renderer.Store(&fn)
+}
+
+// translate resolves key in the active language and formats it.
+func translate(key string, args ...interface{}) string {
 	if printer == nil {
 		// Fallback caso Init() não tenha sido chamado ou falhou.
 		// Retorna a chave para que o desenvolvedor veja que algo está errado.

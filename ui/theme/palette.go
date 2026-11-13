@@ -147,4 +147,11 @@ type Theme struct {
 	Name    string
 	Variant Variant
 	Palette Palette
+	// Monoglyph asks every surface to render with the canonical one-cell
+	// glyphs only: colored emoji used as status marks become their glyph
+	// (a cross, a check, a triangle) and decorative ones are dropped. A
+	// monochrome palette with full-color emoji scattered through it reads
+	// as two designs at once; the themes that set this are the ones built
+	// around weight and spacing instead of hue.
+	Monoglyph bool
 }

@@ -252,3 +252,60 @@ func GrafiteTheme() Theme {
 		},
 	}
 }
+
+// OnyxTheme is the monochrome theme: a true-black ground, white for what
+// matters, four steps of neutral gray for everything else, and color kept
+// for state alone (done, warning, failed). Hierarchy comes from weight and
+// spacing, so a screen full of output has one thing to look at instead of a
+// dozen competing hues. It turns Monoglyph on for the same reason.
+//
+// The grays are chosen by luminance, not by eye: each text tone clears the
+// contrast floor on #000000 with room to spare, and the dropdown pairs
+// (white on the border fill, black on the selection fill) stay legible.
+func OnyxTheme() Theme {
+	return Theme{
+		Name:      "onyx",
+		Variant:   VariantDark,
+		Monoglyph: true,
+		Palette: Palette{
+			Primary:    Color{Hex: "#FFFFFF", ANSI256: 231, ANSI16: 15},
+			Secondary:  Color{Hex: "#A1A1A1", ANSI256: 247, ANSI16: 7},
+			Accent:     Color{Hex: "#C7C7C7", ANSI256: 251, ANSI16: 7},
+			Muted:      Color{Hex: "#8F8F8F", ANSI256: 245, ANSI16: 8},
+			Success:    Color{Hex: "#3FCF8E", ANSI256: 78, ANSI16: 2},
+			Warning:    Color{Hex: "#F5A623", ANSI256: 214, ANSI16: 3},
+			Danger:     Color{Hex: "#F2545B", ANSI256: 203, ANSI16: 1},
+			Info:       Color{Hex: "#D4D4D4", ANSI256: 252, ANSI16: 7},
+			Border:     Color{Hex: "#333333", ANSI256: 236, ANSI16: 8},
+			Text:       Color{Hex: "#EDEDED", ANSI256: 255, ANSI16: 7},
+			TextStrong: Color{Hex: "#FFFFFF", ANSI256: 231, ANSI16: 15},
+			Background: Color{Hex: "#000000", ANSI256: 16, ANSI16: 0},
+		},
+	}
+}
+
+// OnyxLightTheme is Onyx for a white terminal: the same idea inverted, ink
+// on paper, with the state colors darkened until they hold on white. Its
+// 16-color indices stay in the non-bright range, as every light palette
+// must (the bright range is painted for a dark ground).
+func OnyxLightTheme() Theme {
+	return Theme{
+		Name:      "onyx-light",
+		Variant:   VariantLight,
+		Monoglyph: true,
+		Palette: Palette{
+			Primary:    Color{Hex: "#000000", ANSI256: 16, ANSI16: 0},
+			Secondary:  Color{Hex: "#666666", ANSI256: 241, ANSI16: 8},
+			Accent:     Color{Hex: "#404040", ANSI256: 238, ANSI16: 0},
+			Muted:      Color{Hex: "#6B6B6B", ANSI256: 242, ANSI16: 8},
+			Success:    Color{Hex: "#0E7A43", ANSI256: 29, ANSI16: 2},
+			Warning:    Color{Hex: "#B45309", ANSI256: 130, ANSI16: 3},
+			Danger:     Color{Hex: "#C4262E", ANSI256: 160, ANSI16: 1},
+			Info:       Color{Hex: "#262626", ANSI256: 235, ANSI16: 0},
+			Border:     Color{Hex: "#EAEAEA", ANSI256: 254, ANSI16: 7},
+			Text:       Color{Hex: "#171717", ANSI256: 233, ANSI16: 0},
+			TextStrong: Color{Hex: "#000000", ANSI256: 16, ANSI16: 0},
+			Background: Color{Hex: "#FFFFFF", ANSI256: 231, ANSI16: 15},
+		},
+	}
+}

@@ -50,6 +50,8 @@ var builtins = map[string]func() Theme{
 	"monokai":          MonokaiTheme,
 	"one-dark":         OneDarkTheme,
 	"grafite":          GrafiteTheme,
+	"onyx":             OnyxTheme,
+	"onyx-light":       OnyxLightTheme,
 }
 
 // init publishes a safe default (the configured default theme + the detected

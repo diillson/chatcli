@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 
+	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/ui/theme"
 )
 
@@ -34,5 +36,13 @@ const (
 // Legacy: prefira kit.Colorize(text, role) em código novo/migrado — o
 // role semântico registra POR QUE a cor existe e o tema resolve o resto.
 func colorize(text string, color string) string {
-	return theme.Recolor(fmt.Sprintf("%s%s%s", color, text, ColorReset))
+	return theme.Recolor(fmt.Sprintf("%s%s%s", color, kit.Plain(text), ColorReset))
+}
+
+// Translated messages carry emoji; a theme that renders in monochrome
+// glyphs gets them rewritten where they are produced. Installed once: the
+// function checks the active theme on each call, so switching themes at
+// runtime needs nothing else.
+func init() {
+	i18n.SetRenderer(kit.Plain)
 }

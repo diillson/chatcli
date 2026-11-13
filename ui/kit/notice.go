@@ -5,7 +5,11 @@
  */
 package kit
 
-import "github.com/diillson/chatcli/ui/theme"
+import (
+	"strings"
+
+	"github.com/diillson/chatcli/ui/theme"
+)
 
 // Level classifies a Notice.
 type Level int
@@ -41,6 +45,7 @@ func (l Level) glyph() Glyph {
 // keep the message in default text (the glyph alone carries the state).
 func Notice(l Level, msg string) string {
 	g := l.glyph()
+	msg = withoutLeadingGlyph(Plain(msg), g)
 	body := msg
 	if l == LevelError || l == LevelWarn {
 		body = Colorize(msg, g.Role())
@@ -53,4 +58,15 @@ func Notice(l Level, msg string) string {
 // running spinner summary) that still want the grid alignment.
 func NoticeRole(g Glyph, msg string, r theme.Role) string {
 	return "  " + Colorize(g.String(), r) + " " + msg
+}
+
+// withoutLeadingGlyph drops g from the front of msg. Many messages open
+// with their own status emoji; once a monochrome theme has turned that
+// into the glyph the notice already draws, the line would show it twice.
+func withoutLeadingGlyph(msg string, g Glyph) string {
+	trimmed := strings.TrimLeft(msg, " ")
+	if rest, ok := strings.CutPrefix(trimmed, g.unicodeForm()); ok {
+		return strings.TrimLeft(rest, " ")
+	}
+	return msg
 }
