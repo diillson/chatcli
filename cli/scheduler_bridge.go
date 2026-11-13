@@ -175,6 +175,7 @@ func (b *schedulerBridge) ClassifyShellCommand(cmd string) scheduler.ShellPolicy
 // PolicyChecker can admit "Ask" classifications when the job was
 // pre-authorized via --i-know / i_know:true.
 func (b *schedulerBridge) ExecuteSlashCommand(ctx context.Context, line string, dangerousConfirmed bool) (string, bool, error) {
+	ctx = procCtxOfJob(ctx)
 	if task, kind, ok := classifyAgentSlash(line); ok {
 		if task == "" {
 			return "", false, fmt.Errorf(
@@ -299,6 +300,7 @@ func classifyAgentSlash(line string) (task string, kind agentSlashKind, ok bool)
 // dangerousConfirmed flows to the PolicyChecker so jobs with --i-know
 // can call tools that would otherwise hit ShellPolicyAsk.
 func (b *schedulerBridge) RunAgentTask(ctx context.Context, task, systemHint string, dangerousConfirmed bool) (string, error) {
+	ctx = procCtxOfJob(ctx)
 	return b.runHeadlessAgent(ctx, task, systemHint, "scheduled /run task", dangerousConfirmed, nil)
 }
 
@@ -307,6 +309,7 @@ func (b *schedulerBridge) RunAgentTask(ctx context.Context, task, systemHint str
 // injected into the headless run, so a scheduled card fires with the same
 // knowledge the creating run had.
 func (b *schedulerBridge) RunAgentTaskWithSkills(ctx context.Context, task, systemHint string, dangerousConfirmed bool, skills []string) (string, error) {
+	ctx = procCtxOfJob(ctx)
 	return b.runHeadlessAgent(ctx, task, systemHint, "scheduled /run task", dangerousConfirmed, skills)
 }
 
@@ -317,6 +320,7 @@ func (b *schedulerBridge) RunAgentTaskWithSkills(ctx context.Context, task, syst
 // those are user-session globals and the scheduler dispatcher must not
 // touch them while the user is interactive.
 func (b *schedulerBridge) RunCoderTask(ctx context.Context, task string, dangerousConfirmed bool) (string, error) {
+	ctx = procCtxOfJob(ctx)
 	return b.runHeadlessAgent(ctx, task, CoderSystemPrompt, "scheduled /coder task", dangerousConfirmed, nil)
 }
 

@@ -359,6 +359,7 @@ func (s *Scheduler) runAction(ctx context.Context, j *Job) {
 	// What the action starts — a resumed agent, a headless run, a tool —
 	// hangs from this job's node on the live dashboard.
 	execCtx = pulse.WithParent(execCtx, pulseJobNodeID(j.ID))
+	execCtx = WithJobTags(execCtx, j.tagsCopy())
 
 	br := s.actBreakers.Get(string(action.Type))
 	release, bErr := br.Acquire()

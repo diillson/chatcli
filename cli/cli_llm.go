@@ -179,10 +179,12 @@ func (cli *ChatCLI) announceQueueDrain() {
 	fmt.Print("\033[0m")
 	_ = os.Stdout.Sync()
 	if remaining > 0 {
-		fmt.Printf("\n%s\n", kit.NoticeRole(kit.GlyphRunning, i18n.T("queue.processing_remaining", remaining), theme.RoleAction))
+		draining := i18n.T("queue.processing_remaining", remaining)
+		fmt.Printf("\n%s\n", flatNoticeOr(noticeRunning, draining, kit.NoticeRole(kit.GlyphRunning, draining, theme.RoleAction)))
 		return
 	}
-	fmt.Printf("\n%s\n", kit.NoticeRole(kit.GlyphRunning, i18n.T("queue.processing"), theme.RoleAction))
+	processing := i18n.T("queue.processing")
+	fmt.Printf("\n%s\n", flatNoticeOr(noticeRunning, processing, kit.NoticeRole(kit.GlyphRunning, processing, theme.RoleAction)))
 }
 
 // acquireOperationContext creates the cancellable context that drives the

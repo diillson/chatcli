@@ -60,8 +60,13 @@ func (a *AgentMode) handleAgentPark(
 	pendingToolCallID string,
 	pendingToolName string,
 ) error {
+	ownerPID, ownerHost, ownerNS, ownerStart := parkProcessIdentity()
 	snap := &park.Snapshot{
 		Token:              park.NewToken(),
+		OwnerPID:           ownerPID,
+		OwnerHost:          ownerHost,
+		OwnerPIDNS:         ownerNS,
+		OwnerStart:         ownerStart,
 		History:            append([]models.Message(nil), a.cli.history...),
 		AgentsLaunched:     a.agentsLaunched,
 		ToolCallsExecd:     a.toolCallsExecd,
@@ -393,12 +398,11 @@ func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, out
 	// single user message so the model treats them as fresh instructions
 	// for this cycle. Consumed: the field is cleared before the bookkeeping
 	// save below so a crash-and-reload never re-injects them.
-	if len(snap.PendingUserDirectives) > 0 {
+	if directives := a.beginParkResume(snap); len(directives) > 0 {
 		a.cli.history = append(a.cli.history, models.Message{
 			Role:    "user",
-			Content: buildParkDirectivesMessage(snap.PendingUserDirectives),
+			Content: buildParkDirectivesMessage(directives),
 		})
-		snap.PendingUserDirectives = nil
 	}
 
 	// Banner so the user sees the resume start in their terminal. Skipped
@@ -407,28 +411,26 @@ func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, out
 	// client through the event sink.
 	if !a.cli.unattended {
 		fmt.Println()
-		fmt.Println(colorize("  ▶️  "+i18n.T("park.banner.resumed", snap.Token, outcome), ColorGreen+ColorBold))
+		resumed := i18n.T("park.banner.resumed", snap.Token, outcome)
+		fmt.Println(flatNoticeOr(noticeRunning, resumed, colorize("  ▶️  "+resumed, ColorGreen+ColorBold)))
 		fmt.Println()
-	}
-
-	// Audit checkpoint and snapshot bookkeeping. We keep the snapshot
-	// file on disk (with LastResumeAt updated) for forensic purposes;
-	// scheduled cleanup removes stale ones via Sweep.
-	snap.LastResumeAt = time.Now().UTC()
-	if err := snap.Save(); err != nil {
-		a.logger.Warn("park: failed to update LastResumeAt", zap.String("token", snap.Token), zap.Error(err))
 	}
 
 	// Reuse the same processAIResponseAndAct loop. maxTurns is fresh —
 	// the resumed loop gets its own turn budget so a long park doesn't
 	// borrow turns from the original Run.
-	maxTurns := AgentMaxTurns()
-	err = a.processAIResponseAndAct(ctx, maxTurns)
+	if a.resumeLoop != nil {
+		err = a.resumeLoop(ctx)
+	} else {
+		err = a.processAIResponseAndAct(ctx, AgentMaxTurns())
+	}
 
 	// Parking again mid-resume: propagate the sentinel untouched — the next
 	// cycle's snapshot + scheduler job already exist. RunResumed maps it to
 	// nil for the REPL drain; runParkedInline uses it to keep waiting.
 	if errors.Is(err, errAgentParkedRequested) {
+		// This snapshot's resume completed: the run moved on to a new park.
+		a.endParkResume(snap.Token, park.ResumeDone)
 		return err
 	}
 	if err != nil {
@@ -442,7 +444,9 @@ func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, out
 		}
 		// Transient failure (API error): KEEP the snapshot so the user can
 		// retry with /resume <token> instead of the park dying silently.
-		// parkPrune / Sweep collects it if abandoned.
+		// Marked as such: the user was just told to retry, so no sweep may
+		// call this snapshot finished — only /parked gc or a discard ends it.
+		a.endParkResume(snap.Token, park.ResumeRetry)
 		a.logger.Warn("park: resumed run failed; snapshot kept for manual /resume",
 			zap.String("token", snap.Token), zap.Error(err))
 		return err
@@ -455,6 +459,45 @@ func (a *AgentMode) runResumedCore(ctx context.Context, snap *park.Snapshot, out
 	_ = park.Delete(snap.Token)
 	a.cli.persistBoundSession()
 	return nil
+}
+
+// beginParkResume records, in the snapshot on disk, that this process is
+// resuming it, and takes the directives queued for it. One locked
+// load-modify-save over the file as it is NOW: the snapshot in hand was
+// loaded earlier, and a note recorded since must be delivered, not
+// overwritten. LastResumeAt alone says only that a resume started; the
+// state says how it ended, and the resumer who to ask while it runs.
+func (a *AgentMode) beginParkResume(snap *park.Snapshot) []string {
+	directives := snap.PendingUserDirectives
+	err := park.Update(snap.Token, func(s *park.Snapshot) error {
+		directives = s.PendingUserDirectives
+		s.PendingUserDirectives = nil
+		s.LastResumeAt = time.Now().UTC()
+		s.ResumeState = park.ResumeRunning
+		s.ResumerPID, s.ResumerHost, s.ResumerPIDNS, s.ResumerStart = parkProcessIdentity()
+		return nil
+	})
+	if err != nil {
+		a.logger.Warn("park: failed to record the resume in the snapshot", zap.String("token", snap.Token), zap.Error(err))
+	}
+	snap.PendingUserDirectives = nil
+	return directives
+}
+
+// endParkResume records how the resume of a snapshot that stays on disk
+// ended. A snapshot already gone (retired, discarded) is nothing to record.
+func (a *AgentMode) endParkResume(token, state string) {
+	err := park.Update(token, func(s *park.Snapshot) error {
+		// A completed resume is never downgraded: "retry" recorded after
+		// the fact by an outer caller must not reopen a finished snapshot.
+		if s.ResumeState != park.ResumeDone {
+			s.ResumeState = state
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, park.ErrSnapshotNotFound) {
+		a.logger.Warn("park: failed to record the resume outcome", zap.String("token", token), zap.String("state", state), zap.Error(err))
+	}
 }
 
 // buildParkDirectivesMessage renders the user messages captured while the
@@ -505,6 +548,9 @@ func buildParkResumeMessage(req park.Request, outcome, detail string) string {
 // i18n-required policy. Field labels are localized; tokens, durations
 // and timestamps are not (they are identity values).
 func renderParkBanner(snap *park.Snapshot, req park.Request) {
+	if renderFlatParkBanner(snap, req) {
+		return
+	}
 	short := snap.Token
 	if len(short) > 8 {
 		short = short[:8]

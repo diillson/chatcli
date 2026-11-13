@@ -22,10 +22,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 const (
@@ -101,10 +103,12 @@ type Server struct {
 	token string
 	host  string
 	url   string
-	page  []byte
 	srv   *http.Server
 	log   *zap.Logger
 	voice *voiceState
+	// themeAtStart is the process theme the Options described. Once the
+	// process runs another one, the page is told about that one instead.
+	themeAtStart string
 
 	mu     sync.Mutex
 	active *run
@@ -157,9 +161,8 @@ func Start(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("webui: listening: %w", err)
 	}
 
-	s := &Server{opts: opts, token: hex.EncodeToString(tok[:]), host: ln.Addr().String(), log: opts.Logger, voice: newVoiceState(opts)}
+	s := &Server{opts: opts, token: hex.EncodeToString(tok[:]), host: ln.Addr().String(), log: opts.Logger, voice: newVoiceState(opts), themeAtStart: theme.Active().Name}
 	s.url = "http://" + s.host + "/?t=" + s.token
-	s.page = s.renderPage()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -223,7 +226,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(s.page)
+	// Rendered per request: a reload after a theme change must paint the new
+	// theme at once, not the one the server started under.
+	_, _ = w.Write(s.renderPage())
 }
 
 // pageTokenParam is the query parameter that carries the token on the page
@@ -254,6 +259,35 @@ type boot struct {
 	ThemeVars map[string]string            `json:"theme_vars,omitempty"`
 	Version   string                       `json:"version"`
 	Features  features                     `json:"features"`
+	// WebTheme feeds the page's theme switch; it also travels on every
+	// status poll, so an open page follows a theme change in this process.
+	WebTheme theme.WebPayload `json:"web_theme"`
+}
+
+// statusPayload is the status poll: the backend status plus the theme, in
+// both shapes the page uses. ThemeVars is the default look's light chrome
+// and is null under a dark theme, which is how the page tells them apart.
+type statusPayload struct {
+	Status
+	WebTheme  theme.WebPayload  `json:"web_theme"`
+	Theme     string            `json:"theme"`
+	ThemeVars map[string]string `json:"theme_vars"`
+}
+
+// defaultLookTheme is the theme name and light chrome for the default look.
+// The Options carry what the process ran at start; after a theme change
+// (pushed by the terminal, or made here) they would describe a theme that
+// is gone, so the live one is read instead.
+func (s *Server) defaultLookTheme() (string, map[string]string) {
+	if theme.Active().Name == s.themeAtStart {
+		return s.opts.ThemeName, s.opts.ThemeVars
+	}
+	return cli.ActiveThemeName(), cli.ActiveThemeCSSVars()
+}
+
+func (s *Server) statusData() statusPayload {
+	name, vars := s.defaultLookTheme()
+	return statusPayload{Status: s.opts.Backend.Status(), WebTheme: theme.ActiveWebPayload(), Theme: name, ThemeVars: vars}
 }
 
 type features struct {
@@ -279,7 +313,8 @@ func (s *Server) bootData() boot {
 	if lang == "" {
 		lang = "en"
 	}
-	return boot{Lang: lang, Strings: s.opts.Strings, Catalogs: UICatalogs(), ThemeName: s.opts.ThemeName, ThemeVars: s.opts.ThemeVars, Version: s.opts.Version, Features: s.features()}
+	name, vars := s.defaultLookTheme()
+	return boot{Lang: lang, Strings: s.opts.Strings, Catalogs: UICatalogs(), ThemeName: name, ThemeVars: vars, Version: s.opts.Version, Features: s.features(), WebTheme: theme.ActiveWebPayload()}
 }
 
 func (s *Server) renderPage() []byte {

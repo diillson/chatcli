@@ -37,6 +37,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -212,6 +213,33 @@ func (w *schedulerWAL) List() ([]*Job, error) {
 	return out, nil
 }
 
+// scan returns every record that reads back, WITHOUT touching the
+// directory: no quarantine, no cleanup. For a process looking at a store
+// it shares with others — what it cannot read is somebody else's to deal
+// with. Only live ".wal" records are read: a quarantined file is a stale
+// picture of a job that may since have been cancelled or have run, and
+// has no effect anywhere.
+func (w *schedulerWAL) scan() ([]*Job, error) {
+	entries, err := os.ReadDir(w.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scheduler wal: readdir: %w", err)
+	}
+	var out []*Job
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || strings.Contains(name, ".tmp.") || !strings.HasSuffix(name, ".wal") {
+			continue
+		}
+		if job, rerr := readWALRecord(filepath.Join(w.dir, name)); rerr == nil && job != nil {
+			out = append(out, job)
+		}
+	}
+	return out, nil
+}
+
 // Count returns how many live (.wal) records exist without decoding.
 func (w *schedulerWAL) Count() int {
 	entries, err := os.ReadDir(w.dir)
@@ -265,7 +293,14 @@ func readWALRecord(path string) (*Job, error) {
 
 	br := bufio.NewReader(f)
 	head := make([]byte, 12)
-	if _, err := br.Read(head); err != nil {
+	// io.ReadFull throughout: a single Read of a buffered reader returns
+	// at most what its buffer holds, so a payload past about 4 KB came
+	// back short, failed its CRC, and the record was quarantined as
+	// corrupt — a job with a long prompt was lost on the next start.
+	// Files quarantined that way before this fix are NOT read back: by now
+	// they are stale copies of jobs that went on living in the snapshot
+	// and may have been cancelled or have run since.
+	if _, err := io.ReadFull(br, head); err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 	if !bytes.Equal(head[0:4], walMagic[:]) {
@@ -277,14 +312,14 @@ func readWALRecord(path string) (*Job, error) {
 		return nil, fmt.Errorf("bad length %d", length)
 	}
 	payload := make([]byte, length)
-	if _, err := br.Read(payload); err != nil {
+	if _, err := io.ReadFull(br, payload); err != nil {
 		return nil, fmt.Errorf("read payload: %w", err)
 	}
 	if crc32.ChecksumIEEE(payload) != crc {
 		return nil, fmt.Errorf("leading crc mismatch")
 	}
 	tail := make([]byte, 4)
-	if _, err := br.Read(tail); err != nil {
+	if _, err := io.ReadFull(br, tail); err != nil {
 		return nil, fmt.Errorf("read trailing crc: %w", err)
 	}
 	if binary.BigEndian.Uint32(tail) != crc {

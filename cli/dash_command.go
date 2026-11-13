@@ -195,12 +195,14 @@ func RunDashForeground(ctx context.Context) error {
 // dashOptions builds the page boot data from the active theme and locale.
 func dashOptions(root, holder string) pulsedash.Options {
 	return pulsedash.Options{
-		Root:    root,
-		Holder:  holder,
-		Self:    pulse.Default().Instance(),
-		Lang:    i18n.ActiveTag().String(),
-		Theme:   dashThemeVars(theme.Active()),
-		Strings: dashStrings(),
+		Root:   root,
+		Holder: holder,
+		Self:   pulse.Default().Instance(),
+		Lang:   i18n.ActiveTag().String(),
+		Theme:  dashThemeVars(theme.Active()),
+		// Asked per request: /dash stays open across /config ui theme.
+		ThemeFunc: func() map[string]string { return dashThemeVars(theme.Active()) },
+		Strings:   dashStrings(),
 	}
 }
 
@@ -263,6 +265,7 @@ var dashStringKeys = []string{
 	"tile.cost", "tile.requests", "tile.active", "tile.ctx", "tile.errors", "recent_min", "brand_sub", "processes",
 	"kind.session", "kind.agent", "kind.turn", "kind.llm", "kind.tool", "kind.skill", "kind.mcp", "kind.pattern",
 	"kind.background", "kind.conn", "kind.rpc",
+	"skin", "skin.terminal", "skin.default",
 }
 
 func dashStrings() map[string]string {

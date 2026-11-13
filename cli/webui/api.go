@@ -17,16 +17,23 @@ import (
 	"github.com/diillson/chatcli/pkg/pulse"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
 	"github.com/diillson/chatcli/llm/tts"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 // apiError is the JSON body of every failed API call.
@@ -80,10 +87,11 @@ type apiRoute struct {
 var routes = []apiRoute{
 	{http.MethodGet, "boot", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleBoot(w, r) }},
 	{http.MethodGet, "status", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) {
-		writeJSON(w, http.StatusOK, s.opts.Backend.Status())
+		writeJSON(w, http.StatusOK, s.statusData())
 	}},
 	{http.MethodGet, "providers", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) { s.handleProviders(w) }},
 	{http.MethodPost, "defaults", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleDefaults(w, r) }},
+	{http.MethodPost, cli.WebThemeResource, 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleTheme(w, r) }},
 	{http.MethodPost, "turn", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleTurn(w, r) }},
 	{http.MethodPost, "runs", 2, func(s *Server, w http.ResponseWriter, r *http.Request, rest []string) {
 		s.handleRunAction(w, r, rest[0], rest[1])
@@ -211,6 +219,30 @@ func (s *Server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 	s.opts.Backend.SetDefaults(strings.TrimSpace(req.Provider), strings.TrimSpace(req.Model))
 	p, m := s.opts.Backend.Defaults()
 	writeJSON(w, http.StatusOK, map[string]string{"provider": p, "model": m})
+}
+
+// handleTheme takes the theme the terminal switched to. This process is a
+// child of the terminal and inherited its theme only at spawn; the terminal
+// posts every later change here, and the next status poll carries it to the
+// page. An unknown name changes nothing.
+//
+// The name also goes into the environment variable the theme is initialized
+// from, as /config ui theme does in the terminal: a /reload run from the
+// page re-reads the theme from there, and without this it would bring back
+// the theme this process was spawned under.
+func (s *Server) handleTheme(w http.ResponseWriter, r *http.Request) {
+	var req cli.WebThemeRequest
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if err := theme.SetActive(req.Theme); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_theme", err.Error())
+		return
+	}
+	if err := os.Setenv(config.ThemeEnv, theme.Active().Name); err != nil {
+		s.log.Warn("web: the pushed theme will not survive a reload", zap.Error(err))
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"theme": theme.Active().Name})
 }
 
 // turnRequest is what the page sends to start a turn.
@@ -486,11 +518,15 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTool(w http.ResponseWriter, r *http.Request, name string) {
 	var req struct {
 		Args string `json:"args"`
+		// Session scopes the call to a web session's state (its process
+		// table). Optional: resolved like a turn's, so a call without one
+		// runs for the page's default session.
+		Session string `json:"session"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	out, err := s.opts.Backend.CallTool(r.Context(), name, req.Args)
+	out, err := s.opts.Backend.CallTool(proc.WithSession(r.Context(), s.sessionOf(req.Session)), name, req.Args)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "tool", err.Error())
 		return

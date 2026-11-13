@@ -264,13 +264,14 @@ type ChatCLI struct {
 	personaHandler        *PersonaHandler
 	skillHandler          *SkillHandler
 	executionProfile      ExecutionProfile
-	pendingAction         string // stores intended action before panic (for Windows go-prompt tearDown workaround)
-	replActive            bool   // true only inside the interactive Start() loop (gates the palette trigger)
-	promptRunning         bool   // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
-	themeReloadPending    bool   // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
-	paletteRequested      bool   // a handler asked to open the command palette; the executor runs it in place
-	paletteTarget         string // command to scope the palette to ("" opens the categorized root)
-	suppressPaletteOnce   bool   // skip the palette trigger for the next handled command (the palette's own selection)
+	pendingAction         string           // stores intended action before panic (for Windows go-prompt tearDown workaround)
+	replActive            bool             // true only inside the interactive Start() loop (gates the palette trigger)
+	promptRunning         bool             // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
+	themeReloadPending    bool             // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
+	promptDraft           promptDraftState // text a finished turn hands to the next prompt (see prompt_draft.go)
+	paletteRequested      bool             // a handler asked to open the command palette; the executor runs it in place
+	paletteTarget         string           // command to scope the palette to ("" opens the categorized root)
+	suppressPaletteOnce   bool             // skip the palette trigger for the next handled command (the palette's own selection)
 
 	// Remote connection state (for /connect and /disconnect)
 	localClient   client.LLMClient           // saved local client when connected to remote
@@ -608,6 +609,11 @@ type ChatCLI struct {
 	// dispatcher goroutine; cli.go reads from the main loop.
 	pendingResumeMu    sync.Mutex
 	pendingResumeQueue []string
+	// resumingParks are the tokens a drain took off the queue and has not
+	// finished resuming (guarded by pendingResumeMu). They are in neither
+	// the queue nor, once their run starts, the active set — and their
+	// snapshots are exactly what the rest of the drain is about to load.
+	resumingParks map[string]int
 
 	// parkOutcomes carries the (outcome, detail) tuple from the
 	// NotifyParkComplete call to the consumer that runs RunResumed,
@@ -1091,7 +1097,7 @@ func detectProjectDir() string {
 }
 
 func (cli *ChatCLI) executor(in string) {
-	in = strings.TrimSpace(in)
+	in = cli.undraftInjectedResume(strings.TrimSpace(in))
 
 	// Drain any pending park resumes BEFORE processing the user's
 	// command. Slash commands like /parked, /jobs and chat input all
@@ -1380,6 +1386,9 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				cli.completer,
 				prompt.OptionParser(pasteParser),
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
+				// What a finished turn handed back (a line typed for a prompt
+				// that was withdrawn): on the input line, not submitted.
+				prompt.OptionInitialBufferText(cli.promptInitialText()),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
 				// Input line + completion dropdown, painted from the ACTIVE
 				// theme (see prompt_theme.go). These used to be literals, so
@@ -1393,9 +1402,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				// iteration below rebuild the prompt from the new palette;
 				// go-prompt has already restored cooked mode at this point,
 				// so the exit is clean.
-				prompt.OptionSetExitCheckerOnInput(func(string, bool) bool {
-					return cli.themeReloadPending
-				}),
+				prompt.OptionSetExitCheckerOnInput(cli.promptShouldRebuild),
 				prompt.OptionHistory(cli.commandHistory),
 				prompt.OptionMaxSuggestion(10),
 				prompt.OptionAddKeyBind(prompt.KeyBind{
@@ -1536,7 +1543,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			cli.promptRunning = true
 			p.Run()
 			cli.promptRunning = false
-			if cli.themeReloadPending {
+			if draftRebuild := cli.takePromptRebuild(); cli.themeReloadPending || draftRebuild {
 				cli.themeReloadPending = false
 				themeReload = true // loop again: rebuild the prompt, keep the REPL
 				return
@@ -1649,8 +1656,10 @@ func (cli *ChatCLI) restoreTerminal() {
 
 // Helper para executar lógica do agente com cancelamento via Ctrl+C
 func (cli *ChatCLI) runWithCancellation(parent context.Context, taskName string, fn func(context.Context) error) {
-	// Cria contexto cancelável derivado do contexto pai
-	ctx, cancel := context.WithCancel(parent)
+	// Cria contexto cancelável derivado do contexto pai. Every turn goes
+	// through here, so this is where a prompt command's operator mark stops:
+	// the turn it started is the model's, not the operator's.
+	ctx, cancel := context.WithCancel(withoutLocalOperator(parent))
 
 	// Registra o cancelamento na struct para acesso global se necessário
 	cli.mu.Lock()
@@ -1947,7 +1956,7 @@ func (cli *ChatCLI) changeLivePrefix() (string, bool) {
 
 		var prefix string
 		if len(icons) > 0 {
-			prefix = "[" + strings.Join(icons, " ") + "] "
+			prefix = kit.Plain("[" + strings.Join(icons, " ") + "] ")
 		}
 		if cli.currentSessionName != "" {
 			prefix += cli.currentSessionName + " "

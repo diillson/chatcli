@@ -9,7 +9,7 @@
     --bg:#0B0E14; --panel:#10141C; --panel2:#151B26; --border:#1E2634; --text:#DCE3EB; --strong:#FFFFFF; --muted:#7D8798; --faint:#556070;
     --amber:#FFB454; --cyan:#4FC3E8; --violet:#C79BFF; --green:#7FD962; --red:#E06C75;
     --accent:var(--cyan); --brand:var(--amber); --ok:var(--green); --err:var(--red); --warn:var(--amber);
-    --user:#1A2433; --code:#0D1119;
+    --user:#1A2433; --code:#0D1119; --on-brand:#111; --ctl:var(--border);
     --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   }
@@ -24,7 +24,7 @@
   button { cursor:pointer; background:var(--panel2); border:1px solid var(--border); border-radius:5px; padding:4px 10px; }
   button:hover { border-color:var(--muted); }
   button:disabled { opacity:.5; cursor:not-allowed; }
-  button.primary { background:var(--brand); color:#111; border-color:var(--brand); font-weight:600; }
+  button.primary { background:var(--brand); color:var(--on-brand); border-color:var(--brand); font-weight:600; }
   button.danger { color:var(--err); border-color:color-mix(in srgb, var(--err) 50%, var(--border)); }
   button.ghost { background:transparent; border-color:transparent; color:var(--muted); }
   button.ghost:hover { color:var(--text); border-color:var(--border); }
@@ -63,6 +63,8 @@
 
   aside { background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
   aside.right { border-right:0; border-left:1px solid var(--border); }
+  /* Closed, the drawer is a zero-width column: its border would sit past the right edge and make the page scroll sideways by that pixel. */
+  #app:not(.drawer) aside.right { border-left:0; }
   .aside-h { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
   .aside-h .grow { flex:1; }
   .list { overflow:auto; flex:1; min-height:0; }
@@ -77,7 +79,7 @@
   @media (hover:none) { .row .actions { display:flex; } }
   .search { padding:8px 10px; border-bottom:1px solid var(--border); }
   .search input { width:100%; }
-  .tabs { display:flex; border-bottom:1px solid var(--border); overflow:auto; flex:none; }
+  .tabs { display:flex; flex-wrap:wrap; border-bottom:1px solid var(--border); overflow:auto; flex:none; }
   .tabs .close { margin-left:auto; position:sticky; right:0; background:var(--panel); }
   .tabs button { border:0; border-radius:0; background:transparent; padding:8px 10px; color:var(--muted); font-size:11px; white-space:nowrap; }
   .tabs button.on { color:var(--strong); box-shadow:inset 0 -2px 0 var(--brand); }
@@ -201,6 +203,35 @@
   #toasts { position:fixed; right:14px; bottom:14px; display:flex; flex-direction:column; gap:6px; z-index:30; }
   .toast { background:var(--panel); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:6px; padding:8px 12px; font-size:12px; max-width:380px; box-shadow:0 6px 20px rgba(0,0,0,.35); }
   .toast.err { border-left-color:var(--err); } .toast.ok { border-left-color:var(--ok); }
+  #skinPick { max-width:15rem; }
+  /* Monochrome terminal themes. applySkin sets data-skin and fills the tokens
+     above from the palette the server exports from ui/theme, so no color
+     lives here: these rules are only the manner. No window lights, glow or
+     heavy edge; a state is a border style or a shape as well as its accent. */
+  :root[data-skin] .lights, :root[data-skin] #btnTheme { display:none; }
+  :root[data-skin] ::selection { background:var(--strong); color:var(--bg); }
+  :root[data-skin] #beat { background:transparent; border:1px solid var(--muted); box-shadow:none; }
+  :root[data-skin] #beat.on { background:var(--ok); border-color:var(--ok); }
+  :root[data-skin] #beat.busy { background:var(--warn); border-color:var(--warn); border-radius:0; }
+  :root[data-skin] .toast { box-shadow:none; border-left-width:1px; }
+  :root[data-skin] .toast.err { border-color:var(--err); border-style:dashed; } :root[data-skin] .toast.ok { border-color:var(--ok); }
+  :root[data-skin] .tool { border-left:1px solid var(--border); }
+  :root[data-skin] .tool.err { border:1px dashed var(--err); } :root[data-skin] .tool.run { border:1px dotted var(--warn); }
+  :root[data-skin] .tool .st { color:var(--ok); } :root[data-skin] .tool.err .st { color:var(--err); } :root[data-skin] .tool.run .st { color:var(--warn); }
+  :root[data-skin] details.thought summary { color:var(--muted); }
+  :root[data-skin] .md blockquote { border-left-width:1px; }
+  :root[data-skin] .msg .who { border-radius:4px; }
+  :root[data-skin] .working .dots i { border-radius:0; }
+  /* The border token is a divider and may stay faint; a control is found by
+     its edge, so inputs, selects and buttons take the control-edge token. */
+  :root[data-skin] button, :root[data-skin] select, :root[data-skin] input[type=text], :root[data-skin] input[type=search],
+  :root[data-skin] .seg, :root[data-skin] #composer .box, :root[data-skin] .switch .track { border-color:var(--ctl); }
+  :root[data-skin] button:hover { border-color:var(--strong); }
+  :root[data-skin] button.ghost { border-color:transparent; } :root[data-skin] button.ghost:hover { border-color:var(--ctl); }
+  :root[data-skin] button.primary { border-color:var(--brand); }
+  :root[data-skin] button.danger, :root[data-skin] .mic.rec { border-color:var(--err); }
+  :root[data-skin] .switch input:checked + .track { border-color:var(--ok); }
+  :root[data-skin] .seg button.on { box-shadow:inset 0 -2px 0 var(--strong); }
   @media (max-width: 1440px) { #sessionLabel { display:none; } }
   @media (max-width: 1180px) { #route { display:none; } }
   /* Large screens: a slightly larger type and a wider reading column. */
@@ -246,6 +277,7 @@
       <select id="model" title="model"></select>
       <span class="chip" id="cost" title="cost">$0.0000</span>
       <button class="ghost" id="btnTheme" title="theme">◐</button>
+      <select id="skinPick"></select>
       <button class="ghost" id="btnLang" title="language">EN</button>
       <button class="ghost" id="btnDrawer" data-i18n="btn.panel">Panel</button>
     </div>
@@ -372,6 +404,7 @@ const DEFAULTS = {
   'voice.install.offer':'Download offline voice (~{mb} MB)','status.voiceIn':'Voice in','status.voiceOut':'Voice out',
   'session.bound':'Bound to {name}','session.new':'New session started','session.deleted':'Session deleted','session.confirmDelete':'Delete saved session {name}?','session.forkName':'Name for the fork','session.live':'live',
   'theme':'theme','lang':'language','offline':'Server unreachable','busy':'A turn is already running',
+  'skin':'Theme','skin.terminal':'terminal','skin.default':'default','skin.attach':'attach','skin.image':'image','skin.mic':'mic',
 };
 // The server ships every switchable language; the page starts in the
 // process language unless the visitor picked another one before.
@@ -391,11 +424,17 @@ function nextLang() {
   const langs = Object.keys(CATALOGS).length ? Object.keys(CATALOGS) : ['en'];
   return langs[(langs.indexOf(BOOT.lang) + 1) % langs.length];
 }
-const t = (k, vars) => (S[k] || DEFAULTS[k] || k).replace(/\{(\w+)\}/g, (_, v) => vars && v in vars ? vars[v] : '');
+// A monochrome skin shows words where the default look shows an emoji.
+let skin = null;
+const MONO_KEYS = { 'composer.attach':'skin.attach', 'composer.image':'skin.image' };
+const glyph = (emoji, plain) => skin && skin.mono ? plain : emoji;
+const t = (k, vars) => (S[skin && skin.mono && MONO_KEYS[k] || k] || DEFAULTS[k] || k).replace(/\{(\w+)\}/g, (_, v) => vars && v in vars ? vars[v] : '');
 function applyStrings() {
   $$('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   $$('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
   $$('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); el.setAttribute('aria-label', el.title); });
+  $('#btnMic').textContent = glyph('🎙', t('skin.mic'));
+  renderSkinPick();
   // Panels built from data re-render in the new language.
   if (typeof renderRoute === 'function' && state.providers) { renderRoute(); renderStatus(); renderTools(); renderSkills(); renderMCP(); renderMemory(); renderCommands(); renderSessions(); renderVoice(); }
 }
@@ -416,6 +455,57 @@ function applyTheme(name) {
   try { saved = localStorage.getItem('chatcli_web_theme'); } catch {}
   applyTheme(saved || (BOOT.theme_vars ? 'light' : 'dark'));
 })();
+
+// ---------- skin: this page's look, a monochrome terminal theme, or whatever
+// the terminal runs. The palettes come from ui/theme through the server (boot
+// data, then every status poll); the page only maps role names onto its own
+// tokens. Anything the server does not offer is the default look above.
+const SKIN_KEY = 'chatcli_web_skin';
+const SKIN_VARS = { '--bg':'background','--panel':'surface','--panel2':'surface2','--border':'border','--text':'text','--strong':'text_strong',
+  '--muted':'muted','--faint':'muted','--accent':'primary','--brand':'primary','--ok':'success','--err':'danger','--warn':'warning',
+  '--amber':'primary','--cyan':'primary','--violet':'secondary','--green':'success','--red':'danger',
+  '--user':'surface2','--code':'surface','--on-brand':'on_primary','--ctl':'control' };
+let webTheme = BOOT.web_theme || { active:'', themes:{} };
+let skinChoice = 'terminal';
+try { skinChoice = localStorage.getItem(SKIN_KEY) || 'terminal'; } catch { /* storage blocked: follow the terminal */ }
+function applySkin(relook) {
+  const root = document.documentElement, was = !!root.dataset.skin;
+  skin = (webTheme.themes || {})[skinChoice === 'terminal' ? webTheme.active : skinChoice] || null;
+  if (skin) {
+    for (const [prop, role] of Object.entries(SKIN_VARS)) root.style.setProperty(prop, skin.roles[role]);
+    root.dataset.skin = skin.name; root.style.colorScheme = skin.variant;
+  } else if (was || relook) {
+    for (const prop of Object.keys(SKIN_VARS)) root.style.removeProperty(prop);
+    delete root.dataset.skin; root.style.colorScheme = '';
+    applyTheme(root.dataset.theme === 'light' ? 'light' : 'dark');   // hand the tokens back to the default look
+  }
+}
+function renderSkinPick() {
+  const pick = $('#skinPick'), names = Object.keys(webTheme.themes || {});
+  if (skinChoice !== 'terminal' && skinChoice !== 'default' && !names.includes(skinChoice)) skinChoice = 'terminal';
+  pick.textContent = ''; pick.title = t('skin'); pick.setAttribute('aria-label', pick.title);
+  const rows = [['terminal', t('skin.terminal') + (webTheme.active ? ' · ' + webTheme.active : '')], ['default', t('skin.default')]].concat(names.map(n => [n, n]));
+  for (const [value, label] of rows) { const o = document.createElement('option'); o.value = value; o.textContent = label; pick.appendChild(o); }
+  pick.value = skinChoice;
+}
+// vars is the default look's share of the terminal theme: the light chrome
+// of a light theme, null for a dark one. It moves with the theme, so the
+// default look and the "terminal" label never describe different themes.
+function setWebTheme(next, vars) {
+  if (!next || JSON.stringify(next) === JSON.stringify(webTheme)) return;
+  webTheme = next;
+  if (vars !== undefined) {
+    BOOT.theme_vars = vars;
+    if (skinChoice === 'terminal') document.documentElement.dataset.theme = vars ? 'light' : 'dark';
+  }
+  applySkin(true); applyStrings();
+}
+$('#skinPick').addEventListener('change', e => {
+  skinChoice = e.target.value;
+  try { localStorage.setItem(SKIN_KEY, skinChoice); } catch { /* storage blocked: the choice lasts for this page */ }
+  applySkin(); applyStrings();
+});
+applySkin();
 
 // ---------- API ----------
 // The token arrives in the page URL (?t=) and stays there so a reload keeps
@@ -554,7 +644,7 @@ function endAssistant(finalText) {
   s.body.innerHTML = md(s.text);
   s.body.classList.remove('caret');
   if (BOOT.features.voice && s.text.trim()) {
-    const sp = document.createElement('button'); sp.className = 'ghost'; sp.textContent = '🔊 ' + t('tts.speak'); sp.style.marginTop = '6px';
+    const sp = document.createElement('button'); sp.className = 'ghost'; sp.textContent = glyph('🔊 ', '') + t('tts.speak'); sp.style.marginTop = '6px';
     sp.onclick = () => speak(s.text); s.el.querySelector('.body').appendChild(sp);
     if (voice.talk && !voice.quiet) speak(s.text, () => { if (voice.talk) startRecording(); });
   }
@@ -639,7 +729,7 @@ async function sendTurn(text) {
   const images = state.images.slice();
   const isPDF = i => i.media_type === 'application/pdf' || /\.pdf$/i.test(i.name || '');
   const previews = images.filter(i => !isPDF(i)).map(i => 'data:' + i.media_type + ';base64,' + i.data);
-  const pdfs = images.filter(isPDF).map(i => '📄 ' + i.name);
+  const pdfs = images.filter(isPDF).map(i => glyph('📄 ', 'PDF ') + i.name);
   addMessage('user', pdfs.length ? (text ? text + '\n' : '') + pdfs.join('\n') : text, previews);
   $('#input').value = ''; autosize(); state.images = []; renderAtts();
   setBusy(true); setPlan(null); beginAssistant(); refocusComposer();
@@ -774,7 +864,7 @@ input.addEventListener('paste', e => {
 function renderAtts() {
   const a = $('#atts');
   a.innerHTML = state.images.map((im, i) => (im.media_type === 'application/pdf' || /\.pdf$/i.test(im.name || '')
-    ? '<span class="att pdf" title="' + esc(im.name) + '">📄 ' + esc(im.name) + '<button class="x" data-i="' + i + '">×</button></span>'
+    ? '<span class="att pdf" title="' + esc(im.name) + '">' + glyph('📄 ', 'PDF ') + esc(im.name) + '<button class="x" data-i="' + i + '">×</button></span>'
     : '<span class="att"><img src="data:' + im.media_type + ';base64,' + im.data + '" alt=""><button class="x" data-i="' + i + '">×</button></span>')).join('');
   $$('#atts .x').forEach(b => b.addEventListener('click', () => { state.images.splice(+b.dataset.i, 1); renderAtts(); }));
   $('#composerHint').textContent = state.images.length ? t('composer.images', { n: state.images.length }) : '';
@@ -1025,7 +1115,7 @@ if (BOOT.features.images) {
   const b = $('#btnImage'); b.style.display = '';
   b.addEventListener('click', async () => {
     const prompt = input.value.trim() || window.prompt(t('image.prompt')); if (!prompt) return;
-    addMessage('user', '🖼 ' + prompt); input.value = ''; autosize();
+    addMessage('user', glyph('🖼 ', t('skin.image') + ': ') + prompt); input.value = ''; autosize();
     try {
       const j = await api('image', { json: { prompt } });
       addMessage('assistant', '', j.images.map(im => 'data:' + im.mime + ';base64,' + im.data));
@@ -1049,6 +1139,8 @@ function renderRoute() {
   const models = (cur.models || []).slice();
   if (state.model && !models.includes(state.model)) models.unshift(state.model);
   ms.innerHTML = models.map(m => '<option value="' + esc(m) + '"' + (m === state.model ? ' selected' : '') + '>' + esc(m) + '</option>').join('');
+  // A list with nothing in it would render as a blank control.
+  ps.hidden = !state.providers.length; ms.hidden = !models.length;
   $('#route').textContent = (state.provider || '—') + ' · ' + (state.model || '—') + ' · ' + t('mode.' + state.mode);
 }
 $('#provider').addEventListener('change', async e => {
@@ -1210,7 +1302,7 @@ $('#btnNew').addEventListener('click', async () => {
   catch (e) { toast(e.message, 'err'); }
 });
 async function refreshSessions() { try { const j = await api('sessions'); state.sessions = j.sessions || []; renderSessions(); } catch {} }
-async function refreshStatus() { try { state.status = await api('status'); renderStatus(); renderMCP(); $('#beat').classList.add('on'); } catch { $('#beat').classList.remove('on'); } }
+async function refreshStatus() { try { state.status = await api('status'); setWebTheme(state.status.web_theme, state.status.theme_vars); renderStatus(); renderMCP(); $('#beat').classList.add('on'); } catch { $('#beat').classList.remove('on'); } }
 
 // ---------- boot ----------
 async function boot() {

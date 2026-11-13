@@ -38,7 +38,9 @@ func TestProcCommandParseRejects(t *testing.T) {
 func TestProcCommandSeesAndStopsWhatTheToolStarted(t *testing.T) {
 	cli := &ChatCLI{logger: zap.NewNop()}
 	t.Cleanup(cli.shutdownProcSupervisor)
-	run := func(line string) string { return captureStdout(t, func() { cli.handleProcCommand(line) }) }
+	run := func(line string) string {
+		return captureStdout(t, func() { cli.handleProcCommand(context.Background(), line) })
+	}
 	if out := run("/proc"); !strings.Contains(out, i18n.T("proc.cmd.none_tracked")) {
 		t.Fatalf("empty list: %q", out)
 	}
@@ -68,13 +70,13 @@ func TestProcCommandSeesAndStopsWhatTheToolStarted(t *testing.T) {
 	complete := func(line string) []string {
 		return suggestTexts(cli.getProcSuggestions(docWithCursor(line, len(line))))
 	}
-	if got := strings.Join(complete("/proc "), " "); got != "list status logs stop" {
+	if got := strings.Join(complete("/proc "), " "); got != "list status logs stop remove" {
 		t.Errorf("subcommands: %q", got)
 	}
 	if got := complete("/proc stop "); len(got) != 1 || got[0] != "p1" {
 		t.Errorf("live ids: %v", got)
 	}
-	if got := strings.Join(complete("/proc logs p1 "), " "); got != "--grep --tail" {
+	if got := strings.Join(complete("/proc logs p1 "), " "); got != "--grep --tail --owner" {
 		t.Errorf("logs flags: %q", got)
 	}
 	// stop only requests the stop; the supervisor terminates on its own.

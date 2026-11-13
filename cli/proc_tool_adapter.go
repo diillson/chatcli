@@ -3,10 +3,12 @@
  * Copyright (c) 2024 Edilson Freitas
  * License: Apache-2.0
  *
- * Implements plugins.ProcAdapter over cli/agent/proc: a lazily created,
- * session-scoped Supervisor whose command vetting is the SAME
+ * Implements plugins.ProcAdapter over cli/agent/proc: a lazily created
+ * Supervisor, one per chatcli process, whose command vetting is the SAME
  * agent.CommandValidator the one-shot exec path uses — @proc is never a side
- * door around policy. Every process still running dies with the session.
+ * door around policy. Each session a server process serves reads and writes
+ * its own table of it (proc.Table); the terminal has the unnamed one. Every
+ * process still running dies with the chatcli process.
  */
 package cli
 
@@ -28,10 +30,47 @@ import (
 // procToolAdapter is the concrete plugins.ProcAdapter.
 type procToolAdapter struct {
 	cli *ChatCLI
+	// owner is the session whose process table this adapter uses; "" is
+	// the terminal's, which is what the adapter wired at startup carries.
+	owner string
 }
 
-// supervisor returns the session supervisor, creating it on first use.
-func (a *procToolAdapter) supervisor() *proc.Supervisor {
+// An RPC session id and a gateway principal spelled alike are still
+// different owners: each kind has its namespace.
+func procSessionOwner(session string) string  { return proc.SessionOwner(session) }
+func procTenantOwner(principal string) string { return "tenant:" + principal }
+
+// WithProcSession marks ctx as serving session, so /proc and @proc run
+// under it use that session's process table. The RPC surfaces (ACP, web,
+// MCP) call it; an empty session leaves ctx on the terminal's table.
+func WithProcSession(ctx context.Context, session string) context.Context {
+	return proc.WithSession(ctx, session)
+}
+
+// withTenantProcOwner gives the gateway tenant whose store set is installed
+// its own process table. Without hub isolation the gateway is one shared
+// conversation and keeps the shared table, like every other store.
+func (cli *ChatCLI) withTenantProcOwner(ctx context.Context) context.Context {
+	if tenant := cli.activeTenant(); tenant != "" {
+		return proc.WithOwner(ctx, procTenantOwner(tenant))
+	}
+	return ctx
+}
+
+// ForContext implements plugins.ProcScoper. The owner travels on the
+// context, not on the ChatCLI: a background run keeps calling tools after
+// its turn handed the process over to another session.
+func (a *procToolAdapter) ForContext(ctx context.Context) plugins.ProcAdapter {
+	return &procToolAdapter{cli: a.cli, owner: proc.OwnerFrom(ctx)}
+}
+
+// supervisor is the process supervisor as this adapter's session sees it.
+func (a *procToolAdapter) supervisor() *proc.Table {
+	return a.processSupervisor().Table(a.owner)
+}
+
+// processSupervisor returns the one supervisor, creating it on first use.
+func (a *procToolAdapter) processSupervisor() *proc.Supervisor {
 	a.cli.procSupOnce.Do(func() {
 		validator := agent.NewCommandValidator(a.cli.logger)
 		sup := proc.NewSupervisor(validator.ValidateCommand, a.cli.logger)
@@ -208,6 +247,7 @@ func formatProcInfo(info proc.Info) string {
 
 // compile-time assertion that the adapter satisfies the plugin interface.
 var _ plugins.ProcAdapter = (*procToolAdapter)(nil)
+var _ plugins.ProcScoper = (*procToolAdapter)(nil)
 
 // shutdownProcSupervisor stops every background process the @proc tool
 // started. Called from the session cleanup path.

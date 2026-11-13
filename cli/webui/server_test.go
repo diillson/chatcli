@@ -15,6 +15,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,8 @@ type fakeBackend struct {
 	sessions map[string][]rpcserve.HistoryItem
 	bound    map[string]string
 	decision agentevents.PermissionDecision
+	// coderRuns numbers the coder runs, for their tool ids.
+	coderRuns int
 }
 
 func newFakeBackend() *fakeBackend {
@@ -110,15 +113,21 @@ func (f *fakeBackend) Chat(_ context.Context, _, text string, o TurnOptions, sin
 
 func (f *fakeBackend) RunCoder(ctx context.Context, _, task string, _ TurnOptions, events agentevents.Sink) (string, error) {
 	events.Thought("thinking")
-	events.ToolStart(agentevents.ToolCall{ID: "t1", Name: "@coder", Title: "rm -rf build"})
-	d, err := events.(agentevents.PermissionDecider).RequestPermissionDecision(agentevents.PermissionRequest{Tool: agentevents.ToolCall{ID: "t1", Name: "@coder"}, Reason: "dangerous", OfferAlways: true})
+	// Every run gets a tool id of its own, as real runs do: the page keys
+	// its tool cards by id, and a reused one leaves the second card open.
+	f.mu.Lock()
+	f.coderRuns++
+	id := "t" + strconv.Itoa(f.coderRuns)
+	f.mu.Unlock()
+	events.ToolStart(agentevents.ToolCall{ID: id, Name: "@coder", Title: "rm -rf build"})
+	d, err := events.(agentevents.PermissionDecider).RequestPermissionDecision(agentevents.PermissionRequest{Tool: agentevents.ToolCall{ID: id, Name: "@coder"}, Reason: "dangerous", OfferAlways: true})
 	if err != nil {
 		return "", err
 	}
 	f.mu.Lock()
 	f.decision = d
 	f.mu.Unlock()
-	events.ToolEnd(agentevents.ToolCall{ID: "t1", Name: "@coder", Status: "done", Output: "ok"})
+	events.ToolEnd(agentevents.ToolCall{ID: id, Name: "@coder", Status: "done", Output: "ok"})
 	events.Message("done: " + task)
 	return "done: " + task, nil
 }

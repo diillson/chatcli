@@ -34,14 +34,23 @@ import (
 )
 
 const (
-	// maxRunning bounds concurrently running processes; a session juggling
-	// more than this is almost certainly leaking servers.
+	// maxRunning bounds the processes ONE owner runs concurrently; a session
+	// juggling more than this is almost certainly leaking servers.
 	maxRunning = 8
 
-	// maxRetained bounds TOTAL tracked entries (running + exited). Oldest
-	// exited entries are evicted first so their logs stay readable for a
-	// while without growing forever.
+	// maxRetained bounds the entries tracked for ONE owner (running +
+	// exited). Its oldest exited entries are evicted first so their logs
+	// stay readable for a while without growing forever.
 	maxRetained = 24
+
+	// maxRunningHost / maxRetainedHost are the ceilings the NAMED owners
+	// (the sessions a server process serves) share: the per-owner limits
+	// alone would let N sessions run 8N servers and hold 24N output
+	// buffers. The terminal — the empty owner, the local operator — is
+	// outside both: its 8 and 24 are its own, it is never refused or
+	// evicted because of sessions, and it does not count against them.
+	maxRunningHost  = 32
+	maxRetainedHost = 96
 
 	// outputRingCap bounds each process's captured combined output.
 	outputRingCap = 256 * 1024 // 256KiB
@@ -58,7 +67,20 @@ const (
 var (
 	stopGrace     = 5 * time.Second
 	killWaitBound = 2 * time.Second
+
+	// unusedEntryAfter is how long an EXITED entry must have gone unused —
+	// since it exited and since it was last read (status, logs, grep, wait)
+	// — before a start by another session may evict it at the tracked
+	// ceiling. Sessions of a server are never closed, and what they leave
+	// behind would otherwise hold the ceiling until restart; an entry
+	// someone is still reading is not leftovers.
+	unusedEntryAfter = 10 * time.Minute
 )
+
+// errHostAtCapacity refuses a start at a host ceiling. It names no count
+// and no session: the caller cannot see, and must not learn about, what
+// the others run.
+var errHostAtCapacity = errors.New("this chatcli host is at its capacity for background processes — stop or remove one of your own if you have any, or try again later")
 
 // State is a process's lifecycle state.
 type State string
@@ -70,7 +92,11 @@ const (
 
 // Info is a point-in-time snapshot of one supervised process.
 type Info struct {
-	ID       string
+	ID string
+	// Owner is the session that started the process, "" for the terminal.
+	// Ids are numbered per owner, so an id names a process only together
+	// with it. Views scoped to one owner never print it.
+	Owner    string
 	PID      int
 	Command  string
 	Dir      string
@@ -93,15 +119,31 @@ type Supervisor struct {
 	logger   *zap.Logger
 	validate Validator
 
-	mu     sync.Mutex
-	seq    int
-	procs  map[string]*managedProcess
+	mu sync.Mutex
+	// seq numbers ids per owner: one sequence for all would let a session
+	// count the others' starts by the gaps in its own ids.
+	seq    map[string]int
+	procs  map[procKey]*managedProcess
 	closed bool
+	// handles gives each named owner a short stable name (o1, o2, ...) in
+	// the order they first started something. An owner is an arbitrary
+	// string a client chose; the operator addresses it by the handle.
+	handles map[string]int
 }
+
+// procKey names one tracked process: ids repeat across owners.
+type procKey struct{ owner, id string }
 
 type managedProcess struct {
 	info Info
 	cmd  *exec.Cmd
+
+	// owner is the session that started the process ("" for the terminal).
+	owner string
+	// lastRead is when status, logs, grep or wait last looked at it
+	// (guarded by Supervisor.mu); with the exit time it says how long the
+	// entry has gone unused.
+	lastRead time.Time
 
 	outMu sync.Mutex
 	out   []byte // ring-ish buffer, trimmed from the front at cap
@@ -123,7 +165,9 @@ func NewSupervisor(validate Validator, logger *zap.Logger) *Supervisor {
 	return &Supervisor{
 		logger:   logger,
 		validate: validate,
-		procs:    map[string]*managedProcess{},
+		seq:      map[string]int{},
+		handles:  map[string]int{},
+		procs:    map[procKey]*managedProcess{},
 	}
 }
 
@@ -131,6 +175,10 @@ func NewSupervisor(validate Validator, logger *zap.Logger) *Supervisor {
 // process id. The process joins its own process group so Stop can terminate
 // the whole tree (dev servers fork workers).
 func (s *Supervisor) Start(command, dir string) (Info, error) {
+	return s.startFor("", command, dir)
+}
+
+func (s *Supervisor) startFor(owner, command, dir string) (Info, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return Info{}, fmt.Errorf("empty command")
@@ -143,11 +191,8 @@ func (s *Supervisor) Start(command, dir string) (Info, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return Info{}, fmt.Errorf("supervisor closed")
-	}
-	if running := s.runningLocked(); running >= maxRunning {
-		return Info{}, fmt.Errorf("%d processes already running (limit %d) — stop one first (@proc stop)", running, maxRunning)
+	if err := s.admitLocked(owner); err != nil {
+		return Info{}, err
 	}
 
 	cmd := shellCommand(command)
@@ -156,12 +201,12 @@ func (s *Supervisor) Start(command, dir string) (Info, error) {
 	}
 	setProcessGroup(cmd)
 
-	s.seq++
-	id := fmt.Sprintf("p%d", s.seq)
+	id := s.nextIDLocked(owner)
 	mp := &managedProcess{
-		info: Info{ID: id, Command: command, Dir: dir, State: StateRunning, Started: time.Now()},
-		cmd:  cmd,
-		done: make(chan struct{}),
+		info:  Info{ID: id, Owner: owner, Command: command, Dir: dir, State: StateRunning, Started: time.Now()},
+		cmd:   cmd,
+		owner: owner,
+		done:  make(chan struct{}),
 	}
 	cmd.Stdout = ringWriter{mp}
 	cmd.Stderr = ringWriter{mp}
@@ -171,8 +216,8 @@ func (s *Supervisor) Start(command, dir string) (Info, error) {
 	}
 	mp.info.PID = cmd.Process.Pid
 
-	s.evictOldestExitedLocked()
-	s.procs[id] = mp
+	s.evictForLocked(owner)
+	s.procs[procKey{owner, id}] = mp
 
 	go func() {
 		err := cmd.Wait()
@@ -195,6 +240,10 @@ func (s *Supervisor) Start(command, dir string) (Info, error) {
 // TTY (REPLs, debuggers, ssh, prompts) run for real and Stdin can drive
 // them. Same vetting, limits and lifecycle as Start; Unix only.
 func (s *Supervisor) StartPTY(command, dir string) (Info, error) {
+	return s.startPTYFor("", command, dir)
+}
+
+func (s *Supervisor) startPTYFor(owner, command, dir string) (Info, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return Info{}, fmt.Errorf("empty command")
@@ -211,11 +260,8 @@ func (s *Supervisor) StartPTY(command, dir string) (Info, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return Info{}, fmt.Errorf("supervisor closed")
-	}
-	if running := s.runningLocked(); running >= maxRunning {
-		return Info{}, fmt.Errorf("%d processes already running (limit %d) — stop one first (@proc stop)", running, maxRunning)
+	if err := s.admitLocked(owner); err != nil {
+		return Info{}, err
 	}
 
 	cmd := shellCommand(command)
@@ -231,18 +277,18 @@ func (s *Supervisor) StartPTY(command, dir string) (Info, error) {
 		return Info{}, fmt.Errorf("start pty: %w", err)
 	}
 
-	s.seq++
-	id := fmt.Sprintf("p%d", s.seq)
+	id := s.nextIDLocked(owner)
 	mp := &managedProcess{
-		info: Info{ID: id, Command: command, Dir: dir, State: StateRunning, Started: time.Now(), PTY: true},
-		cmd:  cmd,
-		ptmx: ptmx,
-		done: make(chan struct{}),
+		info:  Info{ID: id, Owner: owner, Command: command, Dir: dir, State: StateRunning, Started: time.Now(), PTY: true},
+		cmd:   cmd,
+		owner: owner,
+		ptmx:  ptmx,
+		done:  make(chan struct{}),
 	}
 	mp.info.PID = cmd.Process.Pid
 
-	s.evictOldestExitedLocked()
-	s.procs[id] = mp
+	s.evictForLocked(owner)
+	s.procs[procKey{owner, id}] = mp
 
 	// The master side is the only reader of the terminal's output.
 	go func() {
@@ -281,8 +327,12 @@ func (s *Supervisor) StartPTY(command, dir string) (Info, error) {
 // Stdin writes text to a PTY-started process's terminal; pressEnter appends
 // carriage return (what a terminal's Enter key sends).
 func (s *Supervisor) Stdin(id, text string, pressEnter bool) (Info, error) {
+	return s.stdinFor("", id, text, pressEnter)
+}
+
+func (s *Supervisor) stdinFor(owner string, id, text string, pressEnter bool) (Info, error) {
 	s.mu.Lock()
-	mp, ok := s.procs[id]
+	mp, ok := s.procs[procKey{owner, id}]
 	if !ok {
 		s.mu.Unlock()
 		return Info{}, fmt.Errorf("unknown process id %q (see list)", id)
@@ -314,23 +364,33 @@ func (s *Supervisor) Stdin(id, text string, pressEnter bool) (Info, error) {
 
 // Status returns the snapshot for one process.
 func (s *Supervisor) Status(id string) (Info, error) {
+	return s.statusFor("", id)
+}
+
+func (s *Supervisor) statusFor(owner string, id string) (Info, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	mp, ok := s.procs[id]
+	mp, ok := s.procs[procKey{owner, id}]
 	if !ok {
-		return Info{}, s.unknownIDErrLocked(id)
+		return Info{}, s.unknownIDErrLocked(owner, id)
 	}
+	mp.lastRead = time.Now()
 	return mp.info, nil
 }
 
 // Logs returns the last tailLines lines of the process's combined output.
 func (s *Supervisor) Logs(id string, tailLines int) (string, Info, error) {
+	return s.logsFor("", id, tailLines)
+}
+
+func (s *Supervisor) logsFor(owner string, id string, tailLines int) (string, Info, error) {
 	s.mu.Lock()
-	mp, ok := s.procs[id]
+	mp, ok := s.procs[procKey{owner, id}]
 	if !ok {
 		defer s.mu.Unlock()
-		return "", Info{}, s.unknownIDErrLocked(id)
+		return "", Info{}, s.unknownIDErrLocked(owner, id)
 	}
+	mp.lastRead = time.Now()
 	info := mp.info
 	s.mu.Unlock()
 
@@ -349,11 +409,15 @@ func (s *Supervisor) Logs(id string, tailLines int) (string, Info, error) {
 // Stop terminates the process tree: TERM to the group, a grace period, then
 // KILL. Idempotent on exited processes.
 func (s *Supervisor) Stop(id string) (Info, error) {
+	return s.stopFor("", id)
+}
+
+func (s *Supervisor) stopFor(owner string, id string) (Info, error) {
 	s.mu.Lock()
-	mp, ok := s.procs[id]
+	mp, ok := s.procs[procKey{owner, id}]
 	if !ok {
 		defer s.mu.Unlock()
-		return Info{}, s.unknownIDErrLocked(id)
+		return Info{}, s.unknownIDErrLocked(owner, id)
 	}
 	state := mp.info.State
 	s.mu.Unlock()
@@ -377,9 +441,13 @@ func (s *Supervisor) Stop(id string) (Info, error) {
 // callers that must not be held for the grace. The stop is bounded, and
 // CloseAll still covers the process if the session ends first.
 func (s *Supervisor) StopAsync(id string) (Info, error) {
-	info, err := s.Status(id)
+	return s.stopAsyncFor("", id)
+}
+
+func (s *Supervisor) stopAsyncFor(owner string, id string) (Info, error) {
+	info, err := s.statusFor(owner, id)
 	if err == nil && info.State == StateRunning {
-		go func() { _, _ = s.Stop(id) }()
+		go func() { _, _ = s.stopFor(owner, id) }()
 	}
 	return info, err
 }
@@ -405,26 +473,36 @@ func (s *Supervisor) awaitKilled(mp *managedProcess, bound <-chan time.Time) {
 // Remove forgets an exited process (and its logs). Running processes must be
 // stopped first.
 func (s *Supervisor) Remove(id string) error {
+	return s.removeFor("", id)
+}
+
+func (s *Supervisor) removeFor(owner string, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	mp, ok := s.procs[id]
+	mp, ok := s.procs[procKey{owner, id}]
 	if !ok {
-		return s.unknownIDErrLocked(id)
+		return s.unknownIDErrLocked(owner, id)
 	}
 	if mp.info.State == StateRunning {
 		return fmt.Errorf("process %s is running — stop it first", id)
 	}
-	delete(s.procs, id)
+	delete(s.procs, procKey{owner, id})
 	return nil
 }
 
 // List returns every tracked process, running first, then by recency.
 func (s *Supervisor) List() []Info {
+	return s.listFor(nil)
+}
+
+func (s *Supervisor) listFor(owner *string) []Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]Info, 0, len(s.procs))
 	for _, mp := range s.procs {
-		out = append(out, mp.info)
+		if mp.ownedBy(owner) {
+			out = append(out, mp.info)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if (out[i].State == StateRunning) != (out[j].State == StateRunning) {
@@ -465,41 +543,213 @@ func (s *Supervisor) CloseAll() {
 
 // --- internals ---
 
-func (s *Supervisor) runningLocked() int {
-	n := 0
+// admitLocked says whether owner may start one more process. Its own limit
+// is told with its own count, which it can act on. The terminal answers to
+// nothing else. A named owner also shares the host ceilings, and those are
+// told without a number or a name.
+func (s *Supervisor) admitLocked(owner string) error {
+	if s.closed {
+		return fmt.Errorf("supervisor closed")
+	}
+	running, _ := s.countLocked(func(mp *managedProcess) bool { return mp.owner == owner })
+	if running >= maxRunning {
+		return fmt.Errorf("%d processes already running (limit %d) — stop one first (@proc stop)", running, maxRunning)
+	}
+	if owner == "" {
+		return nil
+	}
+	namedRunning, namedTracked := s.countLocked(named)
+	if namedRunning >= maxRunningHost || (namedTracked >= maxRetainedHost && s.evictableForLocked(owner) == (procKey{})) {
+		// The client is told nothing about the others; the server log is
+		// where whoever runs this host learns who holds the table — a
+		// headless server has no prompt to ask /proc list --all at.
+		s.logger.Warn("proc: start refused, host at capacity for session processes",
+			zap.String("refused", s.ownerLabelLocked(owner)),
+			zap.Int("running", namedRunning), zap.Int("running_ceiling", maxRunningHost),
+			zap.Int("tracked", namedTracked), zap.Int("tracked_ceiling", maxRetainedHost),
+			zap.String("holders", s.holdersLocked()))
+		return errHostAtCapacity
+	}
+	return nil
+}
+
+// nextIDLocked issues owner's next process id and, the first time a named
+// owner starts something, its handle.
+func (s *Supervisor) nextIDLocked(owner string) string {
+	if owner != "" && s.handles[owner] == 0 {
+		s.handles[owner] = len(s.handles) + 1
+	}
+	s.seq[owner]++
+	return fmt.Sprintf("p%d", s.seq[owner])
+}
+
+// ownerLabelLocked is an owner as the operator reads it: handle and name.
+func (s *Supervisor) ownerLabelLocked(owner string) string {
+	if n := s.handles[owner]; n > 0 {
+		return fmt.Sprintf("o%d %s", n, owner)
+	}
+	return owner
+}
+
+// holdersLocked lists every named owner with what it holds, for the log.
+func (s *Supervisor) holdersLocked() string {
+	type held struct{ running, tracked int }
+	byOwner := map[string]*held{}
 	for _, mp := range s.procs {
+		if mp.owner == "" {
+			continue
+		}
+		h := byOwner[mp.owner]
+		if h == nil {
+			h = &held{}
+			byOwner[mp.owner] = h
+		}
+		h.tracked++
 		if mp.info.State == StateRunning {
-			n++
+			h.running++
 		}
 	}
-	return n
+	parts := make([]string, 0, len(byOwner))
+	for owner, h := range byOwner {
+		parts = append(parts, fmt.Sprintf("%s running=%d tracked=%d", s.ownerLabelLocked(owner), h.running, h.tracked))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "; ")
 }
 
-// evictOldestExitedLocked keeps total tracked entries under maxRetained by
-// evicting the oldest EXITED entries (running processes are never evicted).
-func (s *Supervisor) evictOldestExitedLocked() {
-	for len(s.procs) >= maxRetained {
-		oldestID := ""
-		var oldest time.Time
-		for id, mp := range s.procs {
-			if mp.info.State != StateExited {
-				continue
-			}
-			if oldestID == "" || mp.info.Ended.Before(oldest) {
-				oldestID, oldest = id, mp.info.Ended
-			}
+// OwnerHandle returns the short stable handle of a named owner ("o1"), ""
+// for the terminal or an owner that never started a process.
+func (s *Supervisor) OwnerHandle(owner string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n := s.handles[owner]; n > 0 {
+		return fmt.Sprintf("o%d", n)
+	}
+	return ""
+}
+
+// OwnerOfHandle resolves a handle OwnerHandle issued back to its owner.
+func (s *Supervisor) OwnerOfHandle(handle string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for owner, n := range s.handles {
+		if fmt.Sprintf("o%d", n) == handle {
+			return owner, true
 		}
-		if oldestID == "" {
-			return // everything is running; the maxRunning gate bounds this
+	}
+	return "", false
+}
+
+// named selects the processes of the sessions, as opposed to the terminal's.
+func named(mp *managedProcess) bool { return mp.owner != "" }
+
+// countLocked counts the running and the tracked processes match selects.
+func (s *Supervisor) countLocked(match func(*managedProcess) bool) (running, tracked int) {
+	for _, mp := range s.procs {
+		if !match(mp) {
+			continue
 		}
-		delete(s.procs, oldestID)
+		tracked++
+		if mp.info.State == StateRunning {
+			running++
+		}
+	}
+	return running, tracked
+}
+
+// evictForLocked makes room for one more entry of owner. Only EXITED
+// entries ever go; a running process is never evicted. Under its own limit
+// it is owner's oldest, so one session's activity never costs another its
+// logs — nor the terminal's, nor the terminal theirs. At the ceiling the
+// named owners share, it is still owner's own first, then the entry of any
+// session that has gone unused the longest (see evictableForLocked).
+func (s *Supervisor) evictForLocked(owner string) {
+	for {
+		_, mine := s.countLocked(func(mp *managedProcess) bool { return mp.owner == owner })
+		_, namedTracked := s.countLocked(named)
+		atCeiling := owner != "" && namedTracked >= maxRetainedHost
+		if mine < maxRetained && !atCeiling {
+			return
+		}
+		key := s.oldestExitedLocked(owner)
+		if key == (procKey{}) && atCeiling {
+			key = s.evictableForLocked(owner)
+		}
+		if key == (procKey{}) {
+			return // everything is running; the running limits bound this
+		}
+		delete(s.procs, key)
 	}
 }
 
-func (s *Supervisor) unknownIDErrLocked(id string) error {
+// oldestExitedLocked is owner's oldest exited entry, the zero key if none.
+func (s *Supervisor) oldestExitedLocked(owner string) procKey {
+	var oldestKey procKey
+	var oldest time.Time
+	for key, mp := range s.procs {
+		if mp.owner != owner || mp.info.State != StateExited {
+			continue
+		}
+		if oldestKey == (procKey{}) || mp.info.Ended.Before(oldest) {
+			oldestKey, oldest = key, mp.info.Ended
+		}
+	}
+	return oldestKey
+}
+
+// lastUsed is when an exited entry was last of use to its owner: the later
+// of its exit and its last read.
+func (mp *managedProcess) lastUsed() time.Time {
+	if mp.lastRead.After(mp.info.Ended) {
+		return mp.lastRead
+	}
+	return mp.info.Ended
+}
+
+// evictableForLocked is the entry a start by a named owner may evict at the
+// tracked ceiling: its own oldest exited one, else the least recently used
+// exited entry of any session, provided it has gone unused for at least
+// unusedEntryAfter. Whether that session has something else running does
+// not matter — it is the entry that was abandoned. The terminal's entries
+// are never candidates.
+func (s *Supervisor) evictableForLocked(owner string) procKey {
+	if key := s.oldestExitedLocked(owner); key != (procKey{}) {
+		return key
+	}
+	cutoff := time.Now().Add(-unusedEntryAfter)
+	var lruKey procKey
+	var lru time.Time
+	for key, mp := range s.procs {
+		if mp.owner == "" || mp.info.State != StateExited {
+			continue
+		}
+		used := mp.lastUsed()
+		if used.After(cutoff) {
+			continue
+		}
+		if lruKey == (procKey{}) || used.Before(lru) {
+			lruKey, lru = key, used
+		}
+	}
+	return lruKey
+}
+
+// ownedBy reports whether a listing scoped to owner includes the process;
+// a nil owner is the process-wide listing.
+func (mp *managedProcess) ownedBy(owner *string) bool {
+	return owner == nil || mp.owner == *owner
+}
+
+// unknownIDErrLocked is the answer for an id owner's table does not hold.
+// It is the same whether the id was never issued or names a process of
+// another owner — existence is not disclosed either — and it lists only
+// owner's own ids.
+func (s *Supervisor) unknownIDErrLocked(owner, id string) error {
 	ids := make([]string, 0, len(s.procs))
-	for pid := range s.procs {
-		ids = append(ids, pid)
+	for key := range s.procs {
+		if key.owner == owner {
+			ids = append(ids, key.id)
+		}
 	}
 	sort.Strings(ids)
 	if len(ids) == 0 {

@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/rpcserve"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/llm/manager"
@@ -553,7 +554,21 @@ func (b *rpcBackend) CallTool(ctx context.Context, name, args string) (string, e
 	if b.cli == nil {
 		return "", errCLIUnavailable
 	}
-	return b.cli.RunAnyRPCTool(ctx, name, args)
+	return b.cli.RunAnyRPCTool(directToolCtx(ctx), name, args)
+}
+
+// directToolOwner is the process table of a tool call that reached this
+// backend with no session at all. It is a table of its own: a server
+// surface never acts on the terminal's processes for lack of a name.
+const directToolOwner = "direct:rpc"
+
+// directToolCtx keeps the session the surface marked on ctx, and gives a
+// call that carries none the surface's own table.
+func directToolCtx(ctx context.Context) context.Context {
+	if proc.HasOwner(ctx) {
+		return ctx
+	}
+	return proc.WithOwner(ctx, directToolOwner)
 }
 
 // MCPProxyTools lists the tools re-exported from the MCP servers ChatCLI is
@@ -924,7 +939,7 @@ func (b *rpcBackend) RunCommand(ctx context.Context, session, line string) (stri
 			return b.runSessionCommand(ctx, session, []string{"new"})
 		}
 	}
-	return b.cli.RunSlashCommandRPC(ctx, line)
+	return b.cli.RunSlashCommandRPC(cli.WithProcSession(ctx, session), line)
 }
 
 type errCLI string

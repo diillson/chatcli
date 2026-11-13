@@ -37,12 +37,17 @@ type WaitResult struct {
 // output counts, including lines written before the wait began: a server
 // that announced its port a second ago is ready now.
 func (s *Supervisor) WaitFor(ctx context.Context, id string, re *regexp.Regexp, timeout time.Duration) (WaitResult, error) {
+	return s.waitForOwned(ctx, "", id, re, timeout)
+}
+
+func (s *Supervisor) waitForOwned(ctx context.Context, owner string, id string, re *regexp.Regexp, timeout time.Duration) (WaitResult, error) {
 	s.mu.Lock()
-	mp, ok := s.procs[id]
+	mp, ok := s.procs[procKey{owner, id}]
 	if !ok {
 		defer s.mu.Unlock()
-		return WaitResult{}, s.unknownIDErrLocked(id)
+		return WaitResult{}, s.unknownIDErrLocked(owner, id)
 	}
+	mp.lastRead = time.Now()
 	s.mu.Unlock()
 
 	deadline := time.Now().Add(timeout)
@@ -80,6 +85,7 @@ func (s *Supervisor) WaitFor(ctx context.Context, id string, re *regexp.Regexp, 
 // waitResult completes a WaitResult with the process info and output tail.
 func (s *Supervisor) waitResult(mp *managedProcess, out string, r WaitResult) WaitResult {
 	s.mu.Lock()
+	mp.lastRead = time.Now() // a wait is use for as long as it lasts
 	r.Info = mp.info
 	s.mu.Unlock()
 	r.Tail = tailString(out, 20)
@@ -99,12 +105,17 @@ func firstMatchingLine(out string, re *regexp.Regexp) (string, bool) {
 // LogsMatching returns the lines of the process's output that re matches
 // (the last tailLines of them), with the count of matches and of lines.
 func (s *Supervisor) LogsMatching(id string, re *regexp.Regexp, tailLines int) (lines []string, matched, total int, info Info, err error) {
+	return s.logsMatchingFor("", id, re, tailLines)
+}
+
+func (s *Supervisor) logsMatchingFor(owner string, id string, re *regexp.Regexp, tailLines int) (lines []string, matched, total int, info Info, err error) {
 	s.mu.Lock()
-	mp, ok := s.procs[id]
+	mp, ok := s.procs[procKey{owner, id}]
 	if !ok {
 		defer s.mu.Unlock()
-		return nil, 0, 0, Info{}, s.unknownIDErrLocked(id)
+		return nil, 0, 0, Info{}, s.unknownIDErrLocked(owner, id)
 	}
+	mp.lastRead = time.Now()
 	info = mp.info
 	s.mu.Unlock()
 	if tailLines <= 0 {

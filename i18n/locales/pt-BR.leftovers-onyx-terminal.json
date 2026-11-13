@@ -1,0 +1,15 @@
+{
+  "agent.flat.failed": "falhou",
+  "agent.flat.denied": "negado",
+  "agent.flat.canceled": "cancelado",
+  "agent.flat.parked": "estacionado",
+  "agent.flat.exit": "saída %s",
+  "agent.flat.line": "1 linha",
+  "agent.flat.lines": "%d linhas",
+  "agent.flat.parallel": "%d em paralelo",
+  "agent.flat.agents": "agentes",
+  "agent.flat.tool_call": "1 chamada de ferramenta",
+  "agent.flat.tool_calls": "%d chamadas de ferramenta",
+  "agent.flat.blocked": "bloqueado",
+  "agent.flat.skipped": "ignorado"
+}

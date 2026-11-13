@@ -73,7 +73,7 @@ func (c *RemoteClient) Ping(ctx context.Context) error {
 // Enqueue sends a schedule_job request.
 func (c *RemoteClient) Enqueue(ctx context.Context, owner Owner, in ToolInput) (*ToolOutput, error) {
 	raw, _ := json.Marshal(in)
-	reply, err := c.call(ctx, Frame{Kind: KindEnqueue, Owner: &owner, Input: raw})
+	reply, err := c.call(ctx, Frame{Kind: KindEnqueue, Owner: &owner, Input: raw, TrustedTags: trustedTagsFrom(ctx)})
 	if err != nil {
 		return nil, err
 	}

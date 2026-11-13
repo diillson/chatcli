@@ -123,7 +123,8 @@ func (a *AgentMode) reportUnconsumedTypeahead() {
 	if len(lines) == 0 || (a.cli != nil && a.cli.unattended) {
 		return
 	}
-	fmt.Printf("\n  %s\n", colorize("📭 "+i18n.T("agent.queue.unconsumed", len(lines)), ColorYellow))
+	unconsumed := i18n.T("agent.queue.unconsumed", len(lines))
+	fmt.Printf("\n%s\n", flatNoticeOr(noticeWarn, unconsumed, "  "+colorize("📭 "+unconsumed, ColorYellow)))
 	for _, line := range lines {
 		fmt.Printf("    %s\n", colorize("❯ "+sanitizeTypeaheadPreview(line), ColorGray))
 	}

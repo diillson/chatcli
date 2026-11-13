@@ -86,6 +86,7 @@ func (a *AgentMode) runParkedInline(ctx context.Context) error {
 		ch := a.cli.parkWaiter(token)
 		if ch == nil {
 			// Defensive: no waiter means the park was cancelled elsewhere.
+			a.cli.unregisterActivePark(token)
 			a.inlineParkToken = ""
 			return nil
 		}
@@ -101,29 +102,47 @@ func (a *AgentMode) runParkedInline(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		a.cli.unregisterParkWaiter(token)
-		a.inlineParkToken = ""
-
-		snap, err := park.Load(token)
-		if err != nil {
-			// Snapshot gone (raced with an explicit cancel): clean end.
-			a.logger.Info("park: inline wake without snapshot; ending turn",
-				zap.String("token", token), zap.Error(err))
-			return nil
-		}
-
-		a.logger.Info("park: inline wake received; resuming in-turn",
-			zap.String("token", token),
-			zap.String("outcome", wake.Outcome))
-
-		err = a.runResumedCore(ctx, snap, wake.Outcome, wake.Detail)
-		if errors.Is(err, errAgentParkedRequested) {
+		reparked, err := a.resumeInlinePark(ctx, token, wake)
+		if reparked {
 			// The monitoring cycle re-parked: handleAgentPark already
 			// registered the next waiter and set inlineParkToken.
 			continue
 		}
 		return err
 	}
+}
+
+// resumeInlinePark runs one resumed cycle of an in-turn park. The wait on
+// token is over whatever happens next, so this process lets go of it on
+// every way out — resumed, failed, snapshot gone, panic: handleAgentPark
+// registers every park as active, and one left registered read as "still
+// waiting" for the life of the server, a leak of one entry per monitoring
+// cycle. While the cycle runs the token is marked as resuming instead, so
+// a sweep in that window still finds it held.
+func (a *AgentMode) resumeInlinePark(ctx context.Context, token string, wake parkOutcome) (reparked bool, err error) {
+	a.cli.markResuming(token)
+	defer a.cli.doneResuming(token)
+	a.cli.unregisterParkWaiter(token)
+	a.cli.unregisterActivePark(token)
+	a.inlineParkToken = ""
+
+	snap, err := park.Load(token)
+	if err != nil {
+		// Snapshot gone (raced with an explicit cancel): clean end.
+		a.logger.Info("park: inline wake without snapshot; ending turn",
+			zap.String("token", token), zap.Error(err))
+		return false, nil
+	}
+
+	a.logger.Info("park: inline wake received; resuming in-turn",
+		zap.String("token", token),
+		zap.String("outcome", wake.Outcome))
+
+	err = a.runResumedCore(ctx, snap, wake.Outcome, wake.Detail)
+	if errors.Is(err, errAgentParkedRequested) {
+		return true, nil
+	}
+	return false, err
 }
 
 // cancelInlinePark retires a park whose in-turn waiter was abandoned:

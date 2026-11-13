@@ -14,6 +14,7 @@
  *   list    —                       inspect waiting parks (any session)
  *   note    {token?, text}          leave a directive for a parked agent
  *   cancel  {token?, reason?}       end a parked wait now (the agent resumes)
+ *   prune   {older_than?}           delete the snapshots nobody waits on
  *
  * The park modes do NOT touch the scheduler directly — that is the agent
  * loop's responsibility, because only the loop has the live snapshot of
@@ -68,7 +69,9 @@ Subcommands:
   list     {}                      — inspect parked agents (token, mode, wait, pending directives)
   note     {token?:"<prefix>", text:"..."} — leave a directive for a parked agent
             (newest park when token omitted; delivered at its resume — use it to
-            inform, redirect, or ask it to change its park cadence next cycle)
+            inform, redirect, or ask it to change its park cadence next cycle).
+            Refused, with nothing recorded, for a park that already resumed,
+            is finished, or is owned by another live process
   cancel   {token?:"<prefix>", reason?:"..."} — cancel a parked wait NOW: the
             scheduled wake is dropped and the agent resumes immediately with
             outcome=cancelled (newest park when token omitted). The user's
@@ -79,6 +82,14 @@ Subcommands:
             scheduler job are removed and that agent never continues. This is
             what the user's /cancel-park does. token is required. Refused
             when another live process is known to own the park
+  prune    {older_than?:"24h"|"7d"} — delete the snapshots whose resume
+            COMPLETED (the agent continued and left them behind), as the
+            user's /parked prune does. older_than limits it to snapshots
+            older than that age. Nothing else is removed, at any age: not a
+            park still waiting, not one whose wait ended but whose agent
+            never resumed or failed to (the user may retry with /resume),
+            not one whose state cannot be established from here. Those are
+            listed as kept — use discard to end one on purpose
 
 cancel and resume both CONTINUE the parked agent (they differ in the outcome
 it is told); discard ENDS it. Durations always carry a unit ("30s", "5m").
@@ -98,7 +109,7 @@ cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.
-func (*BuiltinParkPlugin) Version() string { return "1.3.1" }
+func (*BuiltinParkPlugin) Version() string { return "1.4.3" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinParkPlugin) Path() string { return "" }
@@ -213,6 +224,14 @@ func (*BuiltinParkPlugin) Schema() string {
 				},
 				"examples": []string{`{"cmd":"discard","args":{"token":"b733521e"}}`},
 			},
+			{
+				"name":        "prune",
+				"description": "Delete the snapshots whose resume completed — the agent continued and left them behind (what the user's /parked prune does). Nothing else is removed, whatever its age: not a park still waiting, not one whose wait ended but whose agent never resumed or failed to, not one whose state cannot be established from this process. Those are reported as kept; end one deliberately with discard.",
+				"flags": []map[string]interface{}{
+					{"name": "older_than", "type": "string", "description": `Only snapshots older than this age: a Go duration or whole days ("24h", "7d")`},
+				},
+				"examples": []string{`{"cmd":"prune"}`, `{"cmd":"prune","args":{"older_than":"24h"}}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -263,6 +282,12 @@ func (p *BuiltinParkPlugin) ExecuteWithStream(ctx context.Context, args []string
 			return "", fmt.Errorf("@park: %w", merr)
 		}
 		return out, nil
+	case "prune":
+		out, perr := executeParkPrune(inner)
+		if perr != nil {
+			return "", fmt.Errorf("@park: %w", perr)
+		}
+		return out, nil
 	}
 
 	req, err := buildParkRequest(cmd, inner)
@@ -302,7 +327,7 @@ func parseParkInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalParkCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd|list|note|cancel|resume|discard)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd|list|note|cancel|resume|discard|prune)", cmdStr)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -351,6 +376,8 @@ func canonicalParkCmd(s string) string {
 		return "resume"
 	case "discard", "drop", "delete":
 		return "discard"
+	case "prune", "gc", "sweep":
+		return "prune"
 	}
 	return ""
 }
@@ -363,6 +390,53 @@ type ParkManager interface {
 	// DiscardPark deletes the snapshot and its scheduler job; the agent
 	// never resumes.
 	DiscardPark(token string) (string, error)
+}
+
+// ParkNoter is the optional part of the runtime hook behind note: it
+// records a directive for a park only when that park will read it and no
+// other live process owns its snapshot.
+type ParkNoter interface {
+	NotePark(token, text string) error
+}
+
+// ParkPruner is the optional part of the runtime hook behind prune — the
+// tool-side half of /parked prune. olderThan is "" or an age ("24h", "7d").
+type ParkPruner interface {
+	// PrunePark deletes the snapshots nobody waits on and reports what it
+	// removed and which waiting parks it left alone.
+	PrunePark(olderThan string) (string, error)
+}
+
+// executeParkPrune runs prune through the runtime hook: only the runtime
+// knows which parks are still waiting.
+func executeParkPrune(inner string) (string, error) {
+	var raw map[string]any
+	if strings.TrimSpace(inner) != "" {
+		if err := json.Unmarshal([]byte(inner), &raw); err != nil {
+			return "", fmt.Errorf(`prune: parse args: %w. Expected {"older_than":"24h"} or no args`, err)
+		}
+	}
+	for k := range raw {
+		if k != "older_than" {
+			return "", fmt.Errorf("prune: unknown argument %q (the only one is older_than)", k)
+		}
+	}
+	if err := parkCheckTimeArg(raw, "older_than"); err != nil {
+		return "", fmt.Errorf("prune: %w", err)
+	}
+	olderThan := strings.TrimSpace(asParkString(raw, "older_than"))
+	if _, given := raw["older_than"]; given && olderThan == "" {
+		return "", errors.New(`prune: older_than is empty — give an age such as "24h" or "7d", or omit it`)
+	}
+	pruner, ok := currentParkCanceller().(ParkPruner)
+	if !ok {
+		return "", errors.New("prune: no park runtime wired in this process; the user can run /parked prune in an interactive session")
+	}
+	out, err := pruner.PrunePark(olderThan)
+	if err != nil {
+		return "", fmt.Errorf("prune: %w", err)
+	}
+	return out, nil
 }
 
 // executeParkManage runs resume / discard through the runtime hook.
@@ -585,7 +659,14 @@ func executeParkNote(inner string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := park.AppendDirective(target.Token, text); err != nil {
+	// The runtime knows which parks will read a note and which belong to
+	// another process; without one (no CLI bound) the write is still
+	// serialized per token.
+	record := park.AppendDirective
+	if noter, ok := currentParkCanceller().(ParkNoter); ok {
+		record = noter.NotePark
+	}
+	if err := record(target.Token, text); err != nil {
 		return "", fmt.Errorf("note: %w", err)
 	}
 	return fmt.Sprintf(i18n.T("park.note.recorded"), parkShortToken(target.Token)), nil

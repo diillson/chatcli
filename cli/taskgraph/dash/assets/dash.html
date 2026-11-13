@@ -10,6 +10,7 @@
     --fg: #dbe4f0; --dim: #8b93a7; --accent: #4da3ff;
     --pending: #8b93a7; --running: #4da3ff; --reviewing: #c792ea;
     --done: #4cd97b; --failed: #ff5c69; --blocked: #f0a840;
+    --ctl: var(--line);
   }
   html[data-theme="light"] {
     --bg: #f4f6fa; --panel: #ffffff; --panel2: #eef1f6; --line: #d4dbe6;
@@ -54,6 +55,45 @@
   .hint { position: absolute; left: 12px; bottom: 10px; color: var(--dim); font-size: 11px; pointer-events: none; }
   .legend { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 10px; color: var(--dim); font-size: 11px; pointer-events: none; }
   .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 4px; }
+  #skinPick { max-width: 15rem; }
+  /* Monochrome terminal themes. applySkin sets data-skin and fills the custom
+     properties above from the palette the server exports from ui/theme, so
+     no color lives here: these rules are only the manner. Thin borders, no
+     shadow, and every state told by shape and stroke as well as by its one
+     accent, so the graph still reads without color. */
+  html[data-skin] #themeBtn { display: none; }
+  html[data-skin] #popover { box-shadow: none; border-radius: 6px; }
+  html[data-skin] header .status-pill { border-radius: 4px; border-color: currentColor; }
+  html[data-skin] .ev { border-left-width: 1px; }
+  /* The line token is a divider and may stay faint; a control is found by its edge. */
+  html[data-skin] select, html[data-skin] button.hbtn, html[data-skin] .tabs button.active { border-color: var(--ctl); }
+  html[data-skin] .legend i { box-sizing: border-box; border: 1px solid var(--c); border-radius: 0; background: transparent !important; }
+  html[data-skin] .legend i[data-s=pending] { --c: var(--pending); }
+  html[data-skin] .legend i[data-s=running] { --c: var(--running); background: var(--c) !important; }
+  html[data-skin] .legend i[data-s=reviewing] { --c: var(--reviewing); border-left-width: 5px; }
+  html[data-skin] .legend i[data-s=done] { --c: var(--done); background: var(--c) !important; border-radius: 50%; }
+  html[data-skin] .legend i[data-s=failed] { --c: var(--failed); background: var(--c) !important; transform: rotate(45deg) scale(.85); }
+  html[data-skin] .legend i[data-s=blocked] { --c: var(--blocked); border-radius: 50%; }
+  /* A wrapping row breaks before anything shrinks, which left the theme
+     select alone on a second row. On a wide window the header is one row:
+     the run name and the run select, which repeat each other, give way. */
+  @media (min-width: 1100px) {
+    html[data-skin] header { flex-wrap: nowrap; }
+    html[data-skin] header > * { flex: none; white-space: nowrap; }
+    html[data-skin] header .spacer { flex: 1 1 0; }
+    html[data-skin] #runName { flex: 0 1 auto; min-width: 4rem; overflow: hidden; text-overflow: ellipsis; }
+    html[data-skin] #runPicker { flex: 0 1 18rem; min-width: 9rem; text-overflow: ellipsis; }
+  }
+  @media (max-width: 760px) {
+    html[data-skin] main { flex-direction: column; }
+    html[data-skin] aside { width: auto; height: 30vh; border-left: 0; border-top: 1px solid var(--line); }
+    html[data-skin] header { gap: 8px; padding: 8px 12px; }
+    html[data-skin] .counters { flex-wrap: wrap; gap: 4px 10px; }
+    html[data-skin] select { max-width: 100%; min-width: 0; }
+    html[data-skin] .hint { display: none; }
+    html[data-skin] .legend { left: 12px; flex-wrap: wrap; gap: 4px 10px; }
+    html[data-skin] #popover { left: 8px !important; right: 8px; max-width: none; }
+  }
 </style>
 </head>
 <body>
@@ -68,6 +108,7 @@
     <button id="tabResults">Results</button>
   </div>
   <select id="runPicker" title="run"></select>
+  <select id="skinPick" title="theme" aria-label="theme"></select>
   <button class="hbtn" id="themeBtn" title="toggle theme">◐</button>
 </header>
 <main>
@@ -76,12 +117,12 @@
     <div id="popover"></div>
     <div class="hint">drag to pan · ctrl/⌘+wheel to zoom · 0 to fit · click a task for evidence</div>
     <div class="legend">
-      <span><i style="background:var(--pending)"></i>pending</span>
-      <span><i style="background:var(--running)"></i>running</span>
-      <span><i style="background:var(--reviewing)"></i>reviewing</span>
-      <span><i style="background:var(--done)"></i>done</span>
-      <span><i style="background:var(--failed)"></i>failed</span>
-      <span><i style="background:var(--blocked)"></i>blocked</span>
+      <span><i data-s="pending" style="background:var(--pending)"></i>pending</span>
+      <span><i data-s="running" style="background:var(--running)"></i>running</span>
+      <span><i data-s="reviewing" style="background:var(--reviewing)"></i>reviewing</span>
+      <span><i data-s="done" style="background:var(--done)"></i>done</span>
+      <span><i data-s="failed" style="background:var(--failed)"></i>failed</span>
+      <span><i data-s="blocked" style="background:var(--blocked)"></i>blocked</span>
     </div>
     <div id="results"></div>
   </div>
@@ -90,6 +131,7 @@
     <div id="events"></div>
   </aside>
 </main>
+<script id="boot" type="application/json">__TASKGRAPH_BOOT__</script>
 <script>
 'use strict';
 /* ChatCLI task-graph dashboard — read-only observer over /api/state and
@@ -113,12 +155,62 @@ $('themeBtn').onclick = () => {
   draw();
 };
 
+/* ── skin: this page's look, a monochrome terminal theme, or whatever the
+   terminal runs. The palettes come from ui/theme through the server (boot
+   data, then every events poll); the page only maps role names onto its own
+   custom properties. Anything the server does not offer is the default look. */
+const SKIN_KEY = 'chatcli.taskgraph.skin';
+const SKIN_VARS = {
+  '--bg': 'background', '--panel': 'surface', '--panel2': 'surface2', '--line': 'border', '--fg': 'text', '--dim': 'muted', '--accent': 'primary',
+  '--pending': 'muted', '--running': 'primary', '--reviewing': 'primary', '--done': 'success', '--failed': 'danger', '--blocked': 'warning', '--ctl': 'control',
+};
+let webTheme = { active: '', themes: {} };
+try { webTheme = JSON.parse($('boot').textContent).web_theme || webTheme; } catch (e) { /* served without boot data: default look */ }
+let skinChoice = 'terminal';
+try { skinChoice = localStorage.getItem(SKIN_KEY) || 'terminal'; } catch (e) { /* storage blocked: follow the terminal */ }
+const skinOn = () => !!document.documentElement.dataset.skin;
+function applySkin() {
+  const root = document.documentElement;
+  const th = (webTheme.themes || {})[skinChoice === 'terminal' ? webTheme.active : skinChoice];
+  for (const [prop, role] of Object.entries(SKIN_VARS)) {
+    if (th) root.style.setProperty(prop, th.roles[role]); else root.style.removeProperty(prop);
+  }
+  if (th) { root.dataset.skin = th.name; root.style.colorScheme = th.variant; }
+  else { delete root.dataset.skin; root.style.colorScheme = ''; }
+  draw();
+}
+function renderSkinPick() {
+  const pick = $('skinPick'), names = Object.keys(webTheme.themes || {});
+  if (skinChoice !== 'terminal' && skinChoice !== 'default' && !names.includes(skinChoice)) skinChoice = 'terminal';
+  pick.textContent = '';
+  for (const [value, label] of [['terminal', 'terminal' + (webTheme.active ? ' · ' + webTheme.active : '')], ['default', 'default']].concat(names.map(n => [n, n]))) {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = label;
+    pick.appendChild(o);
+  }
+  pick.value = skinChoice;
+}
+// Every API answer names the terminal's theme in a header, the refusals and
+// the "no run yet" ones included, so the page follows a change whichever poll
+// happens to be the one still running.
+function followTerminal(name) {
+  if (!name || name === webTheme.active) return;
+  webTheme = Object.assign({}, webTheme, { active: name });
+  renderSkinPick(); applySkin();
+}
+$('skinPick').onchange = e => {
+  skinChoice = e.target.value;
+  try { localStorage.setItem(SKIN_KEY, skinChoice); } catch (err) { /* storage blocked: the choice lasts for this page */ }
+  applySkin();
+};
+
 /* ── data polling ──────────────────────────────────────────────────── */
 // The per-run token arrives in the page URL (?t=); API calls send it in a
 // header so it is never read from a query string server-side.
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 async function fetchJSON(url) {
   const r = await fetch(url, { headers: { 'X-Dash-Token': TOKEN } });
+  followTerminal(r.headers.get('X-Dash-Theme'));
   if (!r.ok) throw new Error(url + ': ' + r.status);
   return r.json();
 }
@@ -281,7 +373,26 @@ function lineage(id) {
   return down;
 }
 
+// Under a monochrome skin a state is a mark shape with a fill level and a
+// stroke pattern, the same shapes the legend shows.
+const MONO_MARK = { pending: ['sq', 0], running: ['sq', 1], reviewing: ['sq', .5], done: ['dot', 1], failed: ['dia', 1], blocked: ['dot', 0] };
+const MONO_DASH = { pending: [2, 3], reviewing: [6, 4], blocked: [6, 4] };
+function stateMark(x, y, status, col) {
+  const [shape, fill] = MONO_MARK[status] || MONO_MARK.pending;
+  ctx.save();
+  ctx.translate(x, y);
+  if (shape === 'dia') ctx.rotate(Math.PI / 4);
+  ctx.strokeStyle = ctx.fillStyle = col; ctx.lineWidth = 1.2; ctx.setLineDash([]);
+  ctx.beginPath();
+  if (shape === 'dot') ctx.arc(0, 0, 4.5, 0, Math.PI * 2); else ctx.rect(-4, -4, 8, 8);
+  if (fill === 1) ctx.fill();
+  ctx.stroke();
+  if (fill === .5) ctx.fillRect(-4, -4, 4, 8);
+  ctx.restore();
+}
+
 function draw() {
+  const mono = skinOn();
   const g = state.graph, L = state.layout;
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   ctx.clearRect(0, 0, cv.width, cv.height);
@@ -294,8 +405,9 @@ function draw() {
     if (!lane.any && L.laneBounds.length === 1) continue;
     ctx.fillStyle = cssVar('--panel');
     ctx.globalAlpha = 0.45;
-    roundRect(-24, lane.y, L.w + 60, lane.h, 12); ctx.fill();
+    roundRect(-24, lane.y, L.w + 60, lane.h, mono ? 4 : 12); ctx.fill();
     ctx.globalAlpha = 1;
+    if (mono) { ctx.strokeStyle = cssVar('--line'); ctx.lineWidth = 1; ctx.stroke(); }
     if (lane.title) {
       ctx.fillStyle = cssVar('--dim');
       ctx.font = '600 12px ui-monospace, monospace';
@@ -320,9 +432,14 @@ function draw() {
       ctx.moveTo(x1, y1);
       ctx.bezierCurveTo(x1 + cxo, y1, x2 - cxo, y2, x2, y2);
       ctx.lineWidth = active ? 2.2 : 1.4;
-      ctx.strokeStyle = dimmed ? cssVar('--line') : (active ? statusColor(t.status) : (byId[d].status === 'done' ? cssVar('--done') : cssVar('--line')));
+      const satisfied = byId[d].status === 'done';
+      // The quiet edge color is a divider tone; under a skin a waiting edge
+      // is information, so it takes the muted ink and a dotted stroke.
+      const idle = cssVar(mono ? '--dim' : '--line');
+      ctx.strokeStyle = dimmed ? idle : (active ? statusColor(t.status) : (satisfied ? cssVar('--done') : idle));
       ctx.globalAlpha = dimmed ? 0.35 : 0.9;
-      if (active) { ctx.setLineDash([7, 6]); ctx.lineDashOffset = -now * 26; } else ctx.setLineDash([]);
+      if (active) { ctx.setLineDash([7, 6]); ctx.lineDashOffset = -now * 26; }
+      else ctx.setLineDash(mono && !satisfied ? [2, 4] : []);
       ctx.stroke();
       ctx.setLineDash([]); ctx.globalAlpha = 1;
     }
@@ -337,11 +454,17 @@ function draw() {
     ctx.fillStyle = cssVar('--panel2');
     ctx.strokeStyle = (state.selected === t.id) ? cssVar('--accent') : col;
     ctx.lineWidth = (state.selected === t.id || state.hover === t.id) ? 2.4 : 1.5;
-    roundRect(p.x, p.y, NODE_W, NODE_H, 10); ctx.fill(); ctx.stroke();
+    if (mono) {
+      ctx.lineWidth = (state.selected === t.id || state.hover === t.id) ? 2 : (t.status === 'running' || t.status === 'failed' ? 1.5 : 1);
+      ctx.setLineDash(MONO_DASH[t.status] || []);
+    }
+    roundRect(p.x, p.y, NODE_W, NODE_H, mono ? 4 : 10); ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
     // Status stripe + pulse for active tasks.
     ctx.fillStyle = col;
     if (t.status === 'running' || t.status === 'reviewing') ctx.globalAlpha = (dimmed ? 0.3 : 1) * (0.55 + 0.45 * Math.abs(Math.sin(now * 2.4)));
-    roundRect(p.x, p.y, 5, NODE_H, 3); ctx.fill();
+    if (mono) stateMark(p.x + NODE_W - 14, p.y + 14, t.status, col);
+    else { roundRect(p.x, p.y, 5, NODE_H, 3); ctx.fill(); }
     ctx.globalAlpha = dimmed ? 0.35 : 1;
     // Text
     ctx.fillStyle = cssVar('--fg');
@@ -510,6 +633,8 @@ function renderResults(g) {
 }
 
 /* ── boot ──────────────────────────────────────────────────────────── */
+renderSkinPick();
+applySkin();
 resize();
 refreshRuns().then(tick);
 </script>

@@ -567,6 +567,7 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 		return "", &utils.APIError{StatusCode: resp.StatusCode, Message: utils.SanitizeSensitiveText(string(raw))}
 	}
 
+	client.RestartResponseProgress(resp)
 	var out strings.Builder
 	// Read-side usage capture: message_start/message_delta SSE events carry
 	// the real token counts (see usage_tracker.go). Fed alongside the text
@@ -600,8 +601,9 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 		var evt struct {
 			Type  string `json:"type"`
 			Delta *struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				Thinking string `json:"thinking"`
 			} `json:"delta"`
 			ContentBlock *struct {
 				Type string `json:"type"`
@@ -629,6 +631,13 @@ func (c *ClaudeClient) processStreamResponse(resp *http.Response, captureUsage b
 		}
 		if evt.Type == "content_block_delta" && evt.Delta != nil && evt.Delta.Type == "text_delta" {
 			out.WriteString(evt.Delta.Text)
+			client.ReportResponseProgress(resp, len(evt.Delta.Text))
+		}
+		if evt.Type == "content_block_delta" && evt.Delta != nil && evt.Delta.Type == "thinking_delta" {
+			// Thinking is billed as output: a caller following the reply
+			// must not see it stall while the model reasons. The text is
+			// only measured here, never kept.
+			client.ReportResponseProgress(resp, len(evt.Delta.Thinking))
 		}
 		if evt.Type == "message_stop" && err == io.EOF {
 			break
@@ -872,7 +881,9 @@ func (c *ClaudeClient) sendOAuthTitleRequest(ctx context.Context, userText strin
 	}
 
 	reqURL := withBetaQuery(c.apiURL)
-	reqCtx := context.WithValue(ctx, oauthModelKey{}, oauthTitleModel)
+	// The title is not the reply: a caller following the turn's stream
+	// must not have this request's text counted into it.
+	reqCtx := client.WithoutStreamProgress(context.WithValue(ctx, oauthModelKey{}, oauthTitleModel))
 	resp, err := auth.DoWithRefresh(reqCtx, c.provider, func(token string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, bytes.NewReader(payload))
 		if err != nil {
