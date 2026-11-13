@@ -16,6 +16,7 @@ import (
 	"github.com/diillson/chatcli/cli/workspace/memory"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/models"
+	"github.com/diillson/chatcli/ui/kit"
 )
 
 // handleMemoryCommand handles the /memory command.
@@ -295,7 +296,7 @@ func (cli *ChatCLI) showMemoryProfile() {
 		for _, k := range sortedStringKeys(profile.Preferences) {
 			label := k
 			if profile.FieldMeta["pref:"+k].Sensitive {
-				label = "🔒 " + k
+				label = kit.Plain("🔒 ") + k
 			}
 			fmt.Printf("    %s: %s\n", label, profile.Preferences[k])
 		}

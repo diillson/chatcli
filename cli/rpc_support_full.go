@@ -478,7 +478,9 @@ func (cli *ChatCLI) runLoopRPC(ctx context.Context, o RPCRunOpts, fn func(contex
 				cli.checkpoints = prevCheckpoints
 			}()
 		}
-		return fn(ctx)
+		// The run's @proc calls use the caller's process table, not the
+		// one every session of this process used to share.
+		return fn(WithProcSession(ctx, o.Session))
 	})
 	if err != nil {
 		return out, err

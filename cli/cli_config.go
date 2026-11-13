@@ -164,6 +164,7 @@ func (cli *ChatCLI) reloadConfiguration(ctx context.Context) {
 	// Re-apply the UI theme so a CHATCLI_THEME change in .env takes effect on
 	// reload, mirroring how the provider/model are re-resolved below.
 	theme.InitFromEnv()
+	cli.notifyWebTheme()
 
 	config.Global.Reload(cli.logger)
 

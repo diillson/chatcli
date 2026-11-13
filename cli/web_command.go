@@ -42,6 +42,9 @@ type webState struct {
 	proc  webProcess
 	url   string
 	bound string
+	// theme queues terminal theme changes for the child; nil while no web
+	// UI runs. See web_theme_sync.go.
+	theme chan string
 }
 
 type osWebProcess struct{ cmd *exec.Cmd }
@@ -160,6 +163,8 @@ func (cli *ChatCLI) webEnsureRunning(ctx context.Context) (string, error) {
 		return "", err
 	}
 	cli.web.proc, cli.web.url, cli.web.bound = proc, url, bound
+	cli.web.theme = make(chan string, 1)
+	go webThemeLoop(context.WithoutCancel(ctx), url, cli.web.theme, cli.logger)
 	return url, nil
 }
 
@@ -222,6 +227,10 @@ func (cli *ChatCLI) shutdownWeb(_ context.Context) bool {
 	cli.web.mu.Lock()
 	proc := cli.web.proc
 	cli.web.proc, cli.web.url, cli.web.bound = nil, "", ""
+	if cli.web.theme != nil {
+		close(cli.web.theme)
+		cli.web.theme = nil
+	}
 	cli.web.mu.Unlock()
 	if proc == nil {
 		return false

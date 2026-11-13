@@ -601,6 +601,9 @@ func (cli *ChatCLI) gatewayAgentFunc(sessions *hubSessions, transcriber transcri
 		if leave != nil {
 			defer leave()
 		}
+		// An isolated principal's agent sees only the background processes
+		// it started, like the rest of its stores.
+		ctx = cli.withTenantProcOwner(ctx)
 
 		// Session control from the channel: "/session attach|detach|status|
 		// save|list|new" binds this sender's principal to a named saved

@@ -66,7 +66,8 @@ var acpCommandAllow = map[string]bool{
 	"/taskgraph": true, "/dash": true,
 	// /proc reads the process table or requests the stop of one entry: no
 	// stdin, and stop returns at once (the supervisor does the TERM→KILL).
-	// The table is the chatcli process's, shared by every session it serves.
+	// Each session gets its own table: the backend marks the command's
+	// context with the session (WithProcSession).
 	"/proc":     true,
 	"/schedule": true, "/wait": true, "/jobs": true,
 }

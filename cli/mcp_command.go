@@ -11,6 +11,7 @@ import (
 	prompt "github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/mcp"
 	"github.com/diillson/chatcli/i18n"
+	"github.com/diillson/chatcli/ui/kit"
 )
 
 // translateMCPError maps the manager's sentinel errors to localized
@@ -165,7 +166,7 @@ func (cli *ChatCLI) mcpShowStatus(filter string) {
 			statusColor = ColorYellow
 			statusText = i18n.T("mcp.cmd.status_starting")
 		case s.AuthRequired:
-			icon = "🔒"
+			icon = kit.Plain("🔒")
 			statusColor = ColorYellow
 			statusText = i18n.T("mcp.cmd.status_auth_required")
 		default:
@@ -575,8 +576,8 @@ func (cli *ChatCLI) renderMCPServerMetadata(prefix string, cfg mcp.ServerConfig)
 		fmt.Println(prefix + "    " + line)
 	}
 	if cfg.Trust {
-		fmt.Println(prefix + fmt.Sprintf("    %s⚠ %s%s",
-			ColorYellow, i18n.T("mcp.cmd.trust_mode_active"), ColorReset))
+		fmt.Println(prefix + fmt.Sprintf("    %s%s %s%s",
+			ColorYellow, kit.Plain("⚠"), i18n.T("mcp.cmd.trust_mode_active"), ColorReset))
 	}
 	if autoCount := len(cfg.AutoApproveSet()); autoCount > 0 && !cfg.Trust {
 		fmt.Println(prefix + fmt.Sprintf("    %s%s%s",

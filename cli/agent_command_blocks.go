@@ -889,7 +889,7 @@ func (a *AgentMode) runSingleCommand(ctx context.Context, block agent.CommandBlo
 
 		if err != nil {
 			errMsg := fmt.Sprintf("❌ Erro: %v\n", err)
-			fmt.Print(errMsg)
+			fmt.Print(kit.Plain(errMsg))
 			allOutput.WriteString(errMsg)
 			*lastError = err.Error()
 		} else {

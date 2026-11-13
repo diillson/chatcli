@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/webui"
 	"github.com/diillson/chatcli/models"
 )
@@ -325,5 +326,5 @@ func (b *rpcBackend) RunWebCommand(ctx context.Context, session, line string) (s
 		}
 		return out, err
 	}
-	return b.cli.RunWebCommandRPC(ctx, line)
+	return b.cli.RunWebCommandRPC(cli.WithProcSession(ctx, session), line)
 }

@@ -12,8 +12,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
@@ -22,13 +20,12 @@ import (
 // applyTurnBoundaryRewrites runs the in-place history rewrites for one
 // loop turn when the rewrite-pressure gate allows them. Each rewrite that
 // changes the history declares the coming cache write as an expected
-// rebuild, so the telemetry does not read it as an unstable prefix.
-func (a *AgentMode) applyTurnBoundaryRewrites(turn int, cfg CompactConfig, renderer *agent.UIRenderer) {
+// rebuild, so the telemetry does not read it as an unstable prefix. The
+// renderer is no longer needed here: the notices draw themselves through
+// printTurnNotice.
+func (a *AgentMode) applyTurnBoundaryRewrites(turn int, cfg CompactConfig, _ *agent.UIRenderer) {
 	if a == nil || a.cli == nil {
 		return
-	}
-	if renderer == nil {
-		renderer = agent.NewUIRenderer(a.logger)
 	}
 	if !a.cli.historyRewriteAllowed(a.cli.history, cfg) {
 		a.logger.Debug("history rewrites deferred: prefix cache is warm and the window is not under pressure",
@@ -43,12 +40,8 @@ func (a *AgentMode) applyTurnBoundaryRewrites(turn int, cfg CompactConfig, rende
 	if h, report := agent.ApplyMicrocompact(a.cli.history, turn, mcCfg, a.logger); report != nil && (report.Truncated > 0 || report.Summarized > 0) {
 		a.cli.history = h
 		a.cli.costTracker.NoteExpectedCacheRebuild()
-		fmt.Printf("\r\033[K  %s %s\n",
-			renderer.Colorize("🗜", agent.ColorGray),
-			renderer.Colorize(
-				i18n.T("agent.microcompact.applied",
-					report.Truncated, report.Summarized, FormatPayloadSize(int(report.CharsSaved))),
-				agent.ColorGray))
+		printTurnNotice(noticeRewrite, i18n.T("agent.microcompact.applied",
+			report.Truncated, report.Summarized, FormatPayloadSize(int(report.CharsSaved))), true)
 	}
 
 	// Skill aging (same turn boundary as microcompact, so both passes
@@ -64,19 +57,13 @@ func (a *AgentMode) applyTurnBoundaryRewrites(turn int, cfg CompactConfig, rende
 	if h, report := agent.DedupRepeatedReads(a.cli.history, mcCfg.CCR, a.logger); report != nil && report.Superseded > 0 {
 		a.cli.history = h
 		a.cli.costTracker.NoteExpectedCacheRebuild()
-		fmt.Printf("\r\033[K  %s %s\n",
-			renderer.Colorize("│", agent.ColorGray),
-			renderer.Colorize(i18n.T("agent.dedup_reads.applied", report.Superseded, FormatPayloadSize(int(report.CharsSaved))), agent.ColorGray))
+		printTurnNotice(noticeRail, i18n.T("agent.dedup_reads.applied", report.Superseded, FormatPayloadSize(int(report.CharsSaved))), true)
 	}
 	if h, report := agent.ApplySkillAging(a.cli.history, saCfg, a.logger); report != nil && report.Collapsed > 0 {
 		a.cli.history = h
 		a.cli.costTracker.NoteExpectedCacheRebuild()
 		a.releaseCollapsedSkills(report.CollapsedSkills, turn)
-		fmt.Printf("\r\033[K  %s %s\n",
-			renderer.Colorize("🗜", agent.ColorGray),
-			renderer.Colorize(
-				i18n.T("agent.skills.aged",
-					report.Collapsed, FormatPayloadSize(int(report.CharsSaved))),
-				agent.ColorGray))
+		printTurnNotice(noticeRewrite, i18n.T("agent.skills.aged",
+			report.Collapsed, FormatPayloadSize(int(report.CharsSaved))), true)
 	}
 }

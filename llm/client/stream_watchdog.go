@@ -85,6 +85,7 @@ func WatchStream(ctx context.Context, chunks <-chan StreamChunk, config Watchdog
 			}
 
 			accumulated += chunk.Text
+			ReportStreamProgress(ctx, len(chunk.Text))
 			lastChunkTime = time.Now()
 
 			// Reset timers

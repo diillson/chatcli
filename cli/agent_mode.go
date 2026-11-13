@@ -48,6 +48,7 @@ import (
 	"github.com/diillson/chatcli/pkg/persona"
 	"github.com/diillson/chatcli/pkg/pulse"
 	"github.com/diillson/chatcli/pkg/textfold"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 	"go.uber.org/zap"
 	"golang.org/x/term"
@@ -95,6 +96,10 @@ type AgentMode struct {
 	isCoderMode      bool
 	isOneShot        bool
 	coderBannerShown bool
+	// resumeLoop replaces the ReAct loop of a resumed run; nil in production.
+	// Tests drive the real resume path (drain, inline wait, snapshot
+	// bookkeeping) with it instead of an LLM.
+	resumeLoop func(ctx context.Context) error
 	// inlineParkToken names the park this run is waiting on IN-TURN, set by
 	// handleAgentPark on unattended surfaces (ACP / MCP server / gateway)
 	// where no REPL exists to drain the resume queue. Run() sees the park
@@ -135,6 +140,9 @@ type AgentMode struct {
 	gatewayPersona  bool
 	lastPolicyMatch *coder.Rule
 	// Métricas
+	// liveOut counts the reply text streamed by the model call in flight.
+	liveOut liveOutputMeter
+
 	turnTimer      *metrics.Timer
 	agentsLaunched int // total de sub-agents lançados na sessão
 	toolCallsExecd int // total de tool calls executadas na sessão
@@ -196,6 +204,14 @@ type AgentMode struct {
 	// See agent_typeahead.go.
 	salvageMu     sync.Mutex
 	salvagedLines []string
+	// detachedPrompts counts the permission prompts of detached runs that
+	// are reading stdinLines; withdrawnPromptLines is what a teardown took
+	// back from one (guarded by stdinMu). See noteDetachedPrompt.
+	detachedPrompts      atomic.Int32
+	withdrawnPromptLines []string
+	// withdrawnCarry is the carry of the last teardown when it holds lines
+	// taken back from a withdrawn prompt, "" otherwise (guarded by stdinMu).
+	withdrawnCarry string
 	// stdinCarry is the half-typed line (no Enter yet) a teardown
 	// interrupted; the next reader spawn — or the line-editing prompt —
 	// picks it up so a suspend never eats keystrokes. Guarded by stdinMu.
@@ -512,6 +528,13 @@ func (a *AgentMode) stopStdinReader() {
 		return
 	}
 	a.teardownStdinReaderLocked()
+	// The turn is over: no later reader of this loop will pick the carry
+	// up. What a withdrawn permission prompt left on it goes to the next
+	// REPL prompt instead of being dropped right after it was announced.
+	if a.withdrawnCarry != "" && a.cli != nil {
+		a.cli.offerPromptDraft(a.withdrawnCarry)
+	}
+	a.withdrawnCarry = ""
 	a.stdinCarry = ""
 	coder.SetSecurityPromptSalvage(nil)
 	coder.SetSecurityPromptDraftParker(nil)
@@ -522,6 +545,8 @@ func (a *AgentMode) stopStdinReader() {
 // fields. Caller holds stdinMu.
 func (a *AgentMode) teardownStdinReaderLocked() {
 	if a.stdinDone != nil {
+		// Read before the close: it is the close that withdraws the prompt.
+		promptOpen := a.detachedPrompts.Load() > 0
 		close(a.stdinDone)
 
 		done := make(chan struct{})
@@ -540,8 +565,17 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		// Lines submitted but not yet drained at a turn boundary survive
 		// the teardown: a suspend (final-answer prompt, @ask overlay) used
 		// to nil the channel with the user's follow-up still inside it.
-		a.salvageTypeahead(drainLinesNonBlocking(a.stdinLines))
+		left := drainLinesNonBlocking(a.stdinLines)
 		a.stdinCarry = a.typeaheadPreviewSnapshot()
+		a.withdrawnCarry = ""
+		if promptOpen {
+			a.stdinCarry = a.parkWithdrawnPromptLines(left, a.stdinCarry)
+			if len(a.withdrawnPromptLines) > 0 {
+				a.withdrawnCarry = a.stdinCarry
+			}
+		} else {
+			a.salvageTypeahead(left)
+		}
 		a.stdinLines = nil
 		a.stdinDone = nil
 		a.stdinCtl = nil
@@ -551,6 +585,7 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		a.stdinCbreakRestore = nil
 	}
 	a.setTypeaheadPreview("")
+	a.announceWithdrawnPrompt()
 }
 
 // takeStdinCarry hands over (and clears) the half-typed line a teardown
@@ -1094,7 +1129,7 @@ func (a *AgentMode) clientAndCtxForTurn(ctx context.Context) (llmclient.LLMClien
 			ctx = llmclient.WithTaskBudget(ctx, llmclient.AnthropicTaskBudgetFor(a.taskBudgetTotal, tokens))
 		}
 	}
-	return turnClient, ctx
+	return turnClient, a.withLiveOutput(ctx)
 }
 
 // resetPerRunState clears the state that belongs to one Run. AgentMode is
@@ -2166,7 +2201,7 @@ func (a *AgentMode) RunOnce(ctx context.Context, query string, autoExecute bool)
 		for _, cmd := range blockToExecute.Commands {
 			if a.validator.IsDangerous(cmd) {
 				errMsg := i18n.T("agent.oneshot.auto_exec_aborted", cmd)
-				fmt.Printf("⚠️ %s\n", errMsg)
+				fmt.Println(kit.Plain("⚠️ " + errMsg))
 				return errors.New(errMsg)
 			}
 		}
@@ -2527,7 +2562,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// input the user typed clearly between LLM turns.
 		if userMsg := a.drainStdinToQueue(); userMsg != "" {
 			label := i18n.T("agent.queue.new_user_instruction")
-			fmt.Printf("\n  %s\n\n", renderer.Colorize("📨 "+label, agent.ColorCyan))
+			fmt.Printf("\n%s\n\n", flatNoticeOr(noticeInfo, label, "  "+renderer.Colorize("📨 "+label, agent.ColorCyan)))
 			userMsg = a.expandFollowUpCommand(ctx, userMsg)
 			a.cli.history = append(a.cli.history, models.Message{
 				Role:    "user",
@@ -2638,23 +2673,15 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			a.logger.Warn("Pre-flight: history near payload cap, forcing aggressive compact",
 				zap.Int("total_chars", totalHistoryChars),
 				zap.Int("cap_bytes", cfg.MaxPayloadBytes))
-			fmt.Printf("\r\033[K  %s %s\n",
-				renderer.Colorize("ℹ", agent.ColorGray),
-				renderer.Colorize(
-					i18n.T("agent.preflight.near_cap",
-						FormatPayloadSize(totalHistoryChars),
-						(totalHistoryChars*100)/cfg.MaxPayloadBytes,
-						FormatPayloadSize(cfg.MaxPayloadBytes)),
-					agent.ColorGray))
+			printTurnNotice(noticeInfo, i18n.T("agent.preflight.near_cap",
+				FormatPayloadSize(totalHistoryChars),
+				(totalHistoryChars*100)/cfg.MaxPayloadBytes,
+				FormatPayloadSize(cfg.MaxPayloadBytes)), true)
 		} else if cfg.MaxPayloadBytes == 0 && totalHistoryChars > 2_500_000 && !a.proxyPayloadWarned {
 			a.proxyPayloadWarned = true
 			a.logger.Warn("History exceeds 2.5 MB, no payload cap set — proxy 413/403 possible",
 				zap.Int("total_chars", totalHistoryChars))
-			fmt.Printf("\r\033[K  %s %s\n",
-				renderer.Colorize("ℹ", agent.ColorYellow),
-				renderer.Colorize(
-					i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalHistoryChars)),
-					agent.ColorYellow))
+			printTurnNotice(noticeCaution, i18n.T("agent.preflight.warn_no_cap", FormatPayloadSize(totalHistoryChars)), true)
 		}
 		// A rewrite forces the provider to cache the whole prefix again,
 		// so an advisable pass waits while the prefix is warm and the
@@ -2666,9 +2693,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 			// silent. Without this, Level 2 (LLM summarization) can block
 			// for 30-90s with zero feedback — users assume a freeze.
 			a.cli.historyCompactor.SetStatusCallback(func(stage CompactStage, msg string) {
-				fmt.Printf("\r\033[K  %s %s\n",
-					renderer.Colorize("│", agent.ColorCyan),
-					renderer.Colorize(msg, agent.ColorGray))
+				printTurnNotice(noticeProgress, msg, true)
 			})
 			a.cli.beforeCompaction(ctx, compactTriggerAuto)
 			compacted, compactErr := a.cli.historyCompactor.Compact(a.cli.compactionCtx(ctx), a.cli.history, a.cli.Client, cfg)
@@ -2808,6 +2833,8 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// served this turn (see clientAndCtxForTurn). turnUsage is hoisted
 		// so the per-turn telemetry line (showTurnStats) can reuse it.
 		var turnUsage *models.UsageInfo
+		// The call is over: its running estimate gives way to real usage.
+		a.liveOut.reset()
 		// The pair that actually served the turn, hoisted alongside
 		// turnUsage: the telemetry line must price and size the window
 		// against the SAME pair the tracker recorded under, or a skill
@@ -2905,11 +2932,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					zap.String("reason", reason),
 					zap.Int("turn", turn+1), zap.Error(err))
 
-				fmt.Printf("\r\033[K  %s %s\n",
-					renderer.Colorize("⚠", agent.ColorYellow),
-					renderer.Colorize(
-						i18n.T("agent.recovery.retrying", reason),
-						agent.ColorYellow))
+				printTurnNotice(noticeWarn, i18n.T("agent.recovery.retrying", reason), true)
 
 				// For payload-too-large: also force the compactor to use a
 				// hard byte cap on the next turn. Without a cap hint we would
@@ -2925,24 +2948,16 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						learnedCap := rejectedBytes * 3 / 4
 						if currentCap == 0 || learnedCap < currentCap {
 							_ = os.Setenv("CHATCLI_MAX_PAYLOAD", fmt.Sprintf("%dB", learnedCap))
-							fmt.Printf("  %s %s\n",
-								renderer.Colorize("ℹ", agent.ColorGray),
-								renderer.Colorize(
-									i18n.T("agent.recovery.learned_cap",
-										FormatPayloadSize(rejectedBytes),
-										FormatPayloadSize(learnedCap)),
-									agent.ColorGray))
+							printTurnNotice(noticeInfo, i18n.T("agent.recovery.learned_cap",
+								FormatPayloadSize(rejectedBytes),
+								FormatPayloadSize(learnedCap)), false)
 						}
 					case currentCap == 0:
 						// Educated guess: assume a 4 MB proxy cap as a sane
 						// default when the rejected size is unknown and the
 						// user hasn't configured one.
 						_ = os.Setenv("CHATCLI_MAX_PAYLOAD", "4MB")
-						fmt.Printf("  %s %s\n",
-							renderer.Colorize("ℹ", agent.ColorGray),
-							renderer.Colorize(
-								i18n.T("agent.recovery.assumed_cap"),
-								agent.ColorGray))
+						printTurnNotice(noticeInfo, i18n.T("agent.recovery.assumed_cap"), false)
 					}
 
 					// Floor diagnosis: system messages (agent charter, skills,
@@ -2962,18 +2977,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							diag := i18n.T("agent.recovery.floor_exceeds_cap",
 								FormatPayloadSize(systemChars),
 								FormatPayloadSize(rejectedBytes))
-							fmt.Printf("\r\033[K  %s %s\n",
-								renderer.Colorize("✖", agent.ColorRed),
-								renderer.Colorize(diag, agent.ColorRed))
+							printTurnNotice(noticeError, diag, true)
 							return fmt.Errorf("%s: %w", diag, err)
 						}
 						if systemChars >= rejectedBytes*3/4 {
-							fmt.Printf("  %s %s\n",
-								renderer.Colorize("⚠", agent.ColorYellow),
-								renderer.Colorize(
-									i18n.T("agent.recovery.floor_warn",
-										FormatPayloadSize(systemChars)),
-									agent.ColorYellow))
+							printTurnNotice(noticeWarn, i18n.T("agent.recovery.floor_warn",
+								FormatPayloadSize(systemChars)), false)
 						}
 					}
 				}
@@ -3153,11 +3162,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				a.logger.Warn("ReAct stagnation detected — breaking out of loop",
 					zap.Int("repeated_turns", repeats),
 					zap.Int("turn", turn+1))
-				fmt.Printf("\r\033[K  %s %s\n",
-					renderer.Colorize("⚠", agent.ColorYellow),
-					renderer.Colorize(
-						i18n.T("agent.early_exit.stagnation", repeats),
-						agent.ColorYellow))
+				printTurnNotice(noticeWarn, i18n.T("agent.early_exit.stagnation", repeats), true)
 				// Close the just-persisted native batch first: stagnation
 				// fires BEFORE execution, so without this the run ends with
 				// assistant(tool_calls) + user — the dangling shape strict
@@ -3213,6 +3218,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 		// both /coder and /agent surfaces after the cross-mode unification.
 		isCompact := renderer.IsCompact()
 		isMinimal := renderer.IsMinimal()
+		// A theme that draws without frames shows tool calls as a flat
+		// timeline in every style; the style still decides how much of a
+		// result is shown.
+		isFlat := renderer.FlatLayout()
 
 		if strings.TrimSpace(reasoning) != "" {
 			a.emitThought(reasoning)
@@ -3403,6 +3412,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					agentWord = "agents"
 				}
 				switch {
+				case isFlat:
+					// The live panel shows the dispatch while it runs; each
+					// agent then gets its line, like a tool call.
 				case isCompactUI:
 					renderer.CompactLine("●", "AGENTS", fmt.Sprintf("%d %s", n, agentWord), agent.ColorPurple)
 				case isMinimalUI:
@@ -3411,7 +3423,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					renderer.RenderTimelineEvent("🚀", "MULTI-AGENT DISPATCH", fmt.Sprintf("Dispatching %d %s", n, agentWord), agent.ColorPurple)
 				}
 
-				if !isCompactUI {
+				if !isCompactUI && !isFlat {
 					for i, ac := range agentCalls {
 						renderer.RenderTimelineEvent("🤖", fmt.Sprintf("[%s] #%d", ac.Agent, i+1), truncateForUI(ac.Task, 120), agent.ColorCyan)
 					}
@@ -3522,7 +3534,12 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 					totalAgentToolCalls += tcCount
 					totalParallelCalls += ar.ParallelCalls
 					totalDuration += ar.Duration
-					if ar.Error != nil {
+					if isFlat {
+						if ar.Error == nil {
+							successCount++
+						}
+						renderer.FlatAgentDone(string(ar.Agent), ar.Task, flatAgentOutput(ar), ar.Error != nil, ar.Duration, tcCount, ar.ParallelCalls)
+					} else if ar.Error != nil {
 						if isCompactUI {
 							renderer.CompactToolDone(string(ar.Agent), ar.Duration.Round(time.Millisecond).String(), true)
 						} else {
@@ -3551,7 +3568,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				turnToolCalls += totalAgentToolCalls
 				a.noteRunToolCalls(totalAgentToolCalls)
 
-				if !isCompactUI {
+				if isFlat {
+					renderer.FlatAgentSummary(successCount, n, totalAgentToolCalls, totalDuration)
+				} else if !isCompactUI {
 					// Resumo compacto do dispatch
 					tcWord := "tool calls"
 					if totalAgentToolCalls == 1 {
@@ -3621,7 +3640,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Helper: render error message respecting compact mode
 			renderError := func(msg string) {
-				if isCompact {
+				if isFlat {
+					renderer.FlatToolRefused(agent.FlatFailed, msg)
+				} else if isCompact {
 					renderer.CompactError(msg)
 				} else if isMinimal {
 					renderer.RenderToolResultMinimal(msg, true)
@@ -3630,10 +3651,20 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				}
 			}
 
+			// refused is renderError carrying why the call did not run. The
+			// flat timeline shows the reason as the call's state; the
+			// framed styles only ever had the message.
+			refused := func(outcome agent.FlatOutcome) func(string) {
+				if !isFlat {
+					return renderError
+				}
+				return func(msg string) { renderer.FlatToolRefused(outcome, msg) }
+			}
+
 			// 1. Renderiza cabeçalho do lote se houver mais de 1 ação
 			if totalActions > 1 {
 				switch {
-				case isCompact:
+				case isCompact || isFlat:
 					// Compact mode: no batch header, just tool lines.
 				case isMinimal:
 					renderer.RenderTimelineEvent("📦", i18n.T("agent.card.batch"), i18n.T("agent.card.batch_actions", totalActions), agent.ColorPurple)
@@ -3644,19 +3675,22 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// Iterar sobre TODAS as chamadas de ferramenta sugeridas
 			for i, tc := range toolCalls {
+				if isFlat {
+					renderer.FlatToolQueue(tc.Name, extractSubcmdFromArgs(tc.Args), tc.Args)
+				}
 				// A failed action no longer stops the batch: the model
 				// batched these calls because they were independent, so its
 				// read-only siblings still run. A mutating sibling is skipped
 				// instead — it could build on the broken step — with a note
 				// that keeps the structured results aligned with the calls.
 				if batchHasError && !a.toolCallIsReadOnly(tc) {
-					turnToolResults = append(turnToolResults, a.skipAfterFailure(i, tc, &batchOutputBuilder, renderError))
+					turnToolResults = append(turnToolResults, a.skipAfterFailure(i, tc, &batchOutputBuilder, refused(agent.FlatSkipped)))
 					continue
 				}
 				// --- SECURITY CHECK START ---
 				if a.isCoderMode {
 					pm, err := coder.NewPolicyManager(a.logger)
-					if a.policyUnavailableBlocked(err, tc.Name, tc.Args, renderError) {
+					if a.policyUnavailableBlocked(err, tc.Name, tc.Args, refused(agent.FlatBlocked)) {
 						batchHasError = true
 						break
 					}
@@ -3664,7 +3698,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						action := a.toolPolicyVerdict(pm, tc.Name, tc.Args)
 						if action == coder.ActionDeny {
 							msg := "AÇÃO BLOQUEADA (Regra de Segurança)"
-							renderError(msg)
+							refused(agent.FlatBlocked)(msg)
 							a.emitBlockedTool(tc.Name, tc.Args, msg)
 							a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 							batchHasError = true
@@ -3679,11 +3713,11 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// nobody can approve, so the action is refused (the
 							// automode opt-in was already applied above). An
 							// explicit ActionDeny above still blocks either way.
-							if a.unattendedAskBlocked(tc.Name, tc.Args, pm, renderError) {
+							if a.unattendedAskBlocked(tc.Name, tc.Args, pm, refused(agent.FlatBlocked)) {
 								batchHasError = true
 								break
 							}
-						} else if action == coder.ActionAsk && a.noTerminalAskBlocked(tc.Name, tc.Args, renderError) {
+						} else if action == coder.ActionAsk && a.noTerminalAskBlocked(tc.Name, tc.Args, refused(agent.FlatBlocked)) {
 							// One-shot without a terminal: nobody can answer
 							// the prompt, so it would block until timeout.
 							batchHasError = true
@@ -3707,17 +3741,17 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									_ = pm.AddRule(pattern, coder.ActionDeny)
 								}
 								msg := "AÇÃO BLOQUEADA PERMANENTEMENTE"
-								renderError(msg)
+								refused(agent.FlatDenied)(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 								batchHasError = true
 							case coder.DecisionDenyOnce:
 								msg := "AÇÃO NEGADA PELO USUÁRIO"
-								renderError(msg)
+								refused(agent.FlatDenied)(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: agent.ActionErrorLabel + msg})
 								batchHasError = true
 							case coder.DecisionCanceled:
 								msg := "OPERAÇÃO CANCELADA (Ctrl+C)"
-								renderError(msg)
+								refused(agent.FlatCanceled)(msg)
 								a.cli.history = append(a.cli.history, models.Message{Role: "user", Content: msg})
 								batchHasError = true
 							}
@@ -3737,12 +3771,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 				toolStartTime := time.Now()
 
 				// UX: Pequena pausa para separar visualmente o pensamento da ação
-				if !isCompact {
+				if !isCompact && !isFlat {
 					time.Sleep(200 * time.Millisecond)
 				}
 
 				// 2. Renderiza a BOX de ação IMEDIATAMENTE (antes de processar)
-				if isCompact {
+				if isFlat {
+					renderer.FlatToolBegin()
+				} else if isCompact {
 					renderer.CompactToolStart(compactLabel)
 				} else if isMinimal {
 					renderer.RenderToolCallMinimal(toolName, toolArgsStr, i+1, totalActions)
@@ -3752,7 +3788,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 				// UX: Força flush e pausa para leitura
 				_ = os.Stdout.Sync()
-				if !isCompact {
+				if !isCompact && !isFlat {
 					time.Sleep(300 * time.Millisecond)
 				}
 
@@ -3883,6 +3919,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// unanswered batch left behind is exactly the
 							// dangling shape strict providers 400 on — in
 							// chat mode too, which has no repair pass.
+							renderer.FlatToolRefused(agent.FlatCanceled, "")
 							a.closeNativeBatch(nativeToolCalls, turnToolResults, toolResultNotExecutedCanceled)
 							return ctx.Err()
 						}
@@ -3952,12 +3989,14 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 										"BLOCKED: Dangerous command detected in @coder exec: %q. "+
 											"This command is forbidden regardless of policy rules. "+
 											"DO NOT retry this command.", shellCmd)
+									outcome := agent.FlatBlocked
 									if asked {
+										outcome = agent.FlatDenied
 										msg = fmt.Sprintf(
 											"BLOCKED: Dangerous command %q was DENIED by the user. "+
 												"DO NOT retry this command.", shellCmd)
 									}
-									renderError(msg)
+									refused(outcome)(msg)
 									a.cli.history = append(a.cli.history, models.Message{
 										Role: "user", Content: "SECURITY BLOCK: " + msg,
 									})
@@ -3983,7 +4022,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 								})
 								if hookResult != nil && hookResult.Blocked {
 									msg := fmt.Sprintf("BLOCKED by hook: %s", hookResult.BlockReason)
-									renderError(msg)
+									refused(agent.FlatBlocked)(msg)
 									a.cli.history = append(a.cli.history, models.Message{
 										Role: "user", Content: "HOOK BLOCK: " + msg,
 									})
@@ -4015,6 +4054,10 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							}
 
 							streamCallback := func(line string) {
+								if isFlat {
+									a.flatStreamRow(renderer, line, isCompact)
+									return
+								}
 								// First real output ends the spinner so streamed
 								// lines don't clash with its carriage-return repaint.
 								a.cli.animation.StopThinkingAnimation()
@@ -4121,11 +4164,19 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 									// never feel frozen. Streaming tools stop it on
 									// their first line (see streamCallback); it's
 									// always stopped after the call returns.
-									if !isCompact {
+									stopLive := func() {}
+									if isFlat {
+										// The task-graph status owns the row
+										// for the whole run of a @taskgraph.
+										if !taskGraphTimerStarted {
+											stopLive = a.startFlatToolLive(ctx, renderer)
+										}
+									} else if !isCompact {
 										a.cli.animation.ShowThinkingAnimation(spinnerMessage(boxLabel))
 									}
 									toolOutput, execErr = a.executeWithRetry(toolCtx, plugin, toolName, toolArgs, streamCallback)
 									a.cli.animation.StopThinkingAnimation()
+									stopLive()
 								}
 							}
 
@@ -4146,6 +4197,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// sem resposta (o formato que providers estritos
 							// rejeitam com 400, inclusive via chat).
 							if ctx.Err() != nil {
+								renderer.FlatToolRefused(agent.FlatCanceled, "")
 								a.closeNativeBatch(nativeToolCalls, turnToolResults, toolResultNotExecutedCanceled)
 								return ctx.Err()
 							}
@@ -4163,6 +4215,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 							// double-close that landed in the user's terminal
 							// as two `╰────╮` rows.
 							if req, parked := park.AsParkError(execErr); parked {
+								renderer.FlatToolRefused(agent.FlatParked, "")
 								var pendingID string
 								var beforeClosure []models.Message
 								if i < len(nativeToolCalls) {
@@ -4208,7 +4261,9 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 						displayForHuman = displayForHuman + "\n\n--- ERRO ---\n" + errText
 					}
 				}
-				if isCompact {
+				if isFlat {
+					renderer.FlatToolDone(displayForHuman, execErr != nil, time.Since(toolStartTime), flatExitStatus(execErr))
+				} else if isCompact {
 					elapsed := time.Since(toolStartTime)
 					durationStr := ""
 					if elapsed >= 500*time.Millisecond {
@@ -4382,7 +4437,7 @@ func (a *AgentMode) processAIResponseAndAct(ctx context.Context, maxTurns int) e
 
 			// 4. Renderiza rodapé do lote
 			if totalActions > 1 {
-				if isCompact {
+				if isCompact || isFlat {
 					renderer.CompactBatchSummary(successCount, totalActions, batchHasError)
 				} else {
 					renderer.RenderBatchSummary(successCount, totalActions, batchHasError)
@@ -4767,6 +4822,7 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 		pa.unattended = a.cli.unattended // no human: "ask" is refused unless automode admits it
 		pa.autoApprove = a.askAutoApproved
 		pa.liveStdin = a.liveStdinLines
+		pa.detachedPrompt = a.noteDetachedPrompt
 		a.policyAdapter = pa
 		a.agentDispatcher.SetPolicyChecker(pa)
 		a.logger.Info("Policy enforcement enabled for parallel workers")

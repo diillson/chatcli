@@ -18,8 +18,6 @@ import (
 // parkedSubcommandSuggestions lists the verbs /parked accepts after
 // the leading slash command.
 var parkedSubcommandSuggestions = []prompt.Suggest{
-	{Text: "prune", Description: "remove snapshots whose scheduler job is in a terminal state"},
-	{Text: "gc", Description: "remove snapshots older than <duration> (e.g. 24h, 7d)"},
 	{Text: "help", Description: "show /parked usage"},
 }
 
@@ -35,7 +33,11 @@ func (cli *ChatCLI) getParkedSuggestions(d prompt.Document) []prompt.Suggest {
 	// list all parked agents, which is also a valid invocation).
 	if len(args) == 0 || (len(args) == 1 && !trailingSpace) {
 		// wake is added per call: i18n resolves at runtime, not at package init.
-		subs := append([]prompt.Suggest{{Text: "wake", Description: i18n.T("complete.parkpar.sub_wake")}}, parkedSubcommandSuggestions...)
+		subs := append([]prompt.Suggest{
+			{Text: "wake", Description: i18n.T("complete.parkpar.sub_wake")},
+			{Text: "prune", Description: i18n.T("complete.leftovers.parked.prune")},
+			{Text: "gc", Description: i18n.T("complete.leftovers.parked.gc")},
+		}, parkedSubcommandSuggestions...)
 		return prompt.FilterHasPrefix(subs, current, true)
 	}
 
@@ -60,6 +62,27 @@ func (cli *ChatCLI) getParkedSuggestions(d prompt.Document) []prompt.Suggest {
 	return nil
 }
 
+// getParkNoteSuggestions completes /park-note: the --token flag as the
+// first word, then the live tokens as its value. Nothing is offered once
+// the message itself is being typed.
+func (cli *ChatCLI) getParkNoteSuggestions(d prompt.Document) []prompt.Suggest {
+	args := strings.Fields(strings.TrimPrefix(d.TextBeforeCursor(), "/park-note"))
+	current := d.GetWordBeforeCursor()
+	trailingSpace := strings.HasSuffix(d.TextBeforeCursor(), " ")
+	if len(args) == 0 || (len(args) == 1 && !trailingSpace) {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "--token", Description: i18n.T("complete.leftovers.park_note.token")},
+		}, current, true)
+	}
+	if args[0] != "--token" {
+		return nil
+	}
+	if len(args) == 1 || (len(args) == 2 && !trailingSpace) {
+		return parkTokenSuggestions(current)
+	}
+	return nil
+}
+
 // getParkTokenSuggestions completes /resume and /cancel-park with live
 // snapshot tokens. Tokens shown are the first 8 characters (which is
 // what /parked displays); the resolveParkToken helper accepts any
@@ -76,7 +99,11 @@ func (cli *ChatCLI) getParkTokenSuggestions(prefix string, d prompt.Document) []
 	if len(args) > 1 || (len(args) == 1 && trailingSpace) {
 		return nil
 	}
+	return parkTokenSuggestions(current)
+}
 
+// parkTokenSuggestions lists the live snapshot tokens matching current.
+func parkTokenSuggestions(current string) []prompt.Suggest {
 	snaps, _ := park.List()
 	if len(snaps) == 0 {
 		return []prompt.Suggest{{

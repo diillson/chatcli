@@ -80,6 +80,7 @@ var slashPrefixRoutes = []slashPrefixRoute{
 	{"/web", (*ChatCLI).getWebSuggestions},
 	{"/mail", (*ChatCLI).getMailSuggestions},
 	{"/parked", (*ChatCLI).getParkedSuggestions},
+	{"/park-note", (*ChatCLI).getParkNoteSuggestions},
 	{"/cancel-park", func(c *ChatCLI, d prompt.Document) []prompt.Suggest {
 		return c.getParkTokenSuggestions("/cancel-park", d)
 	}},

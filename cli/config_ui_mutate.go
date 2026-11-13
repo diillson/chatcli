@@ -88,6 +88,7 @@ func (cli *ChatCLI) configUITheme(args []string) {
 		fmt.Println(colorize("  ❌ "+i18n.T("cfg.ui.theme_set_failed", err.Error()), ColorRed))
 		return
 	}
+	cli.notifyWebTheme()
 
 	if previous == target {
 		fmt.Println(colorize("  ✔ "+i18n.T("cfg.ui.theme_set_noop", target), ColorGray))

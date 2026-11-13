@@ -79,6 +79,8 @@ func (p *BuiltinParkPlugin) DescribeCall(args []string) string {
 			return i18n.T("plugins.park.describe.cancel", textfold.Cut(tok, 8))
 		}
 		return i18n.T("plugins.park.describe.cancel_newest")
+	case "prune", "gc", "sweep":
+		return i18n.T("leftovers.park.describe.prune")
 	case "for_cmd":
 		// Use extractNestedArg so we read args.cmd (the user-supplied
 		// command), not the outer cmd field (which is just the subcommand

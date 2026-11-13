@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/palette"
 	"github.com/diillson/chatcli/i18n"
 )
@@ -68,7 +69,8 @@ func (s *Server) routeInline(ctx context.Context, rn *run, session string, mode,
 	case strings.HasPrefix(line, "/"):
 		return s.routeSlash(ctx, rn, session, line, mode, text)
 	case strings.HasPrefix(line, "@") && normalizeMode(*mode) == "chat" && !hasImages:
-		return s.routeTool(ctx, rn, line, text)
+		// The tool runs for this web session: its @proc is the session's.
+		return s.routeTool(proc.WithSession(ctx, session), rn, line, text)
 	}
 	return false
 }

@@ -1,0 +1,11 @@
+{
+  "web.ui.skin": "Theme",
+  "web.ui.skin.terminal": "terminal",
+  "web.ui.skin.default": "default",
+  "web.ui.skin.attach": "attach",
+  "web.ui.skin.image": "image",
+  "web.ui.skin.mic": "mic",
+  "dash.ui.skin": "Theme",
+  "dash.ui.skin.terminal": "terminal",
+  "dash.ui.skin.default": "default"
+}

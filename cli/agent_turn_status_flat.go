@@ -29,8 +29,17 @@ func (a *AgentMode) flatTurnStatus(d time.Duration, modelName string, queued int
 		theme.ANSI(theme.RoleTextStrong) + modelName + theme.Reset(),
 		kit.Colorize(metrics.FormatDurationShort(d), theme.RoleMuted),
 	}
-	if tokens, cost := a.sessionUsage(); tokens > 0 {
-		parts = append(parts, kit.Colorize(i18n.T("agent.turn.flat.tokens", formatTokenCount64(tokens)), theme.RoleMuted))
+	// While a reply streams, the tokens it has produced so far are added
+	// as an estimate and the figure says so with a leading "~"; the cost
+	// never moves on an estimate, only when the call's real usage lands.
+	tokens, cost := a.sessionUsage()
+	streaming := a.liveOutputTokens()
+	if tokens+streaming > 0 {
+		count := formatTokenCount64(tokens + streaming)
+		if streaming > 0 {
+			count = "~" + count
+		}
+		parts = append(parts, kit.Colorize(i18n.T("agent.turn.flat.tokens", count), theme.RoleMuted))
 		if cost > 0 {
 			parts = append(parts, kit.Colorize(formatTurnCost(cost), theme.RoleMuted))
 		}

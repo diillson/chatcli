@@ -21,7 +21,9 @@ import (
 
 func newParkBridgeCLI(t *testing.T) *ChatCLI {
 	t.Helper()
-	cli := &ChatCLI{logger: zap.NewNop(), unattended: true}
+	// A terminal: only a process that drains its resume queue owns what is
+	// queued in it, which the last part of this test relies on.
+	cli := &ChatCLI{logger: zap.NewNop()}
 	cli.schedulerBridge = newSchedulerBridge(cli)
 	return cli
 }
@@ -83,15 +85,33 @@ func TestParkHubBridge_OwnerHeartbeatsAndHonorsRemoteWake(t *testing.T) {
 		t.Fatal("row of a park no longer owned must be deleted")
 	}
 
-	// A park whose resume is already queued is no longer mirrored as
-	// waiting, so a second cross-process cancel cannot queue a duplicate.
+	// A park whose resume is queued is still this process's: it stays
+	// mirrored, so another terminal looking for its owner finds one. A
+	// cross-process wake aimed at it does not queue a second resume.
 	queued := newWaitingPark(t, cli)
 	cli.pendingResumeMu.Lock()
 	cli.pendingResumeQueue = append(cli.pendingResumeQueue, queued)
 	cli.pendingResumeMu.Unlock()
-	time.Sleep(200 * time.Millisecond)
-	if recs, _ := store.ListParkMirror(context.Background()); len(recs) != 0 {
-		t.Fatalf("a park with a queued resume must not be mirrored: %+v", recs)
+	if !waitFor(t, 3*time.Second, func() bool {
+		recs, _ := store.ListParkMirror(context.Background())
+		return len(recs) == 1 && recs[0].Token == queued
+	}) {
+		t.Fatal("a park with a queued resume is still owned and must stay mirrored")
+	}
+	ok, err = store.RequestParkWake(context.Background(), queued, "cancelled", "again")
+	require.NoError(t, err)
+	require.True(t, ok)
+	if !waitFor(t, 3*time.Second, func() bool {
+		recs, _ := store.ListParkMirror(context.Background())
+		return len(recs) == 1 && recs[0].WakeOutcome == ""
+	}) {
+		t.Fatal("the wake request must be consumed")
+	}
+	cli.pendingResumeMu.Lock()
+	n := len(cli.pendingResumeQueue)
+	cli.pendingResumeMu.Unlock()
+	if n != 1 {
+		t.Fatalf("a wake for a park already queued must not queue it again: %d entries", n)
 	}
 }
 

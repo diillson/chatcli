@@ -70,14 +70,22 @@ const (
 
 // Frame is the on-wire envelope.
 type Frame struct {
-	ID     string          `json:"id,omitempty"`
-	Kind   FrameKind       `json:"kind"`
-	Owner  *Owner          `json:"owner,omitempty"`
-	Input  json.RawMessage `json:"input,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  string          `json:"error,omitempty"`
-	Event  *Event          `json:"event,omitempty"`
-	TS     time.Time       `json:"ts,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Kind  FrameKind       `json:"kind"`
+	Owner *Owner          `json:"owner,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+	// TrustedTags carries the reserved tags of the job being created (see
+	// WithTrustedJobTags) across the socket, where the client's context
+	// does not reach. It is a field of the frame, apart from Input: the
+	// input is what a tool call or a typed command wrote and may not set a
+	// reserved tag; this is filled by the client library from the
+	// context only. The daemon trusts it exactly as much as the rest of
+	// the frame — the socket belongs to the same OS user.
+	TrustedTags map[string]string `json:"trusted_tags,omitempty"`
+	Result      json.RawMessage   `json:"result,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Event       *Event            `json:"event,omitempty"`
+	TS          time.Time         `json:"ts,omitempty"`
 }
 
 // maxFrameSize caps per-frame payload to prevent OOM on malformed or

@@ -8,7 +8,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
@@ -36,8 +38,14 @@ type workerPolicyAdapter struct {
 	stdinCh <-chan string
 
 	// liveStdin is the agent loop's stdin channel while its reader runs, nil
-	// otherwise. A detached run asks through it: stdinCh outlives the turn.
-	liveStdin func() <-chan string
+	// otherwise, with the channel that reader's teardown closes. A detached
+	// run asks through it: stdinCh outlives the turn.
+	liveStdin func() (<-chan string, <-chan struct{})
+
+	// detachedPrompt, when set, is told that a detached run's prompt is
+	// about to read the turn's stdin lines; the func it returns is called
+	// when the prompt is over.
+	detachedPrompt func() (closed func())
 
 	// unattended marks a run with no human to answer an "ask" prompt
 	// (gateway, server, RPC surfaces): PromptSecurityCheck would block on a
@@ -87,11 +95,95 @@ func (a *workerPolicyAdapter) setStdinCh(ch <-chan string) {
 	a.stdinCh = ch
 }
 
-// liveStdinLines is the stdin channel while the reader goroutine runs.
-func (a *AgentMode) liveStdinLines() <-chan string {
+// liveStdinLines is the stdin channel while the reader goroutine runs, with
+// the channel that same reader's teardown closes.
+func (a *AgentMode) liveStdinLines() (<-chan string, <-chan struct{}) {
 	a.stdinMu.Lock()
 	defer a.stdinMu.Unlock()
-	return a.stdinLines
+	if a.stdinLines == nil {
+		return nil, nil
+	}
+	return a.stdinLines, a.stdinDone
+}
+
+// noteDetachedPrompt records that a permission prompt of a detached run is
+// reading this loop's stdin lines, until the returned func is called. A
+// teardown of the reader under such a prompt must not take a line left on
+// the channel for type-ahead: it was typed as the answer.
+func (a *AgentMode) noteDetachedPrompt() (closed func()) {
+	a.detachedPrompts.Add(1)
+	return func() { a.detachedPrompts.Add(-1) }
+}
+
+// parkWithdrawnPromptLines takes the lines a teardown found on the channel
+// while a detached permission prompt was open, and returns the draft to
+// carry: those lines, then the half-typed one. They are neither queued for
+// the model (a "y" would reach it as an instruction) nor dropped.
+func (a *AgentMode) parkWithdrawnPromptLines(lines []string, preview string) string {
+	var kept []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			kept = append(kept, line)
+		}
+	}
+	a.withdrawnPromptLines = kept
+	if preview != "" {
+		kept = append(append([]string(nil), kept...), preview)
+	}
+	return strings.Join(kept, " ")
+}
+
+// announceWithdrawnPrompt tells the user, once, what a withdrawn prompt
+// left unsent. Called at the end of the teardown, with the terminal back
+// in cooked mode.
+func (a *AgentMode) announceWithdrawnPrompt() {
+	lines := a.withdrawnPromptLines
+	a.withdrawnPromptLines = nil
+	if len(lines) == 0 || (a.cli != nil && a.cli.unattended) {
+		return
+	}
+	notice := []string{"", colorize("  ⚠ "+i18n.T("leftovers.prompt.withdrawn"), ColorYellow)}
+	for _, line := range lines {
+		notice = append(notice, colorize("    ❯ "+sanitizeTypeaheadPreview(line), ColorGray))
+	}
+	a.typeaheadNotice(notice...)
+}
+
+// chanClosed reports whether ch is closed; a nil channel never is.
+func chanClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// promptWhileReaderLives runs ask, ending it as soon as readerGone closes.
+// A detached run's prompt reads the turn's stdin channel; once the turn
+// tears its reader down nothing feeds it again, and the prompt held the
+// worker until its timeout. abandoned: it ended that way, not by an answer.
+func promptWhileReaderLives(ctx context.Context, readerGone <-chan struct{}, ask func(context.Context) coder.SecurityDecision) (decision coder.SecurityDecision, abandoned bool) {
+	if readerGone == nil {
+		return ask(ctx), false
+	}
+	promptCtx, cancel := context.WithCancel(ctx)
+	var left atomic.Bool
+	watcher := make(chan struct{})
+	go func() {
+		defer close(watcher)
+		select {
+		case <-readerGone:
+			left.Store(true)
+			cancel()
+		case <-promptCtx.Done():
+		}
+	}()
+	decision = ask(promptCtx)
+	cancel()
+	<-watcher
+	// An answer given as the reader left is still the user's answer.
+	return decision, left.Load() && decision == coder.DecisionCanceled
 }
 
 // pauseSpinner stops the spinner output. The Timer.onPause callback
@@ -180,9 +272,12 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		// A detached task-graph run is the same case, unless the agent turn
 		// that started it is reading stdin NOW (else nobody feeds the prompt).
 		stdinCh, nobody := a.stdinCh, a.unattended
-		if detached, fromTurn := plugins.TaskGraphDetached(ctx); detached {
-			if stdinCh = nil; fromTurn && a.liveStdin != nil {
-				stdinCh = a.liveStdin()
+		var readerGone <-chan struct{}
+		detached, fromTurn := plugins.TaskGraphDetached(ctx)
+		asksTurn := detached && fromTurn && a.liveStdin != nil
+		if detached {
+			if stdinCh = nil; asksTurn {
+				stdinCh, readerGone = a.liveStdin()
 			}
 			nobody = nobody || stdinCh == nil
 		}
@@ -220,6 +315,20 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 			return false, "AÇÃO BLOQUEADA (Regra de Segurança). NÃO TENTE NOVAMENTE."
 		}
 
+		// This call may have queued behind another worker's prompt for a
+		// long time. The reader seen before queueing may have been torn
+		// down since — and replaced: a suspend for an overlay resumes with
+		// new channels. Ask the reader that is live NOW; with none, do not
+		// draw a box nobody can answer.
+		if asksTurn {
+			stdinCh, readerGone = a.liveStdin()
+		}
+		if (asksTurn && stdinCh == nil) || chanClosed(readerGone) {
+			a.logger.Info("Worker tool call denied (the turn's stdin reader went away before the prompt)",
+				zap.String("tool", toolName))
+			return false, i18n.T("agent.policy.unattended_denied", toolName)
+		}
+
 		// Pause spinner so the prompt renders cleanly
 		a.pauseSpinner()
 
@@ -227,44 +336,61 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		secCtx := buildSecurityContext(ctx)
 
 		// Prompt the user with full context
-		decision := coder.PromptSecurityCheckWithContextGuarded(ctx, toolName, args, secCtx, stdinCh)
-		pattern := coder.GetSuggestedPattern(toolName, args)
-
+		if asksTurn && a.detachedPrompt != nil {
+			defer a.detachedPrompt()()
+		}
+		decision, abandoned := promptWhileReaderLives(ctx, readerGone, func(promptCtx context.Context) coder.SecurityDecision {
+			return coder.PromptSecurityCheckWithContextGuarded(promptCtx, toolName, args, secCtx, stdinCh)
+		})
 		// Clear the prompt area and resume spinner
 		fmt.Print(metrics.ClearLine())
 		a.resumeSpinner()
 		if a.restoreInput != nil {
 			a.restoreInput()
 		}
-
-		switch decision {
-		case coder.DecisionAllowAlways:
-			if pattern != "" {
-				if err := a.pm.AddRule(pattern, coder.ActionAllow); err != nil {
-					a.logger.Warn("failed to persist allow rule", zap.String("pattern", pattern), zap.Error(err))
-				}
-			}
-			return true, ""
-
-		case coder.DecisionDenyForever:
-			if pattern != "" {
-				if err := a.pm.AddRule(pattern, coder.ActionDeny); err != nil {
-					a.logger.Warn("failed to persist deny rule", zap.String("pattern", pattern), zap.Error(err))
-				}
-			}
-			return false, "AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
-
-		case coder.DecisionDenyOnce:
-			return false, "AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
-
-		case coder.DecisionCanceled:
-			return false, "OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
-
-		default: // DecisionRunOnce
-			return true, ""
+		if abandoned {
+			// The turn ended between the liveness check and the answer:
+			// nobody is left to ask, which is the unattended case.
+			a.logger.Info("Worker tool call denied (the turn's stdin reader went away before an answer)",
+				zap.String("tool", toolName))
+			return false, i18n.T("agent.policy.unattended_denied", toolName)
 		}
+
+		return a.applyDecision(decision, toolName, args)
 	}
 
 	// Fallback: unknown action → deny (safe default)
 	return false, "AÇÃO BLOQUEADA (política desconhecida)."
+}
+
+// applyDecision turns the user's answer into the verdict, persisting the
+// rule an "always" or "never" answer creates.
+func (a *workerPolicyAdapter) applyDecision(decision coder.SecurityDecision, toolName, args string) (bool, string) {
+	pattern := coder.GetSuggestedPattern(toolName, args)
+	switch decision {
+	case coder.DecisionAllowAlways:
+		if pattern != "" {
+			if err := a.pm.AddRule(pattern, coder.ActionAllow); err != nil {
+				a.logger.Warn("failed to persist allow rule", zap.String("pattern", pattern), zap.Error(err))
+			}
+		}
+		return true, ""
+
+	case coder.DecisionDenyForever:
+		if pattern != "" {
+			if err := a.pm.AddRule(pattern, coder.ActionDeny); err != nil {
+				a.logger.Warn("failed to persist deny rule", zap.String("pattern", pattern), zap.Error(err))
+			}
+		}
+		return false, "AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
+
+	case coder.DecisionDenyOnce:
+		return false, "AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
+
+	case coder.DecisionCanceled:
+		return false, "OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
+
+	default: // DecisionRunOnce
+		return true, ""
+	}
 }

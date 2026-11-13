@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/pulse"
@@ -135,7 +136,7 @@ func (a *dashToolAdapter) Off(ctx context.Context) (string, error) {
 }
 
 // Summary implements plugins.DashAdapter.
-func (a *dashToolAdapter) Summary(_ context.Context, all bool) (string, error) {
+func (a *dashToolAdapter) Summary(ctx context.Context, all bool) (string, error) {
 	if err := a.ready(); err != nil {
 		return "", err
 	}
@@ -149,7 +150,7 @@ func (a *dashToolAdapter) Summary(_ context.Context, all bool) (string, error) {
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
-		events := readSpool(root, m.Instance)
+		events := dashScoped(ctx, readSpool(root, m.Instance))
 		sum := pulse.Summarize(events)
 		b.WriteString(i18n.T("dash.tool.summary.header", m.Surface, strconv.Itoa(m.PID), sum.Events, dashSpan(sum)))
 		if sum.Events == 0 {
@@ -162,7 +163,7 @@ func (a *dashToolAdapter) Summary(_ context.Context, all bool) (string, error) {
 }
 
 // Events implements plugins.DashAdapter.
-func (a *dashToolAdapter) Events(_ context.Context, q plugins.DashEventsQuery) (string, error) {
+func (a *dashToolAdapter) Events(ctx context.Context, q plugins.DashEventsQuery) (string, error) {
 	if err := a.ready(); err != nil {
 		return "", err
 	}
@@ -181,7 +182,7 @@ func (a *dashToolAdapter) Events(_ context.Context, q plugins.DashEventsQuery) (
 	var matched []pulse.Event
 	total := 0
 	for _, m := range metas {
-		for _, ev := range readSpool(root, m.Instance) {
+		for _, ev := range dashScoped(ctx, readSpool(root, m.Instance)) {
 			total++
 			if q.Kind != "" && string(ev.Kind) != q.Kind {
 				continue
@@ -209,6 +210,23 @@ func (a *dashToolAdapter) Events(_ context.Context, q plugins.DashEventsQuery) (
 		b.WriteString("\n" + renderDashEvent(ev, len(metas) > 1))
 	}
 	return b.String(), nil
+}
+
+// dashScoped is what a reader under ctx may see of events: a session sees
+// the background processes it started and no other owner's, the local
+// operator everything.
+func dashScoped(ctx context.Context, events []pulse.Event) []pulse.Event {
+	owner := proc.OwnerFrom(ctx)
+	if owner == "" {
+		return events
+	}
+	out := make([]pulse.Event, 0, len(events))
+	for _, ev := range events {
+		if proc.PulseVisibleTo(owner, ev) {
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 // Mark implements plugins.DashAdapter. The note is a label: one line, short,
