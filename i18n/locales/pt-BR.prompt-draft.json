@@ -1,0 +1,4 @@
+{
+  "agent.typeahead.draft_parked": "Seu rascunho foi guardado enquanto esta pergunta está aberta e volta depois da resposta: %s",
+  "coder.security.invalid_retry": "Não entendi %q. Responda com uma das opções mostradas."
+}
