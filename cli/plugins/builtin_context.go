@@ -119,15 +119,30 @@ func (*BuiltinContextPlugin) Usage() string {
 	return `<tool_call name="@context" args='{"cmd":"create","args":{"name":"react-docs","paths":["/tmp/react.jsonl"],"mode":"knowledge"}}' />
 
 Subcommands (cmd + args):
-  create  {name, paths[], mode?, description?, force?}  build a context/knowledge
-          base. mode defaults to "knowledge" (retrieval-first). paths is a
-          corpus.jsonl (from @docs-flatten), a directory, or files.
-  attach  {name, rag?, priority?}  attach to the session. rag (bool or int K)
-          turns on semantic retrieval; priority orders multiple attachments.
-  detach  {name}                   remove an attachment from the session.
-  list                             list every available context.
-  status                           show what is attached to this session.
-  delete  {name, dry_run?}         permanently delete a context (dry_run:true only shows it).
+  create   {name, paths[], mode?, description?, tags[]?, force?}  build a
+           context/knowledge base. mode defaults to "knowledge" (retrieval-first).
+           paths is a corpus.jsonl (from @docs-flatten), a directory, or files.
+  update   {name, paths[]?, mode?, description?, tags[]?}  re-ingest or modify;
+           omitted fields keep their value.
+  attach   {name, rag?, priority?, chunks[]?, weight?, full?}  attach to the
+           session. rag (true or int K) = semantic retrieval; chunks = only these
+           1-based chunks of a chunked context; weight (0-10] biases this corpus;
+           full:true injects the whole content and opts out of automatic retrieval.
+  detach   {name}                 remove an attachment from the session.
+  attached                        what is attached to THIS session (alias: status).
+           Not the user's "/context status", which shows the live prompt budget.
+  list                            every available context.
+  show     {name}                 one context's metadata.
+  inspect  {name, chunk?}         its documents/chunks; chunk N dumps that chunk.
+  merge    {name, sources[], description?}  combine >= 2 contexts into a new one.
+  refresh  {name}                 re-index from the recorded source paths.
+  watch    {name?}                re-index whenever the sources change; without
+           name, list the watched contexts.
+  unwatch  {name}                 stop watching.
+  export   {name, path}           write a context to a portable file.
+  import   {path}                 load a context from an exported file.
+  metrics                         totals for the whole context store.
+  delete   {name, dry_run?}       permanently delete (dry_run:true only shows it).
 
 Autonomous docs pipeline: @websearch (find the docs source) → @docs-flatten
 (root/repo/url → corpus.jsonl) → @context create … --mode knowledge →
@@ -135,7 +150,10 @@ Autonomous docs pipeline: @websearch (find the docs source) → @docs-flatten
 }
 
 // Version is semver.
-func (*BuiltinContextPlugin) Version() string { return "1.1.0" }
+func (*BuiltinContextPlugin) Version() string { return "1.2.0" }
+
+// contextValidCmds is the verb list quoted by every "unknown cmd" error.
+const contextValidCmds = "create|update|attach|detach|attached|list|show|inspect|merge|refresh|watch|unwatch|export|import|delete|metrics"
 
 // contextDeleteDryRunPrefix heads a delete preview: nothing was removed.
 const contextDeleteDryRunPrefix = "DRY RUN — nothing deleted. This context would be removed from disk:\n"
@@ -156,6 +174,7 @@ func (*BuiltinContextPlugin) Schema() string {
 					{"name": "paths", "type": "array", "required": true, "description": "Sources: a corpus.jsonl from @docs-flatten, a directory, or files."},
 					{"name": "mode", "type": "string", "description": "knowledge (default, retrieval-first) | full | summary | chunked | smart."},
 					{"name": "description", "type": "string", "description": "Optional human description."},
+					{"name": "tags", "type": "array", "description": "Optional tags, used by list filters."},
 					{"name": "force", "type": "boolean", "description": "Overwrite an existing context with the same name."},
 				},
 				"examples": []string{
@@ -170,8 +189,11 @@ func (*BuiltinContextPlugin) Schema() string {
 					{"name": "name", "type": "string", "required": true, "description": "Context name to attach."},
 					{"name": "rag", "type": "integer", "description": "Top-K passages for semantic retrieval (e.g. 8). Omit for the mode default."},
 					{"name": "priority", "type": "integer", "description": "Order among attachments (lower first). Default 100."},
+					{"name": "chunks", "type": "array", "description": "Attach only these 1-based chunks of a chunked context (see inspect). Not combinable with rag."},
+					{"name": "weight", "type": "number", "description": "Corpus weight when knowledge hits are merged, above 0 up to 10 (1 is neutral)."},
+					{"name": "full", "type": "boolean", "description": "Inject the whole content: opts out of the automatic switch to semantic retrieval. Not combinable with rag."},
 				},
-				"examples": []string{`{"cmd":"attach","args":{"name":"react-docs"}}`, `{"cmd":"attach","args":{"name":"react-docs","rag":8}}`},
+				"examples": []string{`{"cmd":"attach","args":{"name":"react-docs"}}`, `{"cmd":"attach","args":{"name":"react-docs","rag":8}}`, `{"cmd":"attach","args":{"name":"api-spec","full":true}}`, `{"cmd":"attach","args":{"name":"repo","chunks":[1,3]}}`},
 			},
 			{
 				"name":        "detach",
@@ -185,9 +207,9 @@ func (*BuiltinContextPlugin) Schema() string {
 				"examples":    []string{`{"cmd":"list"}`},
 			},
 			{
-				"name":        "status",
-				"description": "Show which contexts are attached to THIS session and their footprint.",
-				"examples":    []string{`{"cmd":"status"}`},
+				"name":        "attached",
+				"description": "Show which contexts are attached to THIS session and their footprint. Alias: status. This is not the user's /context status command, which shows the live prompt budget.",
+				"examples":    []string{`{"cmd":"attached"}`},
 			},
 			{
 				"name":        "delete",
@@ -255,6 +277,24 @@ func (*BuiltinContextPlugin) Schema() string {
 				"description": "Summarize the context store: total contexts, how many are attached, total size and a per-mode breakdown.",
 				"examples":    []string{`{"cmd":"metrics"}`},
 			},
+			{
+				"name":        "refresh",
+				"description": "Re-index a context from the source paths recorded when it was created, picking up changed, added and removed files.",
+				"flags":       []map[string]interface{}{{"name": "name", "type": "string", "required": true, "description": "Context name."}},
+				"examples":    []string{`{"cmd":"refresh","args":{"name":"react-docs"}}`},
+			},
+			{
+				"name":        "watch",
+				"description": "Keep a context fresh: re-index it automatically whenever its source files change, until unwatch or the end of the session. Without name, list the watched contexts.",
+				"flags":       []map[string]interface{}{{"name": "name", "type": "string", "description": "Context name. Omit to list what is being watched."}},
+				"examples":    []string{`{"cmd":"watch","args":{"name":"projdocs"}}`, `{"cmd":"watch"}`},
+			},
+			{
+				"name":        "unwatch",
+				"description": "Stop the automatic re-indexing started by watch.",
+				"flags":       []map[string]interface{}{{"name": "name", "type": "string", "required": true, "description": "Context name."}},
+				"examples":    []string{`{"cmd":"unwatch","args":{"name":"projdocs"}}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -268,7 +308,7 @@ func (p *BuiltinContextPlugin) Execute(ctx context.Context, args []string) (stri
 
 // ExecuteWithStream runs the subcommand. The streaming callback is unused —
 // context operations are short — but the signature satisfies the contract.
-func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []string, _ func(string)) (string, error) {
+func (p *BuiltinContextPlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
 	adapter := currentContextAdapter()
 	if adapter == nil {
 		return "", fmt.Errorf("@context: context management not available in this session")
@@ -278,22 +318,15 @@ func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []strin
 		return "", fmt.Errorf("@context: %w", err)
 	}
 
+	if err := contextCheckArgs(cmd, raw); err != nil {
+		return "", err
+	}
+
 	switch cmd {
 	case "create":
-		name := strings.TrimSpace(jsonString(raw, "name"))
-		if name == "" {
-			return "", fmt.Errorf("@context create: \"name\" is required")
-		}
-		paths := contextStringSlice(raw, "paths", "path", "source", "corpus")
-		if len(paths) == 0 {
-			return "", fmt.Errorf("@context create: at least one source path is required (a corpus.jsonl, directory or file)")
-		}
-		mode := strings.TrimSpace(jsonString(raw, "mode"))
-		if mode == "" {
-			mode = "knowledge"
-		}
-		out, cerr := adapter.Create(name, mode, paths, jsonString(raw, "description", "desc"), jsonBool(raw, "force"))
-		return wrapContextErr("create", out, cerr)
+		return contextCreate(adapter, raw)
+	case "refresh", "watch", "unwatch":
+		return contextMaintain(ctx, adapter, cmd, raw)
 	case "update":
 		name := strings.TrimSpace(jsonString(raw, "name"))
 		if name == "" {
@@ -349,12 +382,7 @@ func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []strin
 		out, merr := adapter.Metrics()
 		return wrapContextErr("metrics", out, merr)
 	case "attach":
-		name := strings.TrimSpace(jsonString(raw, "name"))
-		if name == "" {
-			return "", fmt.Errorf("@context attach: \"name\" is required")
-		}
-		out, aerr := adapter.Attach(name, contextRagTopK(raw), jsonInt(raw, "priority"))
-		return wrapContextErr("attach", out, aerr)
+		return contextAttach(adapter, raw)
 	case "detach":
 		name := strings.TrimSpace(jsonString(raw, "name"))
 		if name == "" {
@@ -367,11 +395,11 @@ func (p *BuiltinContextPlugin) ExecuteWithStream(_ context.Context, args []strin
 		return wrapContextErr("list", out, lerr)
 	case "status":
 		out, serr := adapter.Status()
-		return wrapContextErr("status", out, serr)
+		return wrapContextErr("attached", out, serr)
 	case "delete":
 		return contextDelete(adapter, raw)
 	default:
-		return "", fmt.Errorf("@context: unknown cmd %q (valid: create|update|attach|detach|list|show|inspect|merge|status|export|import|delete|metrics)", cmd)
+		return "", fmt.Errorf("@context: unknown cmd %q (valid: %s)", cmd, contextValidCmds)
 	}
 }
 
@@ -405,24 +433,8 @@ func wrapContextErr(sub, out string, err error) (string, error) {
 // (true → default top-K, encoded here as -1 meaning "mode default on") or an
 // int (explicit K). 0 / absent / false means "no override".
 func contextRagTopK(raw map[string]json.RawMessage) int {
-	v, ok := raw["rag"]
-	if !ok {
-		v, ok = raw["retrieve"]
-	}
-	if !ok || len(v) == 0 {
-		return 0
-	}
-	var b bool
-	if err := json.Unmarshal(v, &b); err == nil {
-		if b {
-			return contextDefaultRagTopK
-		}
-		return 0
-	}
-	if n := jsonInt(raw, "rag", "retrieve"); n > 0 {
-		return n
-	}
-	return 0
+	n, _ := contextRagArg(raw)
+	return n
 }
 
 // contextDefaultRagTopK is the top-K applied when rag is requested as a bare
@@ -450,7 +462,7 @@ func parseContextInvocation(args []string) (string, map[string]json.RawMessage, 
 			cmd = inferContextCmd(inner)
 		}
 		if cmd == "" {
-			return "", nil, fmt.Errorf("missing or unknown cmd (valid: create|update|attach|detach|list|show|inspect|merge|status|export|import|delete|metrics)")
+			return "", nil, fmt.Errorf("missing or unknown cmd (valid: %s)", contextValidCmds)
 		}
 		return cmd, inner, nil
 	}
@@ -461,7 +473,7 @@ func parseContextInvocation(args []string) (string, map[string]json.RawMessage, 
 	}
 	cmd := canonicalContextCmd(strings.TrimSpace(args[0]))
 	if cmd == "" {
-		return "", nil, fmt.Errorf("unknown subcommand %q", args[0])
+		return "", nil, fmt.Errorf("unknown subcommand %q (valid: %s)", args[0], contextValidCmds)
 	}
 	return cmd, contextArgvToMap(args[1:]), nil
 }
@@ -486,7 +498,14 @@ func canonicalContextCmd(s string) string {
 	case "merge", "join":
 		return "merge"
 	case "status", "attached":
+		// "attached" is the documented name; "status" stays the internal verb.
 		return "status"
+	case "refresh", "reindex":
+		return "refresh"
+	case "watch":
+		return "watch"
+	case "unwatch":
+		return "unwatch"
 	case "export":
 		return "export"
 	case "import":

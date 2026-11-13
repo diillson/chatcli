@@ -1,0 +1,21 @@
+{
+  "ctxpar.args.unclosed_quote": "aspas %s sem fechamento no comando — feche-as ou remova a aspa",
+  "ctxpar.attach.rag_positive": "--rag recebe um número positivo de trechos, veio %s (omita o número para usar o padrão)",
+  "ctxpar.list.flag_needs_value": "%s precisa de um valor",
+  "ctxpar.list.bad_date": "%s: %q não é uma data (use AAAA-MM-DD)",
+  "complete.ctxpar.list_tag": "Só contextos com esta tag",
+  "complete.ctxpar.list_mode": "Só contextos neste modo",
+  "complete.ctxpar.list_name": "Só contextos cujo nome combina",
+  "complete.ctxpar.list_since": "Criados a partir de AAAA-MM-DD",
+  "complete.ctxpar.list_before": "Criados antes de AAAA-MM-DD",
+  "plugins.mcpsrv.describe_restart": "MCP: reiniciar %s",
+  "plugins.mcpsrv.describe_tools": "MCP: listar ferramentas",
+  "mcp.tool.restart_user_stopped": "O servidor MCP %q foi parado pelo usuário com /mcp stop, então não é reiniciado por aqui. Peça ao usuário para rodar /mcp start %s.",
+  "mcp.tool.restart_ok": "Servidor MCP %q reiniciado: %d ferramenta(s) disponível(is).",
+  "parkpar.wake.usage": "Uso: /parked wake <token> [motivo...]   (retoma o agent agora com outcome=cancelled; use /parked para listar)",
+  "parkpar.wake.failed": "não foi possível acordar o agent estacionado: %v",
+  "parkpar.wake.ok": "Park %s acordado com outcome=cancelled — %s",
+  "parkpar.usage_wake": "/parked wake <token> [motivo] — encerra a espera: o agent retoma agora, avisado de que foi cancelado e por quê",
+  "parkpar.usage_verbs": "/resume <token> retoma como despertar manual; /cancel-park <token> apaga o park e o agent nunca retoma",
+  "complete.parkpar.sub_wake": "retoma um agent estacionado agora com outcome=cancelled: wake <token> [motivo]"
+}

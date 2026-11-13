@@ -102,11 +102,11 @@ func TestParkPlugin_CancelErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no parked agent matches")
 
-	// No runtime wired: refuse and point at /cancel-park — the snapshot
+	// No runtime wired: refuse and point at /parked wake — the snapshot
 	// must survive (deleting it would orphan the scheduler job).
 	_, err = p.Execute(context.Background(), []string{`{"cmd":"cancel"}`})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "/cancel-park "+snap.Token[:8])
+	assert.Contains(t, err.Error(), "/parked wake "+snap.Token[:8])
 	_, loadErr := park.Load(snap.Token)
 	require.NoError(t, loadErr)
 }

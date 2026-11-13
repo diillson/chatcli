@@ -469,6 +469,13 @@ type ChatCLI struct {
 	mcpWatcher     *fsnotify.Watcher  // hot-reload watcher; nil when disabled
 	mcpWatcherDone chan struct{}      // closed to stop the watcher loop
 	mcpStartupDone chan struct{}      // closed once the initial StartAll pass finishes
+	// mcpUserStops names the servers the user stopped with /mcp stop, so
+	// the model's @mcp-login restart does not bring them back.
+	mcpUserStops sync.Map
+	// mcpCtxMu guards mcpCtx/mcpCancel, swapped by /mcp restart while tool
+	// calls read them; mcpServerLocks serializes stop/start per server name.
+	mcpCtxMu       sync.Mutex
+	mcpServerLocks sync.Map
 
 	// MCP channel reactive triggers — engine, pending queues, and the
 	// consumer goroutine that fans Actions out into them. Initialized
@@ -2021,9 +2028,11 @@ func (cli *ChatCLI) bootstrapMCP(ctx context.Context, logger *zap.Logger) {
 	// the snapshot runs on the telemetry goroutine and must not read a field
 	// this goroutine is still assigning.
 	pulse.Default().RegisterSnapshotter(pulseMCPSnapshotKey, mcpMgr.PulseSnapshot)
+	cli.mcpCtxMu.Lock()
 	cli.mcpCancel = mcpCancelFn
-	cli.mcpConfigPath = mcpConfigPath
 	cli.mcpCtx = mcpCtx
+	cli.mcpCtxMu.Unlock()
+	cli.mcpConfigPath = mcpConfigPath
 	cli.mcpStartupDone = make(chan struct{})
 	go func() {
 		defer close(cli.mcpStartupDone)
@@ -2073,6 +2082,7 @@ func (cli *ChatCLI) startMCPConfigWatcher() {
 				cli.logger.Warn("MCP config reload failed", zap.Error(err))
 				return
 			}
+			cli.mcpForgetUserStops(diff)
 			if len(diff.Started)+len(diff.Stopped)+len(diff.Updated) == 0 {
 				return
 			}

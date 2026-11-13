@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/diillson/chatcli/cli/ctxmgr"
 	"github.com/diillson/chatcli/i18n"
@@ -63,7 +64,10 @@ func NewContextHandlerAt(basePath string, logger *zap.Logger) (*ContextHandler, 
 
 // HandleContextCommand processa comandos /context
 func (h *ContextHandler) HandleContextCommand(ctx context.Context, sessionID, input string) error {
-	parts := strings.Fields(input)
+	parts, err := splitContextArgs(input)
+	if err != nil {
+		return err
+	}
 	if len(parts) < 2 {
 		h.showContextHelp()
 		return nil
@@ -124,6 +128,66 @@ func (h *ContextHandler) HandleContextCommand(ctx context.Context, sessionID, in
 	default:
 		return fmt.Errorf("%s", i18n.T("context.error.unknown_subcommand", subcommand))
 	}
+}
+
+// splitContextArgs splits a /context line on Unicode whitespace (as
+// strings.Fields did: Option+Space types a no-break space), keeping a
+// quoted run such as --description "two words" together. Rules:
+//   - a quote groups only when it opens an argument;
+//   - a backslash is always literal, so "C:\dir one\" is a path that ends in
+//     a backslash; a literal quote is written inside the other quote style;
+//   - an unclosed double quote is an error; an apostrophe with no closing
+//     apostrophe at the end of a word is a plain character ('tis, don't).
+func splitContextArgs(input string) ([]string, error) {
+	var out []string
+	var buf strings.Builder
+	inTok := false
+	runes := []rune(input)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case unicode.IsSpace(r):
+			if inTok {
+				out = append(out, buf.String())
+				buf.Reset()
+				inTok = false
+			}
+		case !inTok && (r == '"' || r == '\''):
+			inTok = true
+			end := closingQuote(runes, i)
+			if end < 0 && r == '"' {
+				return nil, fmt.Errorf("%s", i18n.T("ctxpar.args.unclosed_quote", string(r)))
+			}
+			if end < 0 {
+				buf.WriteRune(r)
+				continue
+			}
+			buf.WriteString(string(runes[i+1 : end]))
+			i = end
+		default:
+			buf.WriteRune(r)
+			inTok = true
+		}
+	}
+	if inTok {
+		out = append(out, buf.String())
+	}
+	return out, nil
+}
+
+// closingQuote returns the index of the quote that closes the one at open,
+// or -1. A double quote closes at the next double quote. An apostrophe
+// closes only at one that ends a word, so contractions stay text.
+func closingQuote(runes []rune, open int) int {
+	for j := open + 1; j < len(runes); j++ {
+		if runes[j] != runes[open] {
+			continue
+		}
+		if runes[open] == '"' || j+1 == len(runes) || unicode.IsSpace(runes[j+1]) {
+			return j
+		}
+	}
+	return -1
 }
 
 // handleCreate cria um novo contexto
@@ -387,13 +451,7 @@ func (h *ContextHandler) handleMerge(args []string) error {
 		contextIDs = append(contextIDs, ctx.ID)
 	}
 
-	// Opções de merge padrão
-	opts := ctxmgr.MergeOptions{
-		RemoveDuplicates: true,
-		SortByPath:       true,
-		PreferNewer:      true,
-		Tags:             []string{"merged"},
-	}
+	opts := contextMergeDefaults()
 
 	fmt.Println(i18n.T("context.merge.processing"))
 
@@ -406,6 +464,17 @@ func (h *ContextHandler) handleMerge(args []string) error {
 	h.printContextInfo(mergedCtx, false)
 
 	return nil
+}
+
+// contextMergeDefaults is the one merge policy of /context merge and
+// @context merge, so both produce the same context from the same sources.
+func contextMergeDefaults() ctxmgr.MergeOptions {
+	return ctxmgr.MergeOptions{
+		RemoveDuplicates: true,
+		SortByPath:       true,
+		PreferNewer:      true,
+		Tags:             []string{"merged"},
+	}
 }
 
 // GetManager returns the underlying context manager.

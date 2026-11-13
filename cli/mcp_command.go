@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	prompt "github.com/c-bata/go-prompt"
@@ -103,6 +104,8 @@ func (cli *ChatCLI) mcpLogin(ctx context.Context, name string) {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.login_usage"), ColorYellow))
 		return
 	}
+	// Logging in starts the server: the user's earlier /mcp stop is over.
+	cli.mcpUserStops.Delete(name)
 	fmt.Println(colorize("  "+i18n.T("mcp.cmd.login_starting", name), ColorCyan))
 	if err := cli.mcpManager.LoginOAuth(ctx, name); err != nil {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.login_failed", err), ColorRed))
@@ -281,6 +284,7 @@ func (cli *ChatCLI) mcpRestart(ctx context.Context, name string) {
 		cli.mcpCancel()
 	}
 
+	cli.mcpUserStops.Clear()
 	mcpCtx, cancel := context.WithCancel(ctx)
 	if err := cli.mcpManager.StartAll(mcpCtx); err != nil {
 		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", err), ColorRed))
@@ -289,8 +293,10 @@ func (cli *ChatCLI) mcpRestart(ctx context.Context, name string) {
 		return
 	}
 
+	cli.mcpCtxMu.Lock()
 	cli.mcpCtx = mcpCtx
 	cli.mcpCancel = cancel
+	cli.mcpCtxMu.Unlock()
 	statuses := cli.mcpManager.GetServerStatus()
 	tools := cli.mcpManager.GetTools()
 	fmt.Println(p + fmt.Sprintf("%s✓%s %s",
@@ -310,12 +316,8 @@ func (cli *ChatCLI) mcpRestartOne(name string) {
 	p := uiPrefix(ColorYellow)
 	fmt.Println(p + colorize(i18n.T("mcp.cmd.restarting_one", name), ColorGray))
 
-	if err := cli.mcpManager.StopOne(cli.mcpCtx, name); err != nil {
-		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", translateMCPError(err)), ColorRed))
-		fmt.Println(uiBoxEnd(ColorYellow))
-		return
-	}
-	if err := cli.mcpManager.StartOne(cli.mcpCtx, name); err != nil {
+	cli.mcpUserStops.Delete(name)
+	if err := cli.mcpRestartServer(name); err != nil {
 		fmt.Println(p + colorize(i18n.T("mcp.cmd.restart_error", translateMCPError(err)), ColorRed))
 		fmt.Println(uiBoxEnd(ColorYellow))
 		return
@@ -325,13 +327,78 @@ func (cli *ChatCLI) mcpRestartOne(name string) {
 	fmt.Println()
 }
 
-// mcpSetRunning starts or stops one configured MCP server: the single
-// code path behind /mcp start, /mcp stop and the web UI's toggle.
-func (cli *ChatCLI) mcpSetRunning(name string, on bool) error {
-	if on {
-		return cli.mcpManager.StartOne(cli.mcpCtx, name)
+// mcpRestartServer stops and starts one configured server on the
+// long-lived MCP context: the body of /mcp restart <name> and of the
+// @mcp-login restart verb.
+//
+// Stop and start are one unit per server: two interleaved restarts would
+// each start a process and the manager would keep only the second.
+func (cli *ChatCLI) mcpRestartServer(name string) error {
+	mu := cli.mcpServerLock(name)
+	mu.Lock()
+	defer mu.Unlock()
+	// Read under the lock /mcp restart swaps it under. Inline on purpose: a
+	// helper returning it makes contextcheck demand ctx from every caller.
+	cli.mcpCtxMu.Lock()
+	ctx := cli.mcpCtx
+	cli.mcpCtxMu.Unlock()
+	if err := cli.mcpManager.StopOne(ctx, name); err != nil {
+		return err
 	}
-	return cli.mcpManager.StopOne(cli.mcpCtx, name)
+	return cli.mcpManager.StartOne(ctx, name)
+}
+
+// mcpServerLock returns the mutex that serializes stop/start of one server.
+func (cli *ChatCLI) mcpServerLock(name string) *sync.Mutex {
+	mu, _ := cli.mcpServerLocks.LoadOrStore(name, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+// mcpStoppedByUser reports whether the user stopped this server and it is
+// still down: what every path by which the model could start a server asks.
+// A mark on a server that runs again or left the config is stale: dropped.
+func (cli *ChatCLI) mcpStoppedByUser(name string) bool {
+	if _, marked := cli.mcpUserStops.Load(name); !marked {
+		return false
+	}
+	for _, s := range cli.mcpManager.GetServerStatus() {
+		if s.Name == name && !s.Connected && !s.Starting {
+			return true
+		}
+	}
+	cli.mcpUserStops.Delete(name)
+	return false
+}
+
+// mcpForgetUserStops drops the marks a configuration reload made moot:
+// servers it started or restarted (the user's edit) and servers it removed.
+func (cli *ChatCLI) mcpForgetUserStops(diff mcp.ReloadDiff) {
+	for _, names := range [][]string{diff.Started, diff.Updated, diff.Stopped} {
+		for _, name := range names {
+			cli.mcpUserStops.Delete(name)
+		}
+	}
+}
+
+// mcpSetRunning starts or stops one configured MCP server: the single
+// code path behind /mcp start, /mcp stop and the web UI's toggle. It also
+// records the user's stop, which the model's restart verb must respect.
+func (cli *ChatCLI) mcpSetRunning(name string, on bool) error {
+	mu := cli.mcpServerLock(name)
+	mu.Lock()
+	defer mu.Unlock()
+	cli.mcpCtxMu.Lock()
+	ctx := cli.mcpCtx
+	cli.mcpCtxMu.Unlock()
+	if on {
+		cli.mcpUserStops.Delete(name)
+		return cli.mcpManager.StartOne(ctx, name)
+	}
+	err := cli.mcpManager.StopOne(ctx, name)
+	if err == nil {
+		cli.mcpUserStops.Store(name, true)
+	}
+	return err
 }
 
 func (cli *ChatCLI) mcpStart(name string) {
@@ -368,6 +435,7 @@ func (cli *ChatCLI) mcpReload() {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.reload_error", err), ColorRed))
 		return
 	}
+	cli.mcpForgetUserStops(diff)
 	total := len(diff.Started) + len(diff.Stopped) + len(diff.Updated)
 	if total == 0 {
 		fmt.Println(colorize("  "+i18n.T("mcp.cmd.reload_no_changes"), ColorGray))

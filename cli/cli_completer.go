@@ -714,10 +714,31 @@ func contextSubcommands() []prompt.Suggest {
 }
 
 // contextSubcommandsNeedingName is the set of `/context <sub>` verbs whose
-// first positional argument is the name of an existing context.
+// first positional argument is the name of an existing context. export is
+// not here: it also completes a file path, so it has its own case below
+// (listed here, that case was never reached).
 var contextSubcommandsNeedingName = map[string]bool{
 	"attach": true, "detach": true, "show": true,
-	"delete": true, "export": true, "inspect": true,
+	"delete": true, "inspect": true,
+	"refresh": true, "watch": true, "unwatch": true,
+}
+
+// contextListFlagSuggestions offers the /context list filters, and the mode
+// names right after --mode.
+func contextListFlagSuggestions(args []string, line string, d prompt.Document) []prompt.Suggest {
+	if strings.HasPrefix(d.GetWordBeforeCursor(), "-") {
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "--tag", Description: i18n.T("complete.ctxpar.list_tag")},
+			{Text: "--mode", Description: i18n.T("complete.ctxpar.list_mode")},
+			{Text: "--name", Description: i18n.T("complete.ctxpar.list_name")},
+			{Text: "--since", Description: i18n.T("complete.ctxpar.list_since")},
+			{Text: "--before", Description: i18n.T("complete.ctxpar.list_before")},
+		}, d.GetWordBeforeCursor(), true)
+	}
+	if previousToken(args, line) == "--mode" {
+		return contextModeValueSuggestions()
+	}
+	return []prompt.Suggest{}
 }
 
 func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
@@ -739,6 +760,8 @@ func (cli *ChatCLI) getContextSuggestions(d prompt.Document) []prompt.Suggest {
 		return cli.contextNameOrFlagSuggestions(sub, args, line, d)
 	}
 	switch sub {
+	case "list", "ls":
+		return contextListFlagSuggestions(args, line, d)
 	case "create", "update":
 		return cli.contextCreateOrUpdateSuggestions(sub, args, line, d)
 	case "merge":

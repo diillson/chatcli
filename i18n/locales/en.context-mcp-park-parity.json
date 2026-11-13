@@ -1,0 +1,21 @@
+{
+  "ctxpar.args.unclosed_quote": "unclosed %s quote in the command — close it, or drop the quote",
+  "ctxpar.attach.rag_positive": "--rag takes a positive number of passages, got %s (leave the number out for the default)",
+  "ctxpar.list.flag_needs_value": "%s needs a value",
+  "ctxpar.list.bad_date": "%s: %q is not a date (use YYYY-MM-DD)",
+  "complete.ctxpar.list_tag": "Only contexts carrying this tag",
+  "complete.ctxpar.list_mode": "Only contexts in this mode",
+  "complete.ctxpar.list_name": "Only contexts whose name matches",
+  "complete.ctxpar.list_since": "Created on or after YYYY-MM-DD",
+  "complete.ctxpar.list_before": "Created before YYYY-MM-DD",
+  "plugins.mcpsrv.describe_restart": "MCP: restart %s",
+  "plugins.mcpsrv.describe_tools": "MCP: list tools",
+  "mcp.tool.restart_user_stopped": "MCP server %q was stopped by the user with /mcp stop, so it is not restarted from here. Ask the user to run /mcp start %s.",
+  "mcp.tool.restart_ok": "MCP server %q restarted: %d tool(s) available.",
+  "parkpar.wake.usage": "Usage: /parked wake <token> [reason...]   (resumes the agent now with outcome=cancelled; use /parked to list)",
+  "parkpar.wake.failed": "could not wake the parked agent: %v",
+  "parkpar.wake.ok": "Park %s woken with outcome=cancelled — %s",
+  "parkpar.usage_wake": "/parked wake <token> [reason] — end the wait: the agent resumes now, told it was cancelled and why",
+  "parkpar.usage_verbs": "/resume <token> resumes as a manual wake; /cancel-park <token> deletes the park and the agent never resumes",
+  "complete.parkpar.sub_wake": "resume a parked agent now with outcome=cancelled: wake <token> [reason]"
+}

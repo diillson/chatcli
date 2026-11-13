@@ -8,6 +8,7 @@ package cli
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -19,43 +20,57 @@ import (
 	"github.com/diillson/chatcli/utils"
 )
 
+// contextListFlags are the filters /context list accepts; each takes a value.
+var contextListFlags = []string{"--tag", "--mode", "--name", "--since", "--before"}
+
+// parseContextListFilter reads the /context list filters. A misspelled
+// flag, a flag with no value or an unreadable date is reported: each used
+// to be skipped, and the unfiltered list that came back looked like the
+// answer to the question that was asked.
+func parseContextListFilter(args []string) (*ctxmgr.ContextFilter, error) {
+	filter := &ctxmgr.ContextFilter{}
+	for i := 0; i < len(args); i++ {
+		flag := args[i]
+		if !slices.Contains(contextListFlags, flag) {
+			return nil, fmt.Errorf("%s", i18n.T("context.io.error.unknown_flag", flag))
+		}
+		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+			return nil, fmt.Errorf("%s", i18n.T("ctxpar.list.flag_needs_value", flag))
+		}
+		i++
+		val := args[i]
+		switch flag {
+		case "--tag":
+			filter.Tags = append(filter.Tags, val)
+		case "--mode":
+			mode, ok := validContextMode(val)
+			if !ok {
+				return nil, fmt.Errorf("%s", i18n.T("context.handler.error.invalid_mode", val))
+			}
+			filter.Mode = mode
+		case "--name":
+			filter.NamePattern = val
+		default:
+			t, err := time.Parse("2006-01-02", val)
+			if err != nil {
+				return nil, fmt.Errorf("%s", i18n.T("ctxpar.list.bad_date", flag, val))
+			}
+			if flag == "--since" {
+				filter.CreatedAfter = &t
+			} else {
+				filter.CreatedBefore = &t
+			}
+		}
+	}
+	return filter, nil
+}
+
 // handleList lista contextos com suporte a filtros.
 // Flags: --tag <tag>, --mode <mode>, --name <pattern>, --since <YYYY-MM-DD>, --before <YYYY-MM-DD>
 func (h *ContextHandler) handleList(args []string) error {
-	filter := &ctxmgr.ContextFilter{}
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--tag":
-			if i+1 < len(args) {
-				i++
-				filter.Tags = append(filter.Tags, args[i])
-			}
-		case "--mode":
-			if i+1 < len(args) {
-				i++
-				filter.Mode = ctxmgr.ProcessingMode(args[i])
-			}
-		case "--name":
-			if i+1 < len(args) {
-				i++
-				filter.NamePattern = args[i]
-			}
-		case "--since":
-			if i+1 < len(args) {
-				i++
-				if t, err := time.Parse("2006-01-02", args[i]); err == nil {
-					filter.CreatedAfter = &t
-				}
-			}
-		case "--before":
-			if i+1 < len(args) {
-				i++
-				if t, err := time.Parse("2006-01-02", args[i]); err == nil {
-					filter.CreatedBefore = &t
-				}
-			}
-		}
+	filter, err := parseContextListFilter(args)
+	if err != nil {
+		return err
 	}
 
 	contexts, err := h.manager.ListContexts(filter)

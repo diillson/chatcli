@@ -140,9 +140,12 @@ func parseAttachFlags(args []string) (attachFlags, error) {
 			f.retrievalTopK = ctxmgr.DefaultRetrievalTopK
 			if i+1 < len(args) {
 				if n, err := strconv.Atoi(args[i+1]); err == nil {
-					if n > 0 {
-						f.retrievalTopK = n
+					// --rag 0 used to be swallowed and the default K applied,
+					// as if the number had never been typed.
+					if n <= 0 {
+						return f, fmt.Errorf("%s", i18n.T("ctxpar.attach.rag_positive", args[i+1]))
 					}
+					f.retrievalTopK = n
 					i++
 				}
 			}

@@ -33,8 +33,53 @@ func newLiveParkAdapter(cli *ChatCLI) *liveParkAdapter { return &liveParkAdapter
 // parkCancelOutcome is the outcome string the resumed agent sees.
 const parkCancelOutcome = "cancelled"
 
+// parkManualOutcome is the outcome /resume and @park resume report.
+const parkManualOutcome = "manual"
+
 // CancelPark implements plugins.ParkCanceller.
 func (a *liveParkAdapter) CancelPark(token, reason string) (string, error) {
+	if strings.TrimSpace(reason) == "" {
+		reason = "cancelled via @park cancel"
+	}
+	return a.wakePark(token, parkCancelOutcome, reason)
+}
+
+// ResumePark implements plugins.ParkManager: the wake /resume performs,
+// through the same cross-process path as CancelPark.
+func (a *liveParkAdapter) ResumePark(token string) (string, error) {
+	return a.wakePark(token, parkManualOutcome, "resumed via @park resume")
+}
+
+// DiscardPark implements plugins.ParkManager: what /cancel-park does. A park
+// another live process is known to own is refused — its scheduler job lives
+// there and would fire on nothing. An owner that is not mirrored or stopped
+// heartbeating is not seen, and that park is discarded.
+func (a *liveParkAdapter) DiscardPark(token string) (string, error) {
+	if a == nil || a.cli == nil {
+		return "", errors.New("park runtime not bound to the CLI")
+	}
+	if _, err := park.Load(token); err != nil {
+		return "", err
+	}
+	if !a.cli.ownsPark(token) {
+		if owner, alive := remoteParkLiveOwner(token); alive {
+			return "", fmt.Errorf("park %s is owned by another live process (%s); discard it there with /cancel-park, or use cancel to wake it", token, describeParkOwner(owner))
+		}
+	}
+	jobErr, err := a.cli.discardPark(token, "discarded via @park discard")
+	if err != nil {
+		return "", err
+	}
+	out := "snapshot deleted; this agent will not resume"
+	if jobErr != nil {
+		out += fmt.Sprintf(" (its scheduler job could not be cancelled: %v)", jobErr)
+	}
+	return out, nil
+}
+
+// wakePark resumes a parked agent now with the given outcome, here or in
+// the live process that owns it.
+func (a *liveParkAdapter) wakePark(token, outcome, reason string) (string, error) {
 	if a == nil || a.cli == nil {
 		return "", errors.New("park runtime not bound to the CLI")
 	}
@@ -46,18 +91,15 @@ func (a *liveParkAdapter) CancelPark(token, reason string) (string, error) {
 		return "", fmt.Errorf("park %s is already resuming", token)
 	}
 	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "cancelled via @park cancel"
-	}
 
 	owned := a.cli.ownsPark(token)
 	if !owned {
 		if owner, alive := remoteParkLiveOwner(token); alive {
-			if !requestRemoteParkWake(token, parkCancelOutcome, reason) {
+			if !requestRemoteParkWake(token, outcome, reason) {
 				return "", fmt.Errorf("park %s is owned by %s but the wake request could not be recorded in the hub", token, describeParkOwner(owner))
 			}
-			return fmt.Sprintf("cancel delivered via the hub to the process that owns this park (%s); it drops the scheduler job and resumes the agent there with outcome=cancelled on its next sync tick",
-				describeParkOwner(owner)), nil
+			return fmt.Sprintf("wake delivered via the hub to the process that owns this park (%s); it drops the scheduler job and resumes the agent there with outcome=%s on its next sync tick",
+				describeParkOwner(owner), outcome), nil
 		}
 	}
 
@@ -75,7 +117,7 @@ func (a *liveParkAdapter) CancelPark(token, reason string) (string, error) {
 	if !owned {
 		notes = append(notes, "no live process owns this park (its session ended); resuming it here")
 	}
-	if err := a.cli.schedulerBridge.wakeParkedAgent(token, parkCancelOutcome, reason); err != nil {
+	if err := a.cli.schedulerBridge.wakeParkedAgent(token, outcome, reason); err != nil {
 		return "", err
 	}
 	if a.cli.unattended {
