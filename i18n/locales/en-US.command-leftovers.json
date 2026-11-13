@@ -1,0 +1,6 @@
+{
+  "hooks.cmd.reloaded": "Hooks reloaded from the configuration files: %d loaded.",
+  "hooks.cmd.unknown_sub": "Unknown subcommand %q. Use /hooks, /hooks list or /hooks reload.",
+  "cli.switch.unknown_arg": " ❌ /switch does not understand %q. Use /switch (pick a provider), /switch --model <name>, or /provider <name>.",
+  "cli.switch.missing_value": " ❌ %s needs a value."
+}
