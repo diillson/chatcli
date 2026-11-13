@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.230.0](https://github.com/diillson/chatcli/compare/v1.229.0...v1.230.0) (2026-11-13)
+
+
+### Features
+
+* **cli:** give /proc, /taskgraph, /channel and /moa tool parity ([#1971](https://github.com/diillson/chatcli/issues/1971)) ([444d5c8](https://github.com/diillson/chatcli/commit/444d5c846c2e9282da0939523011dc2566998650))
+* **cli:** give the knowledge commands and tools the same verbs ([#1970](https://github.com/diillson/chatcli/issues/1970)) ([0f3ded9](https://github.com/diillson/chatcli/commit/0f3ded97ee7564245df2fee8375d6a2e5ca748d6))
+* **cli:** per-session processes, safe park prune and the onyx flat turn ([#1973](https://github.com/diillson/chatcli/issues/1973)) ([8b57635](https://github.com/diillson/chatcli/commit/8b57635fd0a7a711a9e06e8d39f17b4365901a33))
+* **scheduler:** run /wait in the background and announce when it ends ([#1956](https://github.com/diillson/chatcli/issues/1956)) ([6373fbc](https://github.com/diillson/chatcli/commit/6373fbc836c8f02a5a8e32cb18f293e071f19153))
+* **squad:** give /board, /mail and /agents the verbs their tools have ([#1968](https://github.com/diillson/chatcli/issues/1968)) ([458e0a3](https://github.com/diillson/chatcli/commit/458e0a38e61149d1785589163d3bd9d7feb7b8e4))
+* **tools:** level context, mcp and park tools with their commands ([#1969](https://github.com/diillson/chatcli/issues/1969)) ([4fc9880](https://github.com/diillson/chatcli/commit/4fc98805adf355c52e79ce1d5124334b46bea17c))
+* **ui:** flat panels and a live turn status for the onyx themes ([#1965](https://github.com/diillson/chatcli/issues/1965)) ([872f1ec](https://github.com/diillson/chatcli/commit/872f1ecd5118ba71c47e97b7382f964d6263375d))
+* **ui:** onyx, a monochrome theme with plain glyphs ([#1964](https://github.com/diillson/chatcli/issues/1964)) ([9f0ea64](https://github.com/diillson/chatcli/commit/9f0ea646d97ec1c54117729bd37a11acfe9d8c9c))
+
+
+### Bug Fixes
+
+* **build:** Go 1.27.4 for the net/http fix (GO-2026-6859) ([#1960](https://github.com/diillson/chatcli/issues/1960)) ([1f00e82](https://github.com/diillson/chatcli/commit/1f00e82eb509fe154469cd6dd41fa0cce435026e))
+* **cli:** honor /hooks reload, report what /switch ignores, keep graphview data ([#1962](https://github.com/diillson/chatcli/issues/1962)) ([a2a69d8](https://github.com/diillson/chatcli/commit/a2a69d8f6a56ac43867f15c77b38bae8c6dc756c))
+* **cli:** make Ctrl+C cancel the running slash command instead of quitting ([#1954](https://github.com/diillson/chatcli/issues/1954)) ([44032b6](https://github.com/diillson/chatcli/commit/44032b6d987bb84c354719a8343ef9dba0a68a33))
+* **cli:** never hold the prompt from a command typed during a turn ([#1967](https://github.com/diillson/chatcli/issues/1967)) ([7fd093f](https://github.com/diillson/chatcli/commit/7fd093f60dcc036b9c336d65e7f17f44d0328572))
+* **cli:** stop mistyped commands from running an action ([#1961](https://github.com/diillson/chatcli/issues/1961)) ([52e2c67](https://github.com/diillson/chatcli/commit/52e2c676f5298840b0c5b5b012226cc5f576bce9))
+* **coder:** allow reading a system binary that is a link out of its directory ([#1959](https://github.com/diillson/chatcli/issues/1959)) ([0a02628](https://github.com/diillson/chatcli/commit/0a02628d688e530ec4882d875e1fd77919ac2c8c))
+* **coder:** keep a half-typed line out of the answer to a permission prompt ([#1957](https://github.com/diillson/chatcli/issues/1957)) ([74fbeff](https://github.com/diillson/chatcli/commit/74fbefff49f00da80eae2dba4dd0aa7475917bff))
+* **mcp:** register stdio close and log hooks without racing the reader ([#1972](https://github.com/diillson/chatcli/issues/1972)) ([b13c0ad](https://github.com/diillson/chatcli/commit/b13c0ad09c435da9f4f52bf59c261d5741c2d095))
+* **scheduler:** make the agent tool's wait honor its interval and timeout ([#1955](https://github.com/diillson/chatcli/issues/1955)) ([d2513d4](https://github.com/diillson/chatcli/commit/d2513d4c94ac4e4e5fe6fee0d077ad5311cf38a9))
+* **scheduler:** show a waiting job as polling, not overdue and failed ([#1953](https://github.com/diillson/chatcli/issues/1953)) ([a5e009b](https://github.com/diillson/chatcli/commit/a5e009b43f3af0e297b39a521d8022ba904385cc))
+* **tools:** let default-on options be turned off, and make /connect strict ([#1966](https://github.com/diillson/chatcli/issues/1966)) ([4505c3d](https://github.com/diillson/chatcli/commit/4505c3dca55429fb8ba777fcabf81841b9c968b4))
+* **tools:** read tool arguments the way the agent loop delivers them ([#1958](https://github.com/diillson/chatcli/issues/1958)) ([1a6e977](https://github.com/diillson/chatcli/commit/1a6e9772bf17b7ed2207ad8b45c9adaf74645b66))
+* **tts:** repin the kokoro voice model upstream replaced in place ([#1974](https://github.com/diillson/chatcli/issues/1974)) ([2440a7d](https://github.com/diillson/chatcli/commit/2440a7d7fc8ce7b8ecd0355ba9b62ae9b4a98946))
+
 ## [1.229.0](https://github.com/diillson/chatcli/compare/v1.228.1...v1.229.0) (2026-11-10)
 
 
