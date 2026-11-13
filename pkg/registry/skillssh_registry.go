@@ -234,7 +234,7 @@ func (r *SkillsShRegistry) GetSkillMeta(ctx context.Context, nameOrSlug string) 
 	}
 
 	if best == nil {
-		return nil, fmt.Errorf("skill '%s' not found in %s", nameOrSlug, r.name)
+		return nil, skillNotFound(nameOrSlug, r.name)
 	}
 
 	// Enrich metadata by fetching SKILL.md frontmatter from download snapshot

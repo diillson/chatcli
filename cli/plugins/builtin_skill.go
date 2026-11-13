@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/persona/usage"
@@ -45,6 +46,31 @@ var skillNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 // skillsDirOverride lets tests redirect the skills directory.
 var skillsDirOverride string
 
+// SkillSessionAdapter backs the @skill subcommands that need the live
+// session: pinning and the read-only registry lookups. Installing from a
+// registry is deliberately NOT part of it — fetching third-party
+// instructions into the prompt stays a human decision (/skill install).
+type SkillSessionAdapter interface {
+	Pin(name string) (string, error)
+	Unpin(name string) (string, error)
+	RegistrySearch(ctx context.Context, query string) (string, error)
+	// RegistryInfo reads one registry only when from is set.
+	RegistryInfo(ctx context.Context, name, from string) (string, error)
+}
+
+// skillAdapterHolder lets a nil adapter be stored (see memAdapterHolder).
+type skillAdapterHolder struct{ a SkillSessionAdapter }
+
+var skillAdapterAtom atomic.Value // stores skillAdapterHolder
+
+// SetSkillAdapter wires the live adapter. Pass nil to clear it.
+func SetSkillAdapter(a SkillSessionAdapter) { skillAdapterAtom.Store(skillAdapterHolder{a: a}) }
+
+func currentSkillAdapter() SkillSessionAdapter {
+	h, _ := skillAdapterAtom.Load().(skillAdapterHolder)
+	return h.a
+}
+
 // BuiltinSkillPlugin is the @skill tool.
 type BuiltinSkillPlugin struct{}
 
@@ -56,7 +82,7 @@ func (*BuiltinSkillPlugin) Name() string { return "@skill" }
 
 // Description surfaces the tool.
 func (*BuiltinSkillPlugin) Description() string {
-	return "Author and evolve your own skills. When you learn a reusable procedure, a project convention, or a workflow the user repeats, save it as a skill so it auto-activates in future sessions. Use create/update/list/show/remove."
+	return "Author and evolve your own skills. When you learn a reusable procedure, a project convention, or a workflow the user repeats, save it as a skill so it auto-activates in future sessions. Use create/update/list/show/remove; pin keeps a skill active for the whole session; search/info look a skill up in the registries (read-only)."
 }
 
 // Usage explains the canonical invocation.
@@ -77,11 +103,20 @@ Subcommands (cmd + args):
   restore {name}       bring back the previous version of a skill (after an update or self-evolve went wrong)
   stats                show activation analytics (which skills earn their keep)
   export {names?, out} bundle skills into a shareable JSON pack
-  import {path}        install skills from a pack (overwrite optional)`
+  import {path}        install skills from a pack (overwrite optional)
+  pin {name}           inject the skill into every turn of this session (until unpin)
+  unpin {name}         stop injecting a pinned skill
+  search {query}       read-only: find skills in the configured registries
+  info {name, from?}   read-only: local install + registry metadata of one skill (from = one registry)
+
+Installing or uninstalling registry skills is NOT available to this tool, by
+design: third-party skills enter the prompt only when the user runs
+/skill install <name>. Use search/info to recommend one and ask the user.
+(The install alias here means import: a local pack file.)`
 }
 
 // Version is semver.
-func (*BuiltinSkillPlugin) Version() string { return "1.1.1" }
+func (*BuiltinSkillPlugin) Version() string { return "1.2.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSkillPlugin) Path() string { return "" }
@@ -130,6 +165,33 @@ func (*BuiltinSkillPlugin) Schema() string {
 				},
 				"examples": []string{`{"cmd":"import","args":{"path":"team-pack.json"}}`},
 			},
+			{
+				"name":        "pin",
+				"description": "Inject a skill into every turn of this session regardless of its triggers, until unpin. Manual-only skills cannot be pinned.",
+				"flags":       []map[string]interface{}{field("name", "string", true, "Skill to pin.")},
+				"examples":    []string{`{"cmd":"pin","args":{"name":"deploy-x"}}`},
+			},
+			{
+				"name":        "unpin",
+				"description": "Stop injecting a pinned skill.",
+				"flags":       []map[string]interface{}{field("name", "string", true, "Pinned skill to release.")},
+				"examples":    []string{`{"cmd":"unpin","args":{"name":"deploy-x"}}`},
+			},
+			{
+				"name":        "search",
+				"description": "Read-only: search the configured skill registries. Installing is the user's call (/skill install) — this tool cannot install.",
+				"flags":       []map[string]interface{}{field("query", "string", true, "What to look for.")},
+				"examples":    []string{`{"cmd":"search","args":{"query":"frontend design"}}`},
+			},
+			{
+				"name":        "info",
+				"description": "Read-only: what is known about one skill — the local install and the registry metadata (version, author, moderation).",
+				"flags": []map[string]interface{}{
+					field("name", "string", true, "Skill name or registry slug."),
+					field("from", "string", false, "Only this registry."),
+				},
+				"examples": []string{`{"cmd":"info","args":{"name":"frontend-design"}}`, `{"cmd":"info","args":{"name":"frontend-design","from":"skills.sh"}}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -167,13 +229,16 @@ type skillPackItem struct {
 }
 
 // ExecuteWithStream ignores the stream callback.
-func (p *BuiltinSkillPlugin) ExecuteWithStream(_ context.Context, args []string, _ func(string)) (string, error) {
+func (p *BuiltinSkillPlugin) ExecuteWithStream(ctx context.Context, args []string, _ func(string)) (string, error) {
 	if len(args) == 0 {
 		return "", errors.New(`@skill: empty args. Example: <tool_call name="@skill" args='{"cmd":"list"}' />`)
 	}
 	cmd, inner, err := parseSkillInvocation(args)
 	if err != nil {
 		return "", fmt.Errorf("@skill: %w", err)
+	}
+	if skillSessionCmds[cmd] != nil {
+		return executeSkillSessionCmd(ctx, cmd, inner)
 	}
 	dir, err := resolveSkillsDir()
 	if err != nil {
@@ -210,7 +275,45 @@ func (p *BuiltinSkillPlugin) ExecuteWithStream(_ context.Context, args []string,
 		_ = json.Unmarshal([]byte(inner), &in)
 		return importSkills(dir, in.Path, in.Overwrite)
 	default:
-		return "", fmt.Errorf("@skill: unknown cmd %q (valid: create|update|list|show|remove|restore|stats|export|import)", cmd)
+		return "", fmt.Errorf("@skill: unknown cmd %q (valid: create|update|list|show|remove|restore|stats|export|import|pin|unpin|search|info)", cmd)
+	}
+}
+
+// skillSessionCmds: per subcommand, the required argument, then the rest.
+var skillSessionCmds = map[string][]string{
+	"pin":    {"name"},
+	"unpin":  {"name"},
+	"search": {"query"},
+	"info":   {"name", "from"},
+}
+
+// executeSkillSessionCmd runs pin/unpin/search/info against the session
+// adapter. An argument the subcommand does not take is refused: ignored, a
+// mistyped "from" would silently widen info to every registry.
+func executeSkillSessionCmd(ctx context.Context, cmd, inner string) (string, error) {
+	adapter := currentSkillAdapter()
+	if adapter == nil {
+		return "", fmt.Errorf("@skill %s: not available in this session", cmd)
+	}
+	accepted := skillSessionCmds[cmd]
+	if unknown := unknownArgKeys(inner, accepted...); len(unknown) > 0 {
+		return "", fmt.Errorf("@skill %s: unknown argument(s) %s (accepted: %s)", cmd, strings.Join(unknown, ", "), strings.Join(accepted, ", "))
+	}
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(inner), &raw)
+	primary := strings.TrimSpace(jsonString(raw, accepted[0]))
+	if primary == "" {
+		return "", fmt.Errorf("@skill %s: %q is required", cmd, accepted[0])
+	}
+	switch cmd {
+	case "pin":
+		return adapter.Pin(primary)
+	case "unpin":
+		return adapter.Unpin(primary)
+	case "search":
+		return adapter.RegistrySearch(ctx, primary)
+	default:
+		return adapter.RegistryInfo(ctx, primary, strings.TrimSpace(jsonString(raw, "from")))
 	}
 }
 
@@ -569,7 +672,7 @@ func parseSkillInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalSkillCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: create|update|list|show|remove|restore|stats|export|import)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: create|update|list|show|remove|restore|stats|export|import|pin|unpin|search|info)", cmdStr)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -591,8 +694,11 @@ func parseSkillInvocation(args []string) (string, string, error) {
 	// argv form (flattened by the agent): "<cmd> --key value ..." with
 	// triggers/allowed_tools/names as repeated flags → arrays.
 	primary := "name"
-	if canon == "import" {
+	switch canon {
+	case "import":
 		primary = "path"
+	case "search":
+		primary = "query"
 	}
 	inner := argvInner(args[1:], primary, map[string]bool{"triggers": true, "allowed_tools": true, "names": true}, nil)
 	return canon, inner, nil
@@ -618,6 +724,14 @@ func canonicalSkillCmd(s string) string {
 		return "export"
 	case "import", "install":
 		return "import"
+	case "pin":
+		return "pin"
+	case "unpin":
+		return "unpin"
+	case "search", "find", "registry_search":
+		return "search"
+	case "info", "about", "registry_info":
+		return "info"
 	}
 	return ""
 }

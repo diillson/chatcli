@@ -7,8 +7,25 @@ package registry
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 )
+
+// ErrSkillNotFound marks the answer "this registry has no such skill": the
+// registry replied, so it is not a registry failure. Detect with errors.Is.
+var ErrSkillNotFound = errors.New("skill not found")
+
+// skillNotFound is the not-found error every adapter returns: the wording
+// callers already know, plus the ErrSkillNotFound identity.
+func skillNotFound(nameOrSlug, registryName string) error {
+	return notFoundError(fmt.Sprintf("skill '%s' not found in %s", nameOrSlug, registryName))
+}
+
+type notFoundError string
+
+func (e notFoundError) Error() string      { return string(e) }
+func (notFoundError) Is(target error) bool { return target == ErrSkillNotFound }
 
 // ModerationFlags represents safety signals from a registry about a skill.
 type ModerationFlags struct {

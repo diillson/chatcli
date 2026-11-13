@@ -139,6 +139,64 @@ func (a *memoryPluginAdapter) ForgetByID(idPrefix string) (string, error) {
 	}
 }
 
+// Stats implements plugins.MemoryInspector: what /memory stats shows.
+func (a *memoryPluginAdapter) Stats() (string, error) {
+	if a.cli.memoryStore == nil {
+		return "", fmt.Errorf("memory not enabled")
+	}
+	mgr := a.cli.memoryStore.Manager()
+	stats := mgr.Patterns.GetStats()
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %d\n", i18n.T("mem.cmd.stats.facts_stored"), mgr.Facts.Count())
+	fmt.Fprintf(&b, "%s %d\n", i18n.T("mem.cmd.stats.topics_tracked"), len(mgr.Topics.GetAll()))
+	fmt.Fprintf(&b, "%s %d\n", i18n.T("mem.cmd.stats.projects_tracked"), len(mgr.Projects.GetAll()))
+	fmt.Fprintf(&b, "%s %d\n", i18n.T("mem.cmd.stats.sessions"), stats.SessionCount)
+	fmt.Fprintf(&b, "%s %d\n", i18n.T("mem.cmd.stats.total_messages"), stats.TotalMessages)
+	if stats.AvgSessionSecs > 0 {
+		b.WriteString(i18n.T("mem.cmd.stats.avg_session", stats.AvgSessionSecs/60.0) + "\n")
+	}
+	if hours := mgr.Patterns.GetPeakHours(3); len(hours) > 0 {
+		labels := make([]string, 0, len(hours))
+		for _, h := range hours {
+			labels = append(labels, fmt.Sprintf("%02d:00", h))
+		}
+		fmt.Fprintf(&b, "%s %s\n", i18n.T("mem.cmd.stats.peak_hours"), strings.Join(labels, ", "))
+	}
+	if top := mgr.Patterns.GetTopCommands(5); len(top) > 0 {
+		fmt.Fprintf(&b, "%s %s\n", i18n.T("mem.cmd.stats.top_commands"), strings.Join(top, ", "))
+	}
+	if !stats.LastSession.IsZero() {
+		fmt.Fprintf(&b, "%s %s\n", i18n.T("mem.cmd.stats.last_session"), stats.LastSession.Format("2006-01-02 15:04"))
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// WhyLastRecall implements plugins.MemoryInspector: what /memory why shows.
+func (a *memoryPluginAdapter) WhyLastRecall() (string, error) {
+	if a.cli.memoryStore == nil {
+		return "", fmt.Errorf("memory not enabled")
+	}
+	a.cli.recallTraceMu.Lock()
+	tr := a.cli.lastRecallTrace
+	a.cli.recallTraceMu.Unlock()
+	if tr == nil {
+		return i18n.T("memory.why.none"), nil
+	}
+	if len(tr.Facts) == 0 {
+		return i18n.T("memory.recall.none", tr.Query), nil
+	}
+	var b strings.Builder
+	b.WriteString(i18n.T("memory.recall.header", len(tr.Facts), tr.Query) + "\n")
+	for _, r := range tr.Facts {
+		if r.Fact == nil {
+			continue
+		}
+		fmt.Fprintf(&b, "%.2f  %s  [%s]  %s\n    %s\n", r.Final, shortFactID(r.Fact.ID), r.Fact.Category,
+			strings.TrimSpace(r.Fact.Content), i18n.T("memory.recall.why", r.Why()))
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
 // renderFactLines lists facts as "id  [category]  content".
 func renderFactLines(facts []*memory.Fact) string {
 	var b strings.Builder

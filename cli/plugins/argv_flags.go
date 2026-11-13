@@ -23,6 +23,7 @@ package plugins
 
 import (
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -88,6 +89,22 @@ func argvToInnerJSON(argv []string, arrayKeys, intKeys map[string]bool) (positio
 	}
 	b, _ := json.Marshal(obj)
 	return strings.Join(pos, " "), string(b)
+}
+
+// unknownArgKeys lists, sorted, the inner-args keys not in accepted, so a
+// subcommand can refuse a mistyped argument instead of running without it.
+func unknownArgKeys(inner string, accepted ...string) []string {
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(inner), &raw)
+	for _, a := range accepted {
+		delete(raw, a)
+	}
+	keys := make([]string, 0, len(raw))
+	for k := range raw {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // argvHasFlags reports whether argv carries any --flag. The agent loop

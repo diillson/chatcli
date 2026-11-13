@@ -21,6 +21,7 @@ func TestSkillSubcommandSuggestions_MembershipAndDescriptions(t *testing.T) {
 		"search": true, "install": true, "uninstall": true, "list": true,
 		"info": true, "registries": true, "registry": true, "prefer": true,
 		"pin": true, "unpin": true, "pinned": true, "stats": true, "help": true,
+		"show": true, "restore": true,
 	}
 	if len(got) != len(want) {
 		t.Errorf("len = %d, want %d (extra/missing entries silently change the UX)", len(got), len(want))

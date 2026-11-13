@@ -80,8 +80,11 @@ func TestParseInstallArgs_Variations(t *testing.T) {
 		args      []string
 		wantSkill string
 		wantFrom  string
+		wantErr   bool
 	}{
-		{name: "empty args", args: nil, wantSkill: "", wantFrom: ""},
+		{name: "empty args", args: nil, wantErr: true},
+		{name: "unknown flag", args: []string{"frontend-design", "--form", "skills.sh"}, wantErr: true},
+		{name: "second name", args: []string{"frontend-design", "skills.sh"}, wantErr: true},
 		{
 			name:      "name only",
 			args:      []string{"frontend-design"},
@@ -100,15 +103,18 @@ func TestParseInstallArgs_Variations(t *testing.T) {
 			wantFrom:  "local",
 		},
 		{
-			name:      "dangling --from has no value",
-			args:      []string{"frontend-design", "--from"},
-			wantSkill: "frontend-design",
-			wantFrom:  "",
+			// Ignored, this installed from whichever registry answered first.
+			name:    "dangling --from has no value",
+			args:    []string{"frontend-design", "--from"},
+			wantErr: true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			skill, from := parseInstallArgs(tc.args)
+			skill, from, err := parseInstallArgs(tc.args)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
 			if skill != tc.wantSkill {
 				t.Errorf("skill = %q, want %q", skill, tc.wantSkill)
 			}

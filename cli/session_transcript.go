@@ -200,16 +200,19 @@ func (cli *ChatCLI) handleSessionTranscript(args []string, rest string) {
 		}
 		cli.searchTranscript(query)
 	case "show", "replay":
+		// Defaults apply only to an argument left out: a mistyped number
+		// used to become 1 or 10 and show a different slice than asked.
 		from, count := 1, 10
-		if len(args) > 1 {
-			if n, err := strconv.Atoi(args[1]); err == nil && n > 0 {
-				from = n
+		for i, dst := range []*int{&from, &count} {
+			if len(args) <= i+1 {
+				break
 			}
-		}
-		if len(args) > 2 {
-			if n, err := strconv.Atoi(args[2]); err == nil && n > 0 {
-				count = n
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n <= 0 {
+				fmt.Println(colorize("  "+i18n.T("kp.session.transcript.bad_number", args[i+1]), ColorYellow))
+				return
 			}
+			*dst = n
 		}
 		cli.showTranscript(from, count)
 	case "export":

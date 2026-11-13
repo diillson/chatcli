@@ -965,6 +965,8 @@ func NewChatCLI(ctx context.Context, manager manager.LLMManager, logger *zap.Log
 
 	// Initialize skill registry handler
 	cli.skillHandler = NewSkillHandler(logger, cli.personaHandler.GetManager())
+	// Wire the session-bound half of @skill: pin/unpin and registry lookups.
+	plugins.SetSkillAdapter(&skillPluginAdapter{cli: cli})
 
 	cli.Client = client
 	cli.commandHandler = NewCommandHandler(cli)

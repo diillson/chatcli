@@ -96,6 +96,8 @@ func (*BuiltinSessionPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.session.describe.attach", describeTrunc(describeStr(inner, "id"), 40))
 	case "detach":
 		return i18n.T("plugins.session.describe.detach")
+	case "status":
+		return i18n.T("kp.describe.session.status")
 	}
 	return i18n.T("plugins.session.describe.search", describeTrunc(describeStr(inner, "query"), 50))
 }
@@ -199,6 +201,14 @@ func (*BuiltinSkillPlugin) DescribeCall(args []string) string {
 		return i18n.T("plugins.skill.describe.export")
 	case "import":
 		return i18n.T("plugins.skill.describe.import")
+	case "pin":
+		return i18n.T("kp.describe.skill.pin", name)
+	case "unpin":
+		return i18n.T("kp.describe.skill.unpin", name)
+	case "search":
+		return i18n.T("kp.describe.skill.search", describeTrunc(describeStr(inner, "query"), 50))
+	case "info":
+		return i18n.T("kp.describe.skill.info", name)
 	default:
 		return i18n.T("plugins.skill.describe.list")
 	}

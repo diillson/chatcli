@@ -103,6 +103,12 @@ type SessionWriter interface {
 	Detach(ctx context.Context) (string, error)
 }
 
+// SessionStatusReporter is an OPTIONAL capability behind @session status:
+// which saved session this conversation is bound to. Read-only.
+type SessionStatusReporter interface {
+	Status(ctx context.Context) (string, error)
+}
+
 type sessionAdapterHolder struct{ a SessionAdapter }
 
 var sessionAdapterAtom atomic.Value // stores sessionAdapterHolder
@@ -149,6 +155,8 @@ Subcommands (cmd + args):
                            query jumps to the best match; message=<index> returns that
                            single message nearly in full (follow up on truncated entries)
   list                     list saved session names
+  status                   read-only: which saved session this conversation is bound to,
+                           if any (check before save/attach, or to tell the user)
   save {name}              save the current conversation under name and bind to it
                            (later turns write through to the store)
   fork {name}              fork the current conversation into a new session and bind to it
@@ -166,7 +174,7 @@ that matter. To keep working under a name: save (new) or attach (existing).`
 }
 
 // Version is semver.
-func (*BuiltinSessionPlugin) Version() string { return "1.6.0" }
+func (*BuiltinSessionPlugin) Version() string { return "1.7.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSessionPlugin) Path() string { return "" }
@@ -217,6 +225,12 @@ func (*BuiltinSessionPlugin) Schema() string {
 					{"name": "limit", "type": "int", "description": "At most this many sessions (default: all)"},
 				},
 				"examples": []string{`{"cmd":"list"}`, `{"cmd":"list","args":{"limit":20}}`},
+			},
+			{
+				"name":        "status",
+				"description": "Read-only: which saved session this conversation is bound to, if any, and how many messages it holds.",
+				"flags":       []map[string]interface{}{},
+				"examples":    []string{`{"cmd":"status"}`},
 			},
 			{
 				"name":        "save",
@@ -376,8 +390,25 @@ func (p *BuiltinSessionPlugin) ExecuteWithStream(ctx context.Context, args []str
 			return writer.Attach(ctx, name)
 		}
 	default:
-		return "", fmt.Errorf("@session: unknown cmd %q (valid: search|get|list|save|fork|attach|detach)", cmd)
+		return executeSessionStatus(ctx, adapter, cmd, inner)
 	}
+}
+
+// executeSessionStatus runs status; any other cmd reaching it is unknown.
+// An argument is refused, not ignored: "status --name x" answering for the
+// bound session would read as an answer about x.
+func executeSessionStatus(ctx context.Context, adapter SessionAdapter, cmd, inner string) (string, error) {
+	if cmd != "status" {
+		return "", fmt.Errorf("@session: unknown cmd %q (valid: search|get|list|status|save|fork|attach|detach)", cmd)
+	}
+	sr, ok := adapter.(SessionStatusReporter)
+	if !ok {
+		return "", errors.New("@session status: not available in this session")
+	}
+	if extra := unknownArgKeys(inner); len(extra) > 0 {
+		return "", fmt.Errorf("@session status: takes no arguments (got %s); use get {name} to read a saved session", strings.Join(extra, ", "))
+	}
+	return sr.Status(ctx)
 }
 
 // parseSessionInvocation mirrors the other builtins' parsing.
@@ -395,7 +426,7 @@ func parseSessionInvocation(args []string) (string, string, error) {
 		canon := canonicalSessionCmd(cmdStr)
 		if canon == "" {
 			if !isFlatArgs(raw) {
-				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|get|list|save|fork|attach|detach)", cmdStr)
+				return "", "", fmt.Errorf("missing or unknown cmd %q (valid: search|get|list|status|save|fork|attach|detach)", cmdStr)
 			}
 			canon = "search" // flat native args, e.g. {"query":"..."}
 		}
@@ -437,6 +468,8 @@ func canonicalSessionCmd(s string) string {
 		return "get"
 	case "list", "sessions":
 		return "list"
+	case "status", "current", "bound":
+		return "status"
 	case "save":
 		return "save"
 	case "fork", "branch":

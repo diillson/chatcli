@@ -10,6 +10,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -446,11 +447,15 @@ func (rm *RegistryManager) GetAllSkillMeta(ctx context.Context, nameOrSlug strin
 
 // trackResult updates the failure counter for a registry.
 // After maxFailures consecutive errors, the registry is auto-disabled for cooldownDuration.
+//
+// "No such skill" is a completed round trip, not a failure: counted as one,
+// three lookups of a locally authored skill put a healthy registry in
+// cooldown and the next search or install skipped it without a word.
 func (rm *RegistryManager) trackResult(registryName string, err error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrSkillNotFound) {
 		rm.failureCounts[registryName]++
 		count := rm.failureCounts[registryName]
 		if count >= rm.maxFailures {

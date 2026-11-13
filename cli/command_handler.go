@@ -437,6 +437,13 @@ func (ch *CommandHandler) handleSessionCommand(ctx context.Context, userInput st
 			fmt.Println(i18n.T("session.error_name_required_load"))
 			return
 		}
+		// Attaching to the session already bound is a no-op. Running it
+		// reloaded the file and rotated the hub thread, which deletes the
+		// backlog the gateway channels read — for nothing.
+		if command == "attach" && ch.cli.boundSessionName() == name {
+			fmt.Println(i18n.T("kp.session.attach.same", name))
+			return
+		}
 		if command == "attach" && !ch.cli.sessionManager.SessionExists(name) {
 			ch.cli.handleSaveSession(ctx, name)
 		} else {

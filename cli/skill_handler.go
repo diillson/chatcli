@@ -100,9 +100,9 @@ func (sh *SkillHandler) HandleCommand(ctx context.Context, userInput string) {
 			return
 		}
 		// Parse optional --from <registry> flag
-		skillName, fromRegistry := parseInstallArgs(args[2:])
-		if skillName == "" {
-			fmt.Println(colorize(" "+i18n.T("skill.usage.install"), ColorYellow))
+		skillName, fromRegistry, err := parseInstallArgs(args[2:])
+		if err != nil {
+			fmt.Println(colorize(" "+err.Error()+" "+i18n.T("skill.usage.install"), ColorYellow))
 			return
 		}
 		sh.Install(ctx, skillName, fromRegistry)
@@ -118,28 +118,16 @@ func (sh *SkillHandler) HandleCommand(ctx context.Context, userInput string) {
 		sh.List()
 
 	case "registries", "registry":
-		if len(args) >= 4 {
-			action := strings.ToLower(args[2])
-			regName := args[3]
-			switch action {
-			case "enable":
-				sh.SetRegistryEnabled(regName, true)
-				return
-			case "disable":
-				sh.SetRegistryEnabled(regName, false)
-				return
-			}
-		}
-		sh.ShowRegistries()
+		sh.handleRegistryCommand(args[2:])
 
 	case "info":
 		if len(args) < 3 {
 			fmt.Println(colorize(" "+i18n.T("skill.usage.info"), ColorYellow))
 			return
 		}
-		infoName, infoFrom := parseInstallArgs(args[2:])
-		if infoName == "" {
-			fmt.Println(colorize(" "+i18n.T("skill.usage.info"), ColorYellow))
+		infoName, infoFrom, err := parseInstallArgs(args[2:])
+		if err != nil {
+			fmt.Println(colorize(" "+err.Error()+" "+i18n.T("skill.usage.info"), ColorYellow))
 			return
 		}
 		sh.Info(ctx, infoName, infoFrom)
@@ -163,6 +151,9 @@ func (sh *SkillHandler) HandleCommand(ctx context.Context, userInput string) {
 
 	case "pinned":
 		sh.ShowPinned()
+
+	case "show", "restore":
+		sh.handleShowOrRestore(subcommand, args[2:])
 
 	case "stats":
 		filter := ""
@@ -426,18 +417,32 @@ func (sh *SkillHandler) Install(ctx context.Context, name string, fromRegistry s
 // parseInstallArgs extracts the skill name and optional --from flag from install args.
 // "/skill install frontend-design --from skills.sh" → ("frontend-design", "skills.sh")
 // "/skill install frontend-design"                  → ("frontend-design", "")
-func parseInstallArgs(args []string) (skillName string, fromRegistry string) {
-	if len(args) == 0 {
-		return "", ""
-	}
-	skillName = args[0]
-	for i := 1; i < len(args); i++ {
-		if (args[i] == "--from" || args[i] == "-f") && i+1 < len(args) {
+//
+// A --from with no value, an unknown flag or a second name is an error: the
+// command used to ignore them and act on every registry instead of the one
+// the user was trying to name.
+func parseInstallArgs(args []string) (skillName string, fromRegistry string, err error) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--from" || arg == "-f":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return "", "", errors.New(i18n.T("kp.skill.from_missing"))
+			}
 			fromRegistry = args[i+1]
 			i++ // skip the value
+		case strings.HasPrefix(arg, "-"):
+			return "", "", errors.New(i18n.T("kp.flag.unknown", arg))
+		case skillName != "":
+			return "", "", errors.New(i18n.T("kp.skill.unexpected_arg", arg))
+		default:
+			skillName = arg
 		}
 	}
-	return
+	if skillName == "" {
+		return "", "", errors.New(i18n.T("kp.skill.name_missing"))
+	}
+	return skillName, fromRegistry, nil
 }
 
 func (sh *SkillHandler) showInstallResult(result *registry.InstallResult) {
@@ -1178,6 +1183,8 @@ func (sh *SkillHandler) ShowHelp() {
 		{"/skill pin <name>", i18n.T("skill.help.pin")},
 		{"/skill unpin <name>", i18n.T("skill.help.unpin")},
 		{"/skill pinned", i18n.T("skill.help.pinned")},
+		{"/skill show <name>", i18n.T("kp.skill.help.show")},
+		{"/skill restore <name> [--yes]", i18n.T("kp.skill.help.restore")},
 		{"/skill stats [name]", i18n.T("skill.help.stats")},
 		{"/skill help", i18n.T("skill.help.show_help")},
 	}
