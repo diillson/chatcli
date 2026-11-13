@@ -267,6 +267,7 @@ func OnyxTheme() Theme {
 		Name:      "onyx",
 		Variant:   VariantDark,
 		Monoglyph: true,
+		Layout:    LayoutFlat,
 		Palette: Palette{
 			Primary:    Color{Hex: "#FFFFFF", ANSI256: 231, ANSI16: 15},
 			Secondary:  Color{Hex: "#A1A1A1", ANSI256: 247, ANSI16: 7},
@@ -293,6 +294,7 @@ func OnyxLightTheme() Theme {
 		Name:      "onyx-light",
 		Variant:   VariantLight,
 		Monoglyph: true,
+		Layout:    LayoutFlat,
 		Palette: Palette{
 			Primary:    Color{Hex: "#000000", ANSI256: 16, ANSI16: 0},
 			Secondary:  Color{Hex: "#666666", ANSI256: 241, ANSI16: 8},

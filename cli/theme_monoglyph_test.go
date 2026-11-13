@@ -59,13 +59,11 @@ func TestOutputPathsFollowTheThemeGlyphs(t *testing.T) {
 	if got := colorize(msg, ColorRed); hasColoredEmoji(got) || !strings.Contains(got, "✗ build failed") {
 		t.Fatalf("colorize under onyx: %q", got)
 	}
+	// The title keeps its text and loses the icon, whatever the layout
+	// (the layout itself is covered in theme_layout_test.go).
 	got := uiBox("⚡", "HOOKS", ColorPurple)
-	if hasColoredEmoji(got) || !strings.Contains(got, "╭── HOOKS") {
+	if hasColoredEmoji(got) || !strings.Contains(got, "HOOKS") {
 		t.Fatalf("a box title under onyx: %q", got)
-	}
-	// A glyph that is not an emoji keeps its place as the icon.
-	if got := uiBox("◆", "PLAN", ColorPurple); !strings.Contains(got, "╭── ◆ PLAN") {
-		t.Fatalf("a plain glyph icon under onyx: %q", got)
 	}
 	if got := i18n.T("cli.switch.unknown_arg", "x"); hasColoredEmoji(got) || !strings.Contains(got, "✗") {
 		t.Fatalf("a translated message under onyx: %q", got)

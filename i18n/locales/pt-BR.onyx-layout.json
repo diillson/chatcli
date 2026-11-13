@@ -1,0 +1,5 @@
+{
+  "agent.turn.flat.working": "Trabalhando",
+  "agent.turn.flat.tokens": "%s tokens",
+  "agent.turn.flat.queued": "%d na fila"
+}

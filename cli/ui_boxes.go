@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/diillson/chatcli/ui/kit"
+	"github.com/diillson/chatcli/ui/theme"
 )
 
 // ─── Terminal Box Helpers ──────────────────────────────────────
@@ -21,6 +22,9 @@ func uiTermWidth() int {
 
 // uiBox renders a box header: ╭── icon TITLE
 func uiBox(icon, title, color string) string {
+	if theme.Active().Layout == theme.LayoutFlat {
+		return kit.SectionHeader(kit.Plain(title), uiTermWidth())
+	}
 	// A theme that renders in monochrome glyphs has no use for the icon:
 	// what is left of it (often nothing) must not leave a double space.
 	if icon = kit.Plain(icon); strings.TrimSpace(icon) == "" {
@@ -31,11 +35,17 @@ func uiBox(icon, title, color string) string {
 
 // uiBoxEnd renders a box footer: ╰─────────
 func uiBoxEnd(color string) string {
+	if theme.Active().Layout == theme.LayoutFlat {
+		return "" // a flat panel ends with the blank line the caller prints
+	}
 	return fmt.Sprintf("%s╰%s%s", color, strings.Repeat("─", uiTermWidth()-2), ColorReset)
 }
 
 // uiPrefix renders a box sidebar: │
 func uiPrefix(color string) string {
+	if theme.Active().Layout == theme.LayoutFlat {
+		return "  " // content sits under the title, no rail
+	}
 	return fmt.Sprintf("%s│%s  ", color, ColorReset)
 }
 
