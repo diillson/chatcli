@@ -10,6 +10,7 @@
     --fg: #dbe4f0; --dim: #8b93a7; --accent: #4da3ff;
     --pending: #8b93a7; --running: #4da3ff; --reviewing: #c792ea;
     --done: #4cd97b; --failed: #ff5c69; --blocked: #f0a840;
+    --ctl: var(--line);
   }
   html[data-theme="light"] {
     --bg: #f4f6fa; --panel: #ffffff; --panel2: #eef1f6; --line: #d4dbe6;
@@ -64,6 +65,8 @@
   html[data-skin] #popover { box-shadow: none; border-radius: 6px; }
   html[data-skin] header .status-pill { border-radius: 4px; border-color: currentColor; }
   html[data-skin] .ev { border-left-width: 1px; }
+  /* The line token is a divider and may stay faint; a control is found by its edge. */
+  html[data-skin] select, html[data-skin] button.hbtn, html[data-skin] .tabs button.active { border-color: var(--ctl); }
   html[data-skin] .legend i { box-sizing: border-box; border: 1px solid var(--c); border-radius: 0; background: transparent !important; }
   html[data-skin] .legend i[data-s=pending] { --c: var(--pending); }
   html[data-skin] .legend i[data-s=running] { --c: var(--running); background: var(--c) !important; }
@@ -159,7 +162,7 @@ $('themeBtn').onclick = () => {
 const SKIN_KEY = 'chatcli.taskgraph.skin';
 const SKIN_VARS = {
   '--bg': 'background', '--panel': 'surface', '--panel2': 'surface2', '--line': 'border', '--fg': 'text', '--dim': 'muted', '--accent': 'primary',
-  '--pending': 'muted', '--running': 'primary', '--reviewing': 'primary', '--done': 'success', '--failed': 'danger', '--blocked': 'warning',
+  '--pending': 'muted', '--running': 'primary', '--reviewing': 'primary', '--done': 'success', '--failed': 'danger', '--blocked': 'warning', '--ctl': 'control',
 };
 let webTheme = { active: '', themes: {} };
 try { webTheme = JSON.parse($('boot').textContent).web_theme || webTheme; } catch (e) { /* served without boot data: default look */ }
@@ -187,9 +190,13 @@ function renderSkinPick() {
   }
   pick.value = skinChoice;
 }
-function setWebTheme(next) {
-  if (!next || JSON.stringify(next) === JSON.stringify(webTheme)) return;
-  webTheme = next; renderSkinPick(); applySkin();
+// Every API answer names the terminal's theme in a header, the refusals and
+// the "no run yet" ones included, so the page follows a change whichever poll
+// happens to be the one still running.
+function followTerminal(name) {
+  if (!name || name === webTheme.active) return;
+  webTheme = Object.assign({}, webTheme, { active: name });
+  renderSkinPick(); applySkin();
 }
 $('skinPick').onchange = e => {
   skinChoice = e.target.value;
@@ -203,6 +210,7 @@ $('skinPick').onchange = e => {
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 async function fetchJSON(url) {
   const r = await fetch(url, { headers: { 'X-Dash-Token': TOKEN } });
+  followTerminal(r.headers.get('X-Dash-Theme'));
   if (!r.ok) throw new Error(url + ': ' + r.status);
   return r.json();
 }
@@ -246,7 +254,6 @@ async function tick() {
     // would stay invisible until a manual reload.
     draw();
     const ev = await fetchJSON('/api/events?run=' + encodeURIComponent(state.run) + '&since=' + state.eventsNext);
-    setWebTheme(ev.theme);
     if (ev.events && ev.events.length) {
       state.eventsNext = ev.next;
       appendEvents(ev.events);

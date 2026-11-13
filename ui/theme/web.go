@@ -16,8 +16,9 @@ import "fmt"
 // custom properties and never carries a second copy of the palette.
 
 // Web role names. The first twelve are the palette entries one to one; the
-// last three exist only for pages, which need a raised panel and a hover
-// fill (a terminal has neither) and an ink for text set on a Primary fill.
+// last four exist only for pages, which need a raised panel and a hover
+// fill (a terminal has neither), an ink for text set on a Primary fill, and
+// an edge for the controls a terminal does not draw.
 const (
 	WebRolePrimary    = "primary"
 	WebRoleSecondary  = "secondary"
@@ -34,6 +35,11 @@ const (
 	WebRoleSurface    = "surface"
 	WebRoleSurface2   = "surface2"
 	WebRoleOnPrimary  = "on_primary"
+	// WebRoleControl is the boundary of an interactive control (input,
+	// select, button). The Border role is a divider and may stay faint; a
+	// control must be findable without reading its label, so its edge is
+	// held at 3:1 against every ground (WCAG 1.4.11).
+	WebRoleControl = "control"
 )
 
 // The surfaces are the ground moved a few percent toward the text color.
@@ -42,6 +48,10 @@ const (
 const (
 	webSurfaceMix  = 0.025
 	webSurface2Mix = 0.05
+	// The control edge is the muted ink moved a fifth of the way back to the
+	// ground: quieter than text, and still 3:1 on the hover fill of the
+	// light variant, which is the pair with the least room.
+	webControlMix = 0.20
 )
 
 // WebTheme is one theme flattened for a browser page.
@@ -93,6 +103,7 @@ func WebExport(t Theme) WebTheme {
 			WebRoleSurface:    mixHex(p.Background, p.Text, webSurfaceMix),
 			WebRoleSurface2:   mixHex(p.Background, p.Text, webSurface2Mix),
 			WebRoleOnPrimary:  p.Background.Hex,
+			WebRoleControl:    mixHex(p.Muted, p.Background, webControlMix),
 		},
 	}
 }

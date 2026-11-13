@@ -19,7 +19,7 @@ import (
 var webRoleNames = []string{
 	WebRolePrimary, WebRoleSecondary, WebRoleAccent, WebRoleMuted, WebRoleSuccess, WebRoleWarning,
 	WebRoleDanger, WebRoleInfo, WebRoleBorder, WebRoleText, WebRoleTextStrong, WebRoleBackground,
-	WebRoleSurface, WebRoleSurface2, WebRoleOnPrimary,
+	WebRoleSurface, WebRoleSurface2, WebRoleOnPrimary, WebRoleControl,
 }
 
 // The export is the palette, not a copy that can drift: every palette role
@@ -123,6 +123,28 @@ func TestWebThemes_StateStrokesContrast(t *testing.T) {
 			assert.Greaterf(t, contrastRatio(webColor(t, w, s), text), 4.5, "%s: %s too close to the text", name, s)
 		}
 	}
+}
+
+// An input, a select or a button is found by its edge before its label is
+// read: the control edge holds 3:1 on every ground a control sits on. The
+// Border role is measured here too, to pin why it cannot be that edge.
+func TestWebThemes_ControlEdgeContrast(t *testing.T) {
+	themes := WebThemes()
+	require.Len(t, themes, 2)
+	for name, w := range themes {
+		for _, g := range []string{WebRoleBackground, WebRoleSurface, WebRoleSurface2} {
+			got := contrastRatio(webColor(t, w, WebRoleControl), webColor(t, w, g))
+			assert.GreaterOrEqualf(t, got, 3.0, "%s: control edge %s on %s (%s) is %.2f:1",
+				name, w.Roles[WebRoleControl], g, w.Roles[g], got)
+		}
+		divider := contrastRatio(webColor(t, w, WebRoleBorder), webColor(t, w, WebRoleBackground))
+		assert.Lessf(t, divider, 3.0, "%s: the divider is %.2f:1; if it ever reaches 3:1 the control role is redundant", name, divider)
+		// Quieter than the ink it is derived from, so text stays the loudest thing in a control.
+		assert.Less(t, contrastRatio(webColor(t, w, WebRoleControl), webColor(t, w, WebRoleBackground)),
+			contrastRatio(webColor(t, w, WebRoleMuted), webColor(t, w, WebRoleBackground)), name)
+	}
+	th := OnyxLightTheme()
+	assert.Equal(t, mixHex(th.Palette.Muted, th.Palette.Background, webControlMix), WebExport(th).Roles[WebRoleControl])
 }
 
 func TestActiveWebPayload_FollowsTheActiveTheme(t *testing.T) {

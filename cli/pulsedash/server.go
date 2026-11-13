@@ -54,12 +54,16 @@ const (
 
 // Options configures the dashboard.
 type Options struct {
-	Root    string            // pulse spool root; required
-	Holder  string            // who renews the lease (shown in lease.json)
-	Lang    string            // html lang attribute, e.g. "pt-BR"
-	Theme   map[string]string // CSS custom property name -> color, e.g. "--bg": "#1e1e2e"
-	Strings map[string]string // translated UI strings by key
-	Self    string            // instance token of the serving process, highlighted in the page
+	Root   string            // pulse spool root; required
+	Holder string            // who renews the lease (shown in lease.json)
+	Lang   string            // html lang attribute, e.g. "pt-BR"
+	Theme  map[string]string // CSS custom property name -> color, e.g. "--bg": "#1e1e2e"
+	// ThemeFunc, when set, replaces Theme and is asked on every page load
+	// and instances poll, so the default look's chrome follows a terminal
+	// theme change the way the theme switch does.
+	ThemeFunc func() map[string]string
+	Strings   map[string]string // translated UI strings by key
+	Self      string            // instance token of the serving process, highlighted in the page
 }
 
 // Server is a running dashboard.
@@ -114,6 +118,14 @@ func Start(opts Options) (*Server, error) {
 	return s, nil
 }
 
+// chrome is the default look's theme map as of now.
+func (o Options) chrome() map[string]string {
+	if o.ThemeFunc != nil {
+		return o.ThemeFunc()
+	}
+	return o.Theme
+}
+
 // boot is what the page receives at load, injected into the HTML so the
 // first paint already has the theme and the language.
 type boot struct {
@@ -133,7 +145,7 @@ func renderPage(raw []byte, opts Options) ([]byte, error) {
 	}
 	// json.Marshal escapes <, > and & as < etc., so the payload cannot
 	// close the script element it is injected into.
-	payload, err := json.Marshal(boot{Lang: lang, Theme: opts.Theme, Strings: opts.Strings, Self: opts.Self, WebTheme: theme.ActiveWebPayload()})
+	payload, err := json.Marshal(boot{Lang: lang, Theme: opts.chrome(), Strings: opts.Strings, Self: opts.Self, WebTheme: theme.ActiveWebPayload()})
 	if err != nil {
 		return nil, fmt.Errorf("pulsedash: encoding boot data: %w", err)
 	}
@@ -235,7 +247,7 @@ func (s *Server) handleInstances(w http.ResponseWriter, _ *http.Request) {
 	for _, m := range metas {
 		rows = append(rows, instanceRow{Meta: m, Alive: m.Alive(now)})
 	}
-	writeJSON(w, map[string]interface{}{"instances": rows, "now": now, "theme": theme.ActiveWebPayload()})
+	writeJSON(w, map[string]interface{}{"instances": rows, "now": now, "theme": theme.ActiveWebPayload(), "chrome": s.opts.chrome()})
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

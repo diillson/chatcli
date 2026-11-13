@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -171,5 +172,52 @@ func TestPostWebTheme_Refusals(t *testing.T) {
 	child.Close()
 	if err := PostWebTheme(ctx, child.URL+"/?t=abc", "onyx"); err == nil {
 		t.Error("a dead child must be reported")
+	}
+}
+
+// /reload re-reads the theme from the environment file, which can change it
+// behind the web UI's back: the reload path tells the child like every other
+// place that sets the theme. This drives the real reloadConfiguration.
+func TestReloadConfiguration_TellsTheRunningWebUI(t *testing.T) {
+	keepTheme(t)
+	config.ResetBootEnvForTest()
+	config.ResetProjectDotenvForTest()
+	t.Cleanup(func() {
+		config.ResetBootEnvForTest()
+		config.ResetProjectDotenvForTest()
+	})
+	// The reload clears and re-reads these: hand every one back afterwards.
+	for _, v := range reloadableEnvVars {
+		if cur, ok := os.LookupEnv(v); ok {
+			t.Setenv(v, cur)
+		} else {
+			t.Setenv(v, "")
+			_ = os.Unsetenv(v)
+		}
+	}
+	dotenv := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(dotenv, []byte(config.ThemeEnv+"=onyx-light\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CHATCLI_DOTENV", dotenv)
+	if err := theme.SetActive("dark"); err != nil {
+		t.Fatal(err)
+	}
+
+	c := minimalCLI(t)
+	config.InitGlobal(c.logger)
+	c.web.theme = make(chan string, 1) // a web UI is running; nothing drains the queue here
+	_ = captureStdout(t, func() { c.reloadConfiguration(context.Background()) })
+
+	if got := theme.Active().Name; got != "onyx-light" {
+		t.Fatalf("the reload must apply the file's theme, got %q", got)
+	}
+	select {
+	case got := <-c.web.theme:
+		if got != "onyx-light" {
+			t.Fatalf("the child was queued %q, want onyx-light", got)
+		}
+	default:
+		t.Fatal("the reload changed the theme and told the web UI nothing")
 	}
 }

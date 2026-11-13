@@ -110,6 +110,10 @@ func (cli *ChatCLI) notifyWebTheme() {
 // queue is closed, which is how stopping the web UI ends it. ctx is the
 // /web command's, detached from its cancellation: the child outlives the
 // command that started it.
+//
+// A failed post is dropped, not retried: the only failures are a child that
+// is gone or hung, and a retry would deliver a theme that the next change
+// (or the next /web) supersedes anyway.
 func webThemeLoop(ctx context.Context, pageURL string, queue <-chan string, logger *zap.Logger) {
 	for name := range queue {
 		postCtx, cancel := context.WithTimeout(ctx, webThemeTimeout)

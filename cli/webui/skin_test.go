@@ -10,11 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/ui/theme"
 )
 
@@ -122,6 +124,7 @@ func TestPageSkinIsOnlyARoleMapping(t *testing.T) {
 // terminal's own poster against this server, then the poll the page makes.
 func TestTerminalThemeChangeReachesTheNextStatusPoll(t *testing.T) {
 	useTheme(t, "dark")
+	t.Setenv(config.ThemeEnv, "dark")
 	srv, _ := startTest(t)
 	ctx := context.Background()
 	active := func() string {
@@ -169,4 +172,94 @@ func TestPageKeepsItsTokenAcrossAReload(t *testing.T) {
 	if strings.Contains(page, "history.replaceState") || regexp.MustCompile(`(?i)Storage\.setItem\([^)]*token`).MatchString(page) {
 		t.Fatal("the page must leave the token in its address and out of storage")
 	}
+}
+
+// Under a skin every control of the page takes its edge from the
+// control-edge role, never from the divider token: the divider is about
+// 1.2:1 on the light variant, where a control would be found only by its
+// label.
+func TestPageControlsUseTheControlEdge(t *testing.T) {
+	page := string(Page())
+	for _, want := range []string{"--ctl:var(--border);", "'--ctl':'control'", ":root[data-skin] .seg, :root[data-skin] #composer .box, :root[data-skin] .switch .track { border-color:var(--ctl); }", ":root[data-skin] button, :root[data-skin] select, :root[data-skin] input[type=text], :root[data-skin] input[type=search],"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page is missing %q", want)
+		}
+	}
+}
+
+// A pushed theme must outlive a reload in this process: /reload is a command
+// the page can run, and it re-reads the theme from the environment. The
+// push therefore lands there too, as /config ui theme does in the terminal.
+// The status poll then carries both shapes of the theme: the skin payload
+// and the default look's own name and light chrome.
+func TestPushedThemeSurvivesAReloadAndMovesTheDefaultLook(t *testing.T) {
+	useTheme(t, "dark")
+	t.Setenv(config.ThemeEnv, "dark")
+	// What cmd/web.go passes: the theme the child was spawned under.
+	srv, err := Start(Options{Backend: newFakeBackend(), Version: "t", ThemeName: "dark"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+	status := func() statusPayload {
+		t.Helper()
+		code, raw := call(t, srv, http.MethodGet, "/api/status", nil, true)
+		var st statusPayload
+		if code != http.StatusOK || json.Unmarshal(raw, &st) != nil {
+			t.Fatalf("status = %d %s", code, raw)
+		}
+		return st
+	}
+	if st := status(); st.Theme != "dark" || st.ThemeVars != nil {
+		t.Fatalf("at start the default look is the spawn theme, got %q %v", st.Theme, st.ThemeVars)
+	}
+
+	if err := cli.PostWebTheme(context.Background(), srv.URL(), "onyx-light"); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv(config.ThemeEnv); got != "onyx-light" {
+		t.Fatalf("the push must reach %s, got %q", config.ThemeEnv, got)
+	}
+	theme.InitFromEnv() // what reloadConfiguration does
+	if got := theme.Active().Name; got != "onyx-light" {
+		t.Fatalf("a reload reverted the pushed theme to %q", got)
+	}
+
+	st := status()
+	want := theme.OnyxLightTheme().Palette
+	if st.WebTheme.Active != "onyx-light" || st.Theme != "onyx-light" || st.ThemeVars["--text"] != want.Text.Hex || st.ThemeVars["--panel"] != want.Background.Hex {
+		t.Fatalf("after the push the poll must describe one theme in both shapes, got %q %q %v", st.WebTheme.Active, st.Theme, st.ThemeVars)
+	}
+	if b := bootData(t, srv); b.ThemeName != "onyx-light" || b.ThemeVars["--text"] != want.Text.Hex {
+		t.Fatalf("a reload of the page must agree, got %q %v", b.ThemeName, b.ThemeVars)
+	}
+
+	// A dark theme has no light chrome: the field is null, not an empty map.
+	if err := cli.PostWebTheme(context.Background(), srv.URL(), "onyx"); err != nil {
+		t.Fatal(err)
+	}
+	_, raw := call(t, srv, http.MethodGet, "/api/status", nil, true)
+	if !strings.Contains(string(raw), `"theme":"onyx","theme_vars":null`) {
+		t.Fatalf("a dark theme must send null chrome: %s", raw)
+	}
+
+	page := string(Page())
+	for _, wantJS := range []string{"setWebTheme(state.status.web_theme, state.status.theme_vars);", "BOOT.theme_vars = vars;",
+		"if (skinChoice === 'terminal') document.documentElement.dataset.theme = vars ? 'light' : 'dark';"} {
+		if !strings.Contains(page, wantJS) {
+			t.Errorf("the page is missing %q", wantJS)
+		}
+	}
+}
+
+func bootData(t *testing.T, srv *Server) boot {
+	t.Helper()
+	_, raw := call(t, srv, http.MethodGet, "/?t="+srv.Token(), nil, false)
+	body := string(raw)
+	start := strings.Index(body, "const BOOT = ") + len("const BOOT = ")
+	var b boot
+	if err := json.Unmarshal([]byte(body[start:start+strings.Index(body[start:], ";\n")]), &b); err != nil {
+		t.Fatalf("boot JSON: %v", err)
+	}
+	return b
 }

@@ -9,7 +9,7 @@
     --bg:#0B0E14; --panel:#10141C; --panel2:#151B26; --border:#1E2634; --text:#DCE3EB; --strong:#FFFFFF; --muted:#7D8798; --faint:#556070;
     --amber:#FFB454; --cyan:#4FC3E8; --violet:#C79BFF; --green:#7FD962; --red:#E06C75;
     --accent:var(--cyan); --brand:var(--amber); --ok:var(--green); --err:var(--red); --warn:var(--amber);
-    --user:#1A2433; --code:#0D1119; --on-brand:#111;
+    --user:#1A2433; --code:#0D1119; --on-brand:#111; --ctl:var(--border);
     --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   }
@@ -222,6 +222,16 @@
   :root[data-skin] .md blockquote { border-left-width:1px; }
   :root[data-skin] .msg .who { border-radius:4px; }
   :root[data-skin] .working .dots i { border-radius:0; }
+  /* The border token is a divider and may stay faint; a control is found by
+     its edge, so inputs, selects and buttons take the control-edge token. */
+  :root[data-skin] button, :root[data-skin] select, :root[data-skin] input[type=text], :root[data-skin] input[type=search],
+  :root[data-skin] .seg, :root[data-skin] #composer .box, :root[data-skin] .switch .track { border-color:var(--ctl); }
+  :root[data-skin] button:hover { border-color:var(--strong); }
+  :root[data-skin] button.ghost { border-color:transparent; } :root[data-skin] button.ghost:hover { border-color:var(--ctl); }
+  :root[data-skin] button.primary { border-color:var(--brand); }
+  :root[data-skin] button.danger, :root[data-skin] .mic.rec { border-color:var(--err); }
+  :root[data-skin] .switch input:checked + .track { border-color:var(--ok); }
+  :root[data-skin] .seg button.on { box-shadow:inset 0 -2px 0 var(--strong); }
   @media (max-width: 1440px) { #sessionLabel { display:none; } }
   @media (max-width: 1180px) { #route { display:none; } }
   /* Large screens: a slightly larger type and a wider reading column. */
@@ -454,17 +464,17 @@ const SKIN_KEY = 'chatcli_web_skin';
 const SKIN_VARS = { '--bg':'background','--panel':'surface','--panel2':'surface2','--border':'border','--text':'text','--strong':'text_strong',
   '--muted':'muted','--faint':'muted','--accent':'primary','--brand':'primary','--ok':'success','--err':'danger','--warn':'warning',
   '--amber':'primary','--cyan':'primary','--violet':'secondary','--green':'success','--red':'danger',
-  '--user':'surface2','--code':'surface','--on-brand':'on_primary' };
+  '--user':'surface2','--code':'surface','--on-brand':'on_primary','--ctl':'control' };
 let webTheme = BOOT.web_theme || { active:'', themes:{} };
 let skinChoice = 'terminal';
 try { skinChoice = localStorage.getItem(SKIN_KEY) || 'terminal'; } catch { /* storage blocked: follow the terminal */ }
-function applySkin() {
+function applySkin(relook) {
   const root = document.documentElement, was = !!root.dataset.skin;
   skin = (webTheme.themes || {})[skinChoice === 'terminal' ? webTheme.active : skinChoice] || null;
   if (skin) {
     for (const [prop, role] of Object.entries(SKIN_VARS)) root.style.setProperty(prop, skin.roles[role]);
     root.dataset.skin = skin.name; root.style.colorScheme = skin.variant;
-  } else if (was) {
+  } else if (was || relook) {
     for (const prop of Object.keys(SKIN_VARS)) root.style.removeProperty(prop);
     delete root.dataset.skin; root.style.colorScheme = '';
     applyTheme(root.dataset.theme === 'light' ? 'light' : 'dark');   // hand the tokens back to the default look
@@ -478,9 +488,17 @@ function renderSkinPick() {
   for (const [value, label] of rows) { const o = document.createElement('option'); o.value = value; o.textContent = label; pick.appendChild(o); }
   pick.value = skinChoice;
 }
-function setWebTheme(next) {
+// vars is the default look's share of the terminal theme: the light chrome
+// of a light theme, null for a dark one. It moves with the theme, so the
+// default look and the "terminal" label never describe different themes.
+function setWebTheme(next, vars) {
   if (!next || JSON.stringify(next) === JSON.stringify(webTheme)) return;
-  webTheme = next; applySkin(); applyStrings();
+  webTheme = next;
+  if (vars !== undefined) {
+    BOOT.theme_vars = vars;
+    if (skinChoice === 'terminal') document.documentElement.dataset.theme = vars ? 'light' : 'dark';
+  }
+  applySkin(true); applyStrings();
 }
 $('#skinPick').addEventListener('change', e => {
   skinChoice = e.target.value;
@@ -1284,7 +1302,7 @@ $('#btnNew').addEventListener('click', async () => {
   catch (e) { toast(e.message, 'err'); }
 });
 async function refreshSessions() { try { const j = await api('sessions'); state.sessions = j.sessions || []; renderSessions(); } catch {} }
-async function refreshStatus() { try { state.status = await api('status'); setWebTheme(state.status.web_theme); renderStatus(); renderMCP(); $('#beat').classList.add('on'); } catch { $('#beat').classList.remove('on'); } }
+async function refreshStatus() { try { state.status = await api('status'); setWebTheme(state.status.web_theme, state.status.theme_vars); renderStatus(); renderMCP(); $('#beat').classList.add('on'); } catch { $('#beat').classList.remove('on'); } }
 
 // ---------- boot ----------
 async function boot() {

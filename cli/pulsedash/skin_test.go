@@ -156,3 +156,63 @@ func TestTokenCheckIsUnchanged(t *testing.T) {
 		t.Fatalf("without the token = %d, want 403", code)
 	}
 }
+
+// Under a skin every control of the page takes its edge from the
+// control-edge role, never from the divider token: the divider is about
+// 1.2:1 on the light variant, where a control would be found only by its
+// label.
+func TestPageControlsUseTheControlEdge(t *testing.T) {
+	page := pageSource(t)
+	for _, want := range []string{"--ctl:var(--border);", `"--ctl": "control"`, ":root[data-skin] .chip, :root[data-skin] button.ctl, :root[data-skin] select.ctl, :root[data-skin] #search, :root[data-skin] .tile.e { border-color:var(--ctl); }", "hot ? C.strong : C.ctl"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page is missing %q", want)
+		}
+	}
+}
+
+func pageSource(t *testing.T) string {
+	t.Helper()
+	raw, err := assets.ReadFile("assets/dash.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// The default look's chrome is the terminal's as well: with a ThemeFunc the
+// page load and the instances poll carry what the terminal runs now, so the
+// "terminal" label and the chrome never describe different themes. Without
+// one the fixed map is served, as before.
+func TestDefaultLookChromeFollowsTheTerminal(t *testing.T) {
+	chrome := map[string]string{"--bg": "#fafafa"}
+	s, _ := startDash(t, Options{Theme: map[string]string{"--bg": "#101010"}, ThemeFunc: func() map[string]string { return chrome }})
+	poll := func() map[string]string {
+		t.Helper()
+		code, body, _ := call(t, s, "/api/instances", s.token, "")
+		var out struct {
+			Chrome map[string]string `json:"chrome"`
+		}
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &out) != nil {
+			t.Fatalf("instances = %d %s", code, body)
+		}
+		return out.Chrome
+	}
+	if _, body, _ := call(t, s, "/", "", ""); !strings.Contains(body, `"--bg":"#fafafa"`) || strings.Contains(body, "#101010") {
+		t.Fatal("the page load must carry the live chrome")
+	}
+	if got := poll(); got["--bg"] != "#fafafa" {
+		t.Fatalf("poll chrome = %v", got)
+	}
+	chrome = nil // the terminal went to a dark theme
+	if got := poll(); got != nil {
+		t.Fatalf("a dark terminal has no chrome to send, got %v", got)
+	}
+
+	fixed, _ := startDash(t, Options{Theme: map[string]string{"--bg": "#101010"}})
+	if _, body, _ := call(t, fixed, "/", "", ""); !strings.Contains(body, `"--bg":"#101010"`) {
+		t.Fatal("without a ThemeFunc the fixed map is served")
+	}
+	if !strings.Contains(pageSource(t), "setWebTheme(list.theme, list.chrome);") {
+		t.Fatal("the page must take the chrome from the same poll as the theme")
+	}
+}

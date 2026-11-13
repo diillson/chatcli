@@ -15,6 +15,7 @@
     --k-mcp:#FF8C69; --k-pattern:#F27DB5; --k-background:#8FA1B8; --k-conn:#4FD1C5; --k-rpc:#B8E05A; --k-turn:#8B9CFF;
     --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --ctl:var(--border);
   }
   * { box-sizing:border-box; }
   html,body { height:100%; margin:0; background:var(--bg); color:var(--text); font:12.5px/1.45 var(--mono); }
@@ -129,6 +130,11 @@
   :root[data-skin] .tile.a .n, :root[data-skin] .tile.c .n, :root[data-skin] .tile.g .n, :root[data-skin] .tile.v .n { color:var(--strong); }
   :root[data-skin] #empty .ps1 { color:var(--muted); }
   :root[data-skin] .row.err .k { background:var(--err) !important; border-radius:0; }
+  /* The border token is a divider and may stay faint; a control is found by
+     its edge, so chips, buttons, selects and the search take the control-edge token. */
+  :root[data-skin] .chip, :root[data-skin] button.ctl, :root[data-skin] select.ctl, :root[data-skin] #search, :root[data-skin] .tile.e { border-color:var(--ctl); }
+  :root[data-skin] .chip:hover, :root[data-skin] button.ctl:hover, :root[data-skin] select.ctl:hover, :root[data-skin] .chip.self, :root[data-skin] #search:focus { border-color:var(--strong); }
+  :root[data-skin] .tile.e.on, :root[data-skin] aside .bar button.ctl.on { border-color:var(--err); }
   @media (max-width:760px) {
     :root[data-skin] #app { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr) 30vh auto; }
     :root[data-skin] header, :root[data-skin] #tiles, :root[data-skin] #stage, :root[data-skin] aside, :root[data-skin] footer { grid-column:1; }
@@ -207,7 +213,7 @@ const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(
 const SKIN_KEY = "chatcli.dash.skin";
 const SKIN_VARS = {"--bg": "background", "--panel": "surface", "--panel2": "surface2", "--border": "border", "--text": "text", "--strong": "text_strong",
   "--muted": "muted", "--faint": "muted", "--accent": "primary", "--brand": "primary", "--ok": "success", "--err": "danger", "--warn": "warning",
-  "--amber": "primary", "--cyan": "primary", "--violet": "primary", "--green": "success", "--red": "danger"};
+  "--amber": "primary", "--cyan": "primary", "--violet": "primary", "--green": "success", "--red": "danger", "--ctl": "control"};
 // A monochrome theme has no eleven hues to tell the kinds apart; the column
 // headers and the legend already name them, so every kind takes one gray.
 for (const k of ["session","agent","turn","llm","tool","skill","mcp","pattern","background","conn","rpc"]) SKIN_VARS["--k-" + k] = "secondary";
@@ -238,9 +244,14 @@ function renderSkinPick() {
   for (const [value, label] of rows) { const o = document.createElement("option"); o.value = value; o.textContent = label; pick.appendChild(o); }
   pick.value = skinChoice;
 }
-function setWebTheme(next) {
+// chrome is the default look's share of the terminal theme (the light chrome
+// of a light theme, nothing for a dark one). It moves with the theme, so the
+// default look and the "terminal" label never describe different themes.
+function setWebTheme(next, chrome) {
   if (!next || JSON.stringify(next) === JSON.stringify(webTheme)) return;
-  webTheme = next; renderSkinPick(); applySkin();
+  webTheme = next;
+  if (chrome !== undefined) BOOT.theme = chrome || {};
+  renderSkinPick(); applySkin();
 }
 $("skinPick").onchange = e => {
   skinChoice = e.target.value;
@@ -707,7 +718,7 @@ function draw(now) {
   const k = state.cam.k;
   ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
   ctx.setTransform(dpr*k,0,0,dpr*k,dpr*state.cam.x*k,dpr*state.cam.y*k);
-  const C = {bg:cssVar("--bg"), border:cssVar("--border"), panel:cssVar("--panel"), panel2:cssVar("--panel2"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), faint:cssVar("--faint"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent"), brand:cssVar("--brand")};
+  const C = {bg:cssVar("--bg"), border:cssVar("--border"), panel:cssVar("--panel"), panel2:cssVar("--panel2"), text:cssVar("--text"), strong:cssVar("--strong"), muted:cssVar("--muted"), faint:cssVar("--faint"), err:cssVar("--err"), ok:cssVar("--ok"), accent:cssVar("--accent"), brand:cssVar("--brand"), ctl:cssVar("--ctl")};
   const MONO = cssVar("--mono") || "ui-monospace,Menlo,monospace";
 
   for (const n of state.nodes.values()) {              // ease toward layout targets
@@ -793,10 +804,11 @@ function draw(now) {
 }
 
 // paintFlatNode is the node under a monochrome skin: a thin border in the
-// border role, strong while it runs, dashed in the danger ink once it failed.
+// control-edge role (a card is something to click and drag), strong while it
+// runs, dashed in the danger ink once it failed.
 function paintFlatNode(n, C, MONO, hot, failed) {
   ctx.fillStyle = hot ? C.panel2 : C.panel; rr(n.x, n.y, NODE_W, NODE_H, 4); ctx.fill();
-  ctx.strokeStyle = failed ? C.err : hot ? C.strong : C.border; ctx.lineWidth = hot ? 1.4 : 1;
+  ctx.strokeStyle = failed ? C.err : hot ? C.strong : C.ctl; ctx.lineWidth = hot ? 1.4 : 1;
   if (failed) ctx.setLineDash([5, 3]);
   ctx.stroke(); ctx.setLineDash([]);
   ctx.textBaseline = "alphabetic"; ctx.fillStyle = C.strong; ctx.font = "600 11.5px " + MONO;
@@ -1062,7 +1074,7 @@ async function api(path) {
 async function tick() {
   try {
     const list = await api("/api/instances");
-    setWebTheme(list.theme);
+    setWebTheme(list.theme, list.chrome);
     const seen = new Set();
     for (const row of list.instances) {
       seen.add(row.instance);

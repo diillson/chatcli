@@ -53,8 +53,9 @@ const readHeaderTimeout = 10 * time.Second
 // bootPlaceholder is where the page receives its boot JSON.
 const bootPlaceholder = "__TASKGRAPH_BOOT__"
 
-// boot is what the page receives at load. The theme also travels on every
-// events poll, so an open page follows a terminal theme change.
+// boot is what the page receives at load. After that the active theme's
+// name travels as a header on every API answer (see guard), so an open page
+// follows a terminal theme change.
 type boot struct {
 	WebTheme theme.WebPayload `json:"web_theme"`
 }
@@ -68,6 +69,13 @@ func renderPage(raw []byte) []byte {
 	}
 	return bytes.Replace(raw, []byte(bootPlaceholder), payload, 1)
 }
+
+// themeHeader names the terminal's active theme on every authenticated API
+// answer. A header and not a body field because it must also ride the
+// answers that carry no body the page reads: the 404 while no run exists and
+// a failing state read. Those are exactly the moments the page would
+// otherwise stop following the terminal.
+const themeHeader = "X-Dash-Theme"
 
 const (
 	tokenHeader = "X-Dash-Token" // #nosec G101 -- the NAME of the request header, not a credential; the token is random per server
@@ -141,6 +149,7 @@ func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		w.Header().Set(themeHeader, theme.Active().Name)
 		next(w, r)
 	}
 }
@@ -252,7 +261,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		next = i + 1
 	}
-	writeJSON(w, map[string]interface{}{"events": events, "next": next, "theme": theme.ActiveWebPayload()})
+	writeJSON(w, map[string]interface{}{"events": events, "next": next})
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {

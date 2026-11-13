@@ -17,12 +17,16 @@ import (
 	"github.com/diillson/chatcli/pkg/pulse"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/diillson/chatcli/cli"
 	"github.com/diillson/chatcli/cli/agentevents"
+	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/llm/imagegen"
 	"github.com/diillson/chatcli/llm/transcription"
@@ -82,7 +86,7 @@ type apiRoute struct {
 var routes = []apiRoute{
 	{http.MethodGet, "boot", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleBoot(w, r) }},
 	{http.MethodGet, "status", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) {
-		writeJSON(w, http.StatusOK, statusPayload{Status: s.opts.Backend.Status(), WebTheme: theme.ActiveWebPayload()})
+		writeJSON(w, http.StatusOK, s.statusData())
 	}},
 	{http.MethodGet, "providers", 0, func(s *Server, w http.ResponseWriter, _ *http.Request, _ []string) { s.handleProviders(w) }},
 	{http.MethodPost, "defaults", 0, func(s *Server, w http.ResponseWriter, r *http.Request, _ []string) { s.handleDefaults(w, r) }},
@@ -220,6 +224,11 @@ func (s *Server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 // child of the terminal and inherited its theme only at spawn; the terminal
 // posts every later change here, and the next status poll carries it to the
 // page. An unknown name changes nothing.
+//
+// The name also goes into the environment variable the theme is initialized
+// from, as /config ui theme does in the terminal: a /reload run from the
+// page re-reads the theme from there, and without this it would bring back
+// the theme this process was spawned under.
 func (s *Server) handleTheme(w http.ResponseWriter, r *http.Request) {
 	var req cli.WebThemeRequest
 	if !readJSON(w, r, &req) {
@@ -228,6 +237,9 @@ func (s *Server) handleTheme(w http.ResponseWriter, r *http.Request) {
 	if err := theme.SetActive(req.Theme); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_theme", err.Error())
 		return
+	}
+	if err := os.Setenv(config.ThemeEnv, theme.Active().Name); err != nil {
+		s.log.Warn("web: the pushed theme will not survive a reload", zap.Error(err))
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"theme": theme.Active().Name})
 }
