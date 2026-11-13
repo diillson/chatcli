@@ -104,7 +104,7 @@ ChatCLI keeps itself current with `/update` (Homebrew, `go install` or a signatu
 <td width="50%" valign="top">
 
 ### 🤖 Coder agent
-A ReAct loop with 50 builtin tools: files, search, shell, git, tests, LSP navigation and rename, JSON/YAML and diffs, secrets and archives, a real browser, Git forges, background processes. Every call goes through an allow/ask/deny policy; edits are checkpointed in a shadow repository; an optional OS sandbox confines commands. [Coder mode →](https://chatcli.edilsonfreitas.com/usage/coder-mode)
+A ReAct loop with 50 builtin tools: files, search, shell, git, tests, LSP navigation and rename, JSON/YAML and diffs, secrets and archives, a real browser, Git forges, background processes that are scoped per session and that you can watch and stop with `/proc`. Every call goes through an allow/ask/deny policy; edits are checkpointed in a shadow repository; an optional OS sandbox confines commands. [Coder mode →](https://chatcli.edilsonfreitas.com/usage/coder-mode)
 
 </td>
 <td width="50%" valign="top">
@@ -176,7 +176,7 @@ Measured, not claimed: on [LongMemEval-S](https://chatcli.edilsonfreitas.com/con
 <td valign="top">
 
 ### ⏱️ Scheduler
-Durable jobs with cron, wait-until conditions and dependencies; a daemon keeps them running with the terminal closed; agents can park themselves and wake on a condition. [Scheduler →](https://chatcli.edilsonfreitas.com/tools/scheduler)
+Durable jobs with cron, wait-until conditions and dependencies; a daemon keeps them running with the terminal closed; agents can park themselves and wake on a condition, and cleaning up parks never removes one that may still resume. [Scheduler →](https://chatcli.edilsonfreitas.com/tools/scheduler)
 
 </td>
 <td valign="top">
@@ -194,7 +194,7 @@ Durable jobs with cron, wait-until conditions and dependencies; a daemon keeps t
 |---|---|---|
 | Interactive terminal | `chatcli` | chat, `/coder`, `/agent`, `/moa`, every slash command |
 | One-shot and pipes | `chatcli -p "…"` | scripts, CI, `git diff \| chatcli -p …` |
-| Browser UI | `/web` or `chatcli web` | the same session as the terminal |
+| Browser UI | `/web` or `chatcli web` | the same session as the terminal, following its theme |
 | Editors (ACP) | `chatcli acp` | Zed and other ACP clients |
 | Any MCP client | `chatcli mcp-server` | every tool, the agent loops, skills as prompts |
 | Chat apps | `/gateway start` | Telegram, Slack, Discord, WhatsApp, webhooks |

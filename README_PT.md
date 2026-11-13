@@ -104,7 +104,7 @@ O ChatCLI se mantém atualizado com `/update` (Homebrew, `go install` ou auto-su
 <td width="50%" valign="top">
 
 ### 🤖 Agente coder
-Um loop ReAct com 50 tools builtin: arquivos, busca, shell, git, testes, navegação e rename via LSP, JSON/YAML e diffs, segredos e arquivos compactados, um navegador de verdade, forges Git, processos em segundo plano. Toda chamada passa por uma política allow/ask/deny; as edições ganham checkpoint num repositório sombra; um sandbox opcional do sistema operacional confina os comandos. [Modo coder →](https://chatcli.edilsonfreitas.com/pt/usage/coder-mode)
+Um loop ReAct com 50 tools builtin: arquivos, busca, shell, git, testes, navegação e rename via LSP, JSON/YAML e diffs, segredos e arquivos compactados, um navegador de verdade, forges Git, processos em segundo plano que são separados por sessão e que você acompanha e para com `/proc`. Toda chamada passa por uma política allow/ask/deny; as edições ganham checkpoint num repositório sombra; um sandbox opcional do sistema operacional confina os comandos. [Modo coder →](https://chatcli.edilsonfreitas.com/pt/usage/coder-mode)
 
 </td>
 <td width="50%" valign="top">
@@ -176,7 +176,7 @@ Medido, não prometido: no [LongMemEval-S](https://chatcli.edilsonfreitas.com/pt
 <td valign="top">
 
 ### ⏱️ Scheduler
-Jobs duráveis com cron, condições de espera e dependências; um daemon os mantém rodando com o terminal fechado; os agentes podem se estacionar e acordar numa condição. [Scheduler →](https://chatcli.edilsonfreitas.com/pt/tools/scheduler)
+Jobs duráveis com cron, condições de espera e dependências; um daemon os mantém rodando com o terminal fechado; os agentes podem se estacionar e acordar numa condição, e a limpeza de parks nunca remove um que ainda possa retomar. [Scheduler →](https://chatcli.edilsonfreitas.com/pt/tools/scheduler)
 
 </td>
 <td valign="top">
@@ -194,7 +194,7 @@ O `chatcli eval` roda suítes YAML contra o binário real num sandbox, avaliadas
 |---|---|---|
 | Terminal interativo | `chatcli` | chat, `/coder`, `/agent`, `/moa`, todos os slash commands |
 | One-shot e pipes | `chatcli -p "…"` | scripts, CI, `git diff \| chatcli -p …` |
-| UI no navegador | `/web` ou `chatcli web` | a mesma sessão do terminal |
+| UI no navegador | `/web` ou `chatcli web` | a mesma sessão do terminal, acompanhando o tema dele |
 | Editores (ACP) | `chatcli acp` | Zed e outros clientes ACP |
 | Qualquer cliente MCP | `chatcli mcp-server` | todas as tools, os loops de agente, skills como prompts |
 | Apps de chat | `/gateway start` | Telegram, Slack, Discord, WhatsApp, webhooks |
