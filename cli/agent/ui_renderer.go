@@ -194,7 +194,7 @@ func wrapStreamLine(line string, width int) []string {
 // re-tematiza sem alterar os call sites, e a saída fica limpa (sem ANSI) quando
 // não há terminal colorido (pipe/CI).
 func (r *UIRenderer) Colorize(text string, color string) string {
-	return theme.Recolor(fmt.Sprintf("%s%s%s", color, text, ColorReset))
+	return theme.Recolor(fmt.Sprintf("%s%s%s", color, kit.Plain(text), ColorReset))
 }
 
 // ClearScreen limpa a tela (se permitido)

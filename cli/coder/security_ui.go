@@ -14,6 +14,7 @@ import (
 
 	"github.com/diillson/chatcli/i18n"
 	"github.com/diillson/chatcli/pkg/textfold"
+	"github.com/diillson/chatcli/ui/kit"
 	"github.com/diillson/chatcli/utils"
 )
 
@@ -209,7 +210,7 @@ func PromptSecurityCheckWithContext(ctx context.Context, toolName, args string, 
 		BorderForeground(lipgloss.Color("5")).
 		Padding(0, 2).
 		Width(maxBox - 2). // -2 for the border chars (lipgloss includes them in Width)
-		Render(strings.TrimRight(b.String(), "\n"))
+		Render(strings.TrimRight(kit.Plain(b.String()), "\n"))
 
 	fmt.Println()
 	fmt.Println(box)

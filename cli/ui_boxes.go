@@ -21,7 +21,12 @@ func uiTermWidth() int {
 
 // uiBox renders a box header: ╭── icon TITLE
 func uiBox(icon, title, color string) string {
-	return fmt.Sprintf("%s%s╭── %s %s%s", color, ColorBold, icon, title, ColorReset)
+	// A theme that renders in monochrome glyphs has no use for the icon:
+	// what is left of it (often nothing) must not leave a double space.
+	if icon = kit.Plain(icon); strings.TrimSpace(icon) == "" {
+		return fmt.Sprintf("%s%s╭── %s%s", color, ColorBold, kit.Plain(title), ColorReset)
+	}
+	return fmt.Sprintf("%s%s╭── %s %s%s", color, ColorBold, icon, kit.Plain(title), ColorReset)
 }
 
 // uiBoxEnd renders a box footer: ╰─────────
