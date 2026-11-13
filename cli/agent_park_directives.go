@@ -153,6 +153,29 @@ func (cli *ChatCLI) parkNoteByToken(prefix, text string) {
 		fmt.Println(colorize("  "+err.Error(), ColorYellow))
 		return
 	}
+	short := parkShort(token)
+	snap, err := park.Load(token)
+	if err != nil {
+		fmt.Println(colorize("  ⚠ "+i18n.T("park.note.failed", err), ColorYellow))
+		return
+	}
+	// A token resolves over every snapshot on disk, and not every snapshot
+	// has a reader: say so instead of reporting a note as delivered.
+	switch st := cli.parkStatusOf(snap); {
+	case st.resumed:
+		fmt.Println(colorize("  "+i18n.T("leftovers.park_note.resumed", short), ColorYellow))
+		return
+	case st.verdict == parkFinished:
+		fmt.Println(colorize("  "+i18n.T("leftovers.park_note.finished", short), ColorYellow))
+		return
+	case st.heldBy != "":
+		// Its owner rewrites the snapshot (at resume, and for its own
+		// notes) with no lock this process shares, and there is no
+		// cross-process route for directives: writing here could lose
+		// either side's update.
+		fmt.Println(colorize("  "+i18n.T("leftovers.park_note.held_elsewhere", short, st.heldBy), ColorYellow))
+		return
+	}
 	if err := park.AppendDirective(token, text); err != nil {
 		if cli.logger != nil {
 			cli.logger.Warn("park: directive persist failed", zap.String("token", token), zap.Error(err))
@@ -160,7 +183,6 @@ func (cli *ChatCLI) parkNoteByToken(prefix, text string) {
 		fmt.Println(colorize("  ⚠ "+i18n.T("park.note.failed", err), ColorYellow))
 		return
 	}
-	short := parkShort(token)
 	fmt.Println(colorize("  💬 "+i18n.T("leftovers.park_note.queued", short, short), ColorCyan))
 }
 

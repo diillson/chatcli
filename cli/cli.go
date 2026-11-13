@@ -28,6 +28,7 @@ import (
 	"github.com/c-bata/go-prompt"
 	"github.com/diillson/chatcli/cli/agent"
 	"github.com/diillson/chatcli/cli/agent/lsp"
+	"github.com/diillson/chatcli/cli/agent/park"
 	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/agent/quality/lessonq"
 	"github.com/diillson/chatcli/cli/agent/workers"
@@ -608,6 +609,14 @@ type ChatCLI struct {
 	// dispatcher goroutine; cli.go reads from the main loop.
 	pendingResumeMu    sync.Mutex
 	pendingResumeQueue []string
+	// resumingParks are the tokens a drain took off the queue and has not
+	// finished resuming (guarded by pendingResumeMu). They are in neither
+	// the queue nor, once their run starts, the active set — and their
+	// snapshots are exactly what the rest of the drain is about to load.
+	resumingParks map[string]bool
+	// resumeRun replaces AgentMode.RunResumed in runResumeForToken; nil in
+	// production. Tests drive the real drain with it instead of an LLM.
+	resumeRun func(ctx context.Context, snap *park.Snapshot, outcome, detail string) error
 
 	// parkOutcomes carries the (outcome, detail) tuple from the
 	// NotifyParkComplete call to the consumer that runs RunResumed,

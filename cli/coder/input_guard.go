@@ -115,6 +115,13 @@ func (g *InputGuard) IntentDebounce(ctx context.Context, ch <-chan string) int {
 
 	discarded := 0
 	for {
+		// Checked before the select, which picks at random among ready
+		// cases: with the context already done (a prompt withdrawn under
+		// the user) a line on the channel is not spurious input to drop —
+		// it is for whoever tears the reader down to hand back.
+		if ctx.Err() != nil {
+			return discarded
+		}
 		select {
 		case <-ctx.Done():
 			return discarded

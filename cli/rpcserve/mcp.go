@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/i18n"
 )
@@ -667,7 +668,7 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 		}
 		// No session capability: fall through to the plugin dispatcher,
 		// which reports the tool as unknown.
-		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
+		return m.result(m.backend.CallTool(proc.WithSession(ctx, session), p.Name, a.Args))
 	default:
 		// Proxied MCP tools carry the caller's arguments object verbatim
 		// to the origin server; everything else is a plugin tool taking
@@ -675,7 +676,9 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 		if proxy, ok := m.backend.(MCPToolProxy); ok && strings.HasPrefix(p.Name, "mcp_") {
 			return m.result(proxy.CallMCPProxyTool(ctx, p.Name, p.Arguments))
 		}
-		return m.result(m.backend.CallTool(ctx, p.Name, a.Args))
+		// A plugin tool called directly runs for the session the call
+		// names — "mcp" by default, the one this client's agent runs use.
+		return m.result(m.backend.CallTool(proc.WithSession(ctx, session), p.Name, a.Args))
 	}
 }
 

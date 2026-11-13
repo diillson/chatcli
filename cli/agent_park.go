@@ -62,6 +62,8 @@ func (a *AgentMode) handleAgentPark(
 ) error {
 	snap := &park.Snapshot{
 		Token:              park.NewToken(),
+		OwnerPID:           os.Getpid(),
+		OwnerHost:          parkHostname(),
 		History:            append([]models.Message(nil), a.cli.history...),
 		AgentsLaunched:     a.agentsLaunched,
 		ToolCallsExecd:     a.toolCallsExecd,

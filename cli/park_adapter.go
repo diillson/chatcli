@@ -9,7 +9,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -97,15 +96,14 @@ func (a *liveParkAdapter) PrunePark(olderThan string) (string, error) {
 	}
 	rep := a.cli.sweepDeadParks(age)
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "pruned %d parked snapshot(s) nobody was waiting on (%s).", len(rep.removed), scope)
+	fmt.Fprintf(&sb, "pruned %d parked snapshot(s) proven finished (%s).", len(rep.removed), scope)
 	if len(rep.live) > 0 {
-		short := make([]string, 0, len(rep.live))
-		for _, token := range rep.live {
-			short = append(short, parkShort(token))
-		}
-		sort.Strings(short)
 		fmt.Fprintf(&sb, "\nkept %d park(s) still waiting, which prune never removes: %s. To end one on purpose use {\"cmd\":\"discard\",\"args\":{\"token\":\"<prefix>\"}}.",
-			len(short), strings.Join(short, ", "))
+			len(rep.live), strings.Join(parkShorts(rep.live), ", "))
+	}
+	if len(rep.unknown) > 0 {
+		fmt.Fprintf(&sb, "\nkept %d park(s) whose state is unknown here (no scheduler in this process knows their job and no owner answered — they may be waiting in another process, or were created moments ago): %s. Prune never removes these; only the user can, by age, with /parked gc <age>.",
+			len(rep.unknown), strings.Join(parkShorts(rep.unknown), ", "))
 	}
 	for _, e := range rep.errs {
 		fmt.Fprintf(&sb, "\ncould not delete %v", e)

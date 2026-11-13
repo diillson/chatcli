@@ -40,6 +40,13 @@ type Snapshot struct {
 	Token     string    `json:"token"`
 	CreatedAt time.Time `json:"created_at"`
 
+	// OwnerPID / OwnerHost name the process that parked the agent. They are
+	// evidence for cleanup: a snapshot whose owner process is gone, on this
+	// host, is not waiting on anything. Additive — older snapshots have
+	// none and are simply never judged by it.
+	OwnerPID  int    `json:"owner_pid,omitempty"`
+	OwnerHost string `json:"owner_host,omitempty"`
+
 	// History is the cli.history at park time. Restored verbatim.
 	History []models.Message `json:"history"`
 

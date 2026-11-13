@@ -14,6 +14,10 @@
  * chatcli PROCESS, but each session reads its own table of it: on a
  * multi-session server /proc lists and stops what THAT session's agent
  * started, and another session's id answers like one that does not exist.
+ * One caller looks across owners: the person at this terminal's prompt,
+ * with /proc list --all and /proc stop <id> --owner <owner> — the way out
+ * when sessions hold the host's capacity. No headless or session-scoped
+ * path can use them.
  */
 package cli
 
@@ -21,6 +25,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +42,23 @@ type procCommandArgs struct {
 	id   string
 	grep *regexp.Regexp
 	tail int
+	// all (list) and owner (stop) look across process-table owners; only
+	// the terminal's prompt may. byOwner tells "--owner terminal" (the
+	// empty owner) from no --owner at all.
+	all     bool
+	owner   string
+	byOwner bool
+}
+
+// procTerminalOwner is how the empty owner — the terminal session — is
+// written on the command line and shown in /proc list --all.
+const procTerminalOwner = "terminal"
+
+// procCommandFlags are the flags each /proc subcommand reads.
+var procCommandFlags = map[string]map[string]bool{
+	"list": {"--all": true},
+	"logs": {"--grep": true, "--tail": true},
+	"stop": {"--owner": true},
 }
 
 // parseProcCommand reads "/proc <sub> [id] [--grep re] [--tail N]". What it
@@ -62,10 +84,18 @@ func parseProcCommand(userInput string) (procCommandArgs, error) {
 		tok := fields[i]
 		isFlag := strings.HasPrefix(tok, "--")
 		switch {
-		case isFlag && out.sub != "logs", isFlag && tok != "--grep" && tok != "--tail":
+		case isFlag && !procCommandFlags[out.sub][tok]:
 			return out, fmt.Errorf("%s", i18n.T("execparity.unknown_flag", "/proc "+out.sub, tok))
+		case tok == "--all":
+			out.all = true
 		case isFlag && (i+1 >= len(fields) || strings.HasPrefix(fields[i+1], "--")):
 			return out, fmt.Errorf("%s", i18n.T("execparity.flag_needs_value", tok))
+		case tok == "--owner":
+			i++
+			out.byOwner = true
+			if out.owner = fields[i]; out.owner == procTerminalOwner {
+				out.owner = ""
+			}
 		case tok == "--grep":
 			i++
 			re, err := regexp.Compile("(?i)" + fields[i])
@@ -99,9 +129,27 @@ func (cli *ChatCLI) handleProcCommand(ctx context.Context, userInput string) {
 	if err != nil {
 		fmt.Println(colorize("  "+err.Error(), ColorYellow))
 		fmt.Println(colorize("  "+i18n.T("proc.cmd.usage"), ColorGray))
+		if isLocalOperator(ctx) {
+			fmt.Println(colorize("  "+i18n.T("leftovers.proc.usage_operator"), ColorGray))
+		}
 		return
 	}
-	sup := (&procToolAdapter{cli: cli, owner: proc.OwnerFrom(ctx)}).supervisor()
+	adapter := &procToolAdapter{cli: cli, owner: proc.OwnerFrom(ctx)}
+	if args.all || args.byOwner {
+		// Looking across owners is the local operator's alone: a session,
+		// a headless caller, a scheduled job or a command issued while a
+		// turn runs gets the refusal and nothing else.
+		if !isLocalOperator(ctx) {
+			fmt.Println(colorize("  "+i18n.T("leftovers.proc.operator_only"), ColorYellow))
+			return
+		}
+		if args.all {
+			printProcAllOwners(adapter.processSupervisor().List())
+			return
+		}
+		adapter.owner = args.owner
+	}
+	sup := adapter.supervisor()
 	if args.sub == "list" {
 		infos := sup.List()
 		if len(infos) == 0 {
@@ -122,6 +170,27 @@ func (cli *ChatCLI) handleProcCommand(ctx context.Context, userInput string) {
 	for _, line := range strings.Split(out, "\n") {
 		fmt.Println("  " + line)
 	}
+}
+
+// printProcAllOwners is /proc list --all: every tracked process, each
+// under the owner whose table holds it.
+func printProcAllOwners(infos []proc.Info) {
+	if len(infos) == 0 {
+		fmt.Println(colorize("  "+i18n.T("proc.cmd.none_tracked"), ColorGray))
+		return
+	}
+	sort.SliceStable(infos, func(i, j int) bool { return infos[i].Owner < infos[j].Owner })
+	for _, info := range infos {
+		fmt.Printf("  - [%s] %s\n", procOwnerName(info.Owner), procHumanLine(info))
+	}
+}
+
+// procOwnerName is an owner as the operator reads and types it.
+func procOwnerName(owner string) string {
+	if owner == "" {
+		return procTerminalOwner
+	}
+	return owner
 }
 
 // procCommandResult renders status, logs or stop of one process.
@@ -182,6 +251,12 @@ func (cli *ChatCLI) getProcSuggestions(d prompt.Document) []prompt.Suggest {
 	}
 	switch args[0] {
 	case "logs", "stop", "status":
+	case "list":
+		// The completer only runs at the terminal's prompt, which is where
+		// the operator flags work.
+		return prompt.FilterHasPrefix([]prompt.Suggest{
+			{Text: "--all", Description: i18n.T("complete.leftovers.proc.all")},
+		}, current, true)
 	default:
 		return nil
 	}
@@ -192,11 +267,40 @@ func (cli *ChatCLI) getProcSuggestions(d prompt.Document) []prompt.Suggest {
 		}
 		return prompt.FilterHasPrefix(out, current, true)
 	}
+	if args[0] == "stop" {
+		return cli.getProcOwnerSuggestions(args, current, trailingSpace)
+	}
 	if args[0] != "logs" {
 		return nil
 	}
 	return prompt.FilterHasPrefix([]prompt.Suggest{
 		{Text: "--grep", Description: i18n.T("complete.proc.grep")},
 		{Text: "--tail", Description: i18n.T("complete.proc.tail")},
+	}, current, true)
+}
+
+// getProcOwnerSuggestions completes "/proc stop <id> --owner <owner>": the
+// flag after the id, then the owners that have a process.
+func (cli *ChatCLI) getProcOwnerSuggestions(args []string, current string, trailingSpace bool) []prompt.Suggest {
+	last := args[len(args)-1]
+	if (last == "--owner" && trailingSpace) || (len(args) >= 2 && args[len(args)-2] == "--owner" && !trailingSpace) {
+		seen := map[string]bool{}
+		var out []prompt.Suggest
+		for _, info := range (&procToolAdapter{cli: cli}).processSupervisor().List() {
+			if name := procOwnerName(info.Owner); !seen[name] {
+				seen[name] = true
+				out = append(out, prompt.Suggest{Text: name})
+			}
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Text < out[j].Text })
+		return prompt.FilterHasPrefix(out, current, true)
+	}
+	for _, a := range args {
+		if a == "--owner" {
+			return nil
+		}
+	}
+	return prompt.FilterHasPrefix([]prompt.Suggest{
+		{Text: "--owner", Description: i18n.T("complete.leftovers.proc.owner")},
 	}, current, true)
 }

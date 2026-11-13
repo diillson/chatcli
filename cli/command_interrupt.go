@@ -85,5 +85,5 @@ func (cli *ChatCLI) interruptCommandLocked() {
 func (cli *ChatCLI) runInterruptibleCommand(line string) bool {
 	ctx, release := cli.beginInterruptible(context.Background())
 	defer release()
-	return cli.commandHandler.HandleCommand(ctx, line)
+	return cli.commandHandler.HandleCommand(withLocalOperator(ctx), line)
 }

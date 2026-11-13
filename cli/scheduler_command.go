@@ -44,6 +44,7 @@ func (cli *ChatCLI) handleScheduleCommand(ctx context.Context, input string) {
 		return
 	}
 	owner := cli.currentSchedulerOwner()
+	in.Tags = stampProcOwner(ctx, in.Tags)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 

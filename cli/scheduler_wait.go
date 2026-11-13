@@ -107,6 +107,7 @@ func (cli *ChatCLI) handleWaitCommand(ctx context.Context, input string) {
 // wired and returns as soon as it is admitted.
 func (cli *ChatCLI) schedulerEnqueueWait(ctx context.Context, in scheduler.ToolInput) (*scheduler.ToolOutput, error) {
 	in.Async = true
+	in.Tags = stampProcOwner(ctx, in.Tags)
 	owner := cli.currentSchedulerOwner()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

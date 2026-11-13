@@ -8,6 +8,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -40,6 +41,11 @@ type workerPolicyAdapter struct {
 	// otherwise, with the channel that reader's teardown closes. A detached
 	// run asks through it: stdinCh outlives the turn.
 	liveStdin func() (<-chan string, <-chan struct{})
+
+	// detachedPrompt, when set, is told that a detached run's prompt is
+	// about to read the turn's stdin lines; the func it returns is called
+	// when the prompt is over.
+	detachedPrompt func() (closed func())
 
 	// unattended marks a run with no human to answer an "ask" prompt
 	// (gateway, server, RPC surfaces): PromptSecurityCheck would block on a
@@ -98,6 +104,48 @@ func (a *AgentMode) liveStdinLines() (<-chan string, <-chan struct{}) {
 		return nil, nil
 	}
 	return a.stdinLines, a.stdinDone
+}
+
+// noteDetachedPrompt records that a permission prompt of a detached run is
+// reading this loop's stdin lines, until the returned func is called. A
+// teardown of the reader under such a prompt must not take a line left on
+// the channel for type-ahead: it was typed as the answer.
+func (a *AgentMode) noteDetachedPrompt() (closed func()) {
+	a.detachedPrompts.Add(1)
+	return func() { a.detachedPrompts.Add(-1) }
+}
+
+// parkWithdrawnPromptLines takes the lines a teardown found on the channel
+// while a detached permission prompt was open, and returns the draft to
+// carry: those lines, then the half-typed one. They are neither queued for
+// the model (a "y" would reach it as an instruction) nor dropped.
+func (a *AgentMode) parkWithdrawnPromptLines(lines []string, preview string) string {
+	var kept []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			kept = append(kept, line)
+		}
+	}
+	a.withdrawnPromptLines = kept
+	if preview != "" {
+		kept = append(append([]string(nil), kept...), preview)
+	}
+	return strings.Join(kept, " ")
+}
+
+// announceWithdrawnPrompt tells the user, once, what a withdrawn prompt
+// left unsent. Called at the end of the teardown, with the terminal back
+// in cooked mode.
+func (a *AgentMode) announceWithdrawnPrompt() {
+	lines := a.withdrawnPromptLines
+	a.withdrawnPromptLines = nil
+	if len(lines) == 0 || (a.cli != nil && a.cli.unattended) {
+		return
+	}
+	fmt.Printf("\n  %s\n", colorize("⚠ "+i18n.T("leftovers.prompt.withdrawn"), ColorYellow))
+	for _, line := range lines {
+		fmt.Printf("    %s\n", colorize("❯ "+sanitizeTypeaheadPreview(line), ColorGray))
+	}
 }
 
 // chanClosed reports whether ch is closed; a nil channel never is.
@@ -224,8 +272,10 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		// that started it is reading stdin NOW (else nobody feeds the prompt).
 		stdinCh, nobody := a.stdinCh, a.unattended
 		var readerGone <-chan struct{}
-		if detached, fromTurn := plugins.TaskGraphDetached(ctx); detached {
-			if stdinCh = nil; fromTurn && a.liveStdin != nil {
+		detached, fromTurn := plugins.TaskGraphDetached(ctx)
+		asksTurn := detached && fromTurn && a.liveStdin != nil
+		if detached {
+			if stdinCh = nil; asksTurn {
 				stdinCh, readerGone = a.liveStdin()
 			}
 			nobody = nobody || stdinCh == nil
@@ -264,9 +314,15 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 			return false, "AÇÃO BLOQUEADA (Regra de Segurança). NÃO TENTE NOVAMENTE."
 		}
 
-		// The turn may have ended while this call queued behind another
-		// worker's prompt: do not draw a box nobody can answer.
-		if chanClosed(readerGone) {
+		// This call may have queued behind another worker's prompt for a
+		// long time. The reader seen before queueing may have been torn
+		// down since — and replaced: a suspend for an overlay resumes with
+		// new channels. Ask the reader that is live NOW; with none, do not
+		// draw a box nobody can answer.
+		if asksTurn {
+			stdinCh, readerGone = a.liveStdin()
+		}
+		if (asksTurn && stdinCh == nil) || chanClosed(readerGone) {
 			a.logger.Info("Worker tool call denied (the turn's stdin reader went away before the prompt)",
 				zap.String("tool", toolName))
 			return false, i18n.T("agent.policy.unattended_denied", toolName)
@@ -279,11 +335,12 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		secCtx := buildSecurityContext(ctx)
 
 		// Prompt the user with full context
+		if asksTurn && a.detachedPrompt != nil {
+			defer a.detachedPrompt()()
+		}
 		decision, abandoned := promptWhileReaderLives(ctx, readerGone, func(promptCtx context.Context) coder.SecurityDecision {
 			return coder.PromptSecurityCheckWithContextGuarded(promptCtx, toolName, args, secCtx, stdinCh)
 		})
-		pattern := coder.GetSuggestedPattern(toolName, args)
-
 		// Clear the prompt area and resume spinner
 		fmt.Print(metrics.ClearLine())
 		a.resumeSpinner()
@@ -298,34 +355,41 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 			return false, i18n.T("agent.policy.unattended_denied", toolName)
 		}
 
-		switch decision {
-		case coder.DecisionAllowAlways:
-			if pattern != "" {
-				if err := a.pm.AddRule(pattern, coder.ActionAllow); err != nil {
-					a.logger.Warn("failed to persist allow rule", zap.String("pattern", pattern), zap.Error(err))
-				}
-			}
-			return true, ""
-
-		case coder.DecisionDenyForever:
-			if pattern != "" {
-				if err := a.pm.AddRule(pattern, coder.ActionDeny); err != nil {
-					a.logger.Warn("failed to persist deny rule", zap.String("pattern", pattern), zap.Error(err))
-				}
-			}
-			return false, "AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
-
-		case coder.DecisionDenyOnce:
-			return false, "AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
-
-		case coder.DecisionCanceled:
-			return false, "OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
-
-		default: // DecisionRunOnce
-			return true, ""
-		}
+		return a.applyDecision(decision, toolName, args)
 	}
 
 	// Fallback: unknown action → deny (safe default)
 	return false, "AÇÃO BLOQUEADA (política desconhecida)."
+}
+
+// applyDecision turns the user's answer into the verdict, persisting the
+// rule an "always" or "never" answer creates.
+func (a *workerPolicyAdapter) applyDecision(decision coder.SecurityDecision, toolName, args string) (bool, string) {
+	pattern := coder.GetSuggestedPattern(toolName, args)
+	switch decision {
+	case coder.DecisionAllowAlways:
+		if pattern != "" {
+			if err := a.pm.AddRule(pattern, coder.ActionAllow); err != nil {
+				a.logger.Warn("failed to persist allow rule", zap.String("pattern", pattern), zap.Error(err))
+			}
+		}
+		return true, ""
+
+	case coder.DecisionDenyForever:
+		if pattern != "" {
+			if err := a.pm.AddRule(pattern, coder.ActionDeny); err != nil {
+				a.logger.Warn("failed to persist deny rule", zap.String("pattern", pattern), zap.Error(err))
+			}
+		}
+		return false, "AÇÃO BLOQUEADA PERMANENTEMENTE. NÃO TENTE NOVAMENTE."
+
+	case coder.DecisionDenyOnce:
+		return false, "AÇÃO NEGADA PELO USUÁRIO DESTA VEZ. Tente uma abordagem diferente ou pergunte ao usuário."
+
+	case coder.DecisionCanceled:
+		return false, "OPERAÇÃO CANCELADA PELO USUÁRIO (Ctrl+C). Pode tentar a mesma ação novamente se necessário."
+
+	default: // DecisionRunOnce
+		return true, ""
+	}
 }

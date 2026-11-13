@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -323,12 +324,16 @@ func (cli *ChatCLI) runResumeForToken(ctx context.Context, token, outcome, detai
 		fmt.Println(colorize("  ⚠ "+i18n.T("park.resume.load_failed", err), ColorYellow))
 		return false
 	}
-	if cli.agentMode == nil {
-		cli.agentMode = NewAgentMode(cli, cli.logger)
+	run := cli.resumeRun
+	if run == nil {
+		if cli.agentMode == nil {
+			cli.agentMode = NewAgentMode(cli, cli.logger)
+		}
+		run = cli.agentMode.RunResumed
 	}
 	var runErr error
 	cli.runWithCancellation(ctx, "Park Resume", func(ctx context.Context) error {
-		runErr = cli.agentMode.RunResumed(ctx, snap, outcome, detail)
+		runErr = run(ctx, snap, outcome, detail)
 		return runErr
 	})
 	if cli.memWorker != nil {
@@ -362,7 +367,18 @@ func (cli *ChatCLI) drainPendingResumes(ctx context.Context) bool {
 	}
 	tokens := cli.pendingResumeQueue
 	cli.pendingResumeQueue = nil
+	// Off the queue is not finished: until each of these has been resumed
+	// its snapshot is still needed, and nothing else says so — the run of
+	// the first one unregisters it, and the others sit in neither place a
+	// sweep looks. Marked under the lock that empties the queue.
+	if cli.resumingParks == nil {
+		cli.resumingParks = map[string]bool{}
+	}
+	for _, token := range tokens {
+		cli.resumingParks[token] = true
+	}
 	cli.pendingResumeMu.Unlock()
+	defer cli.doneResuming(tokens...) // a panic mid-drain must not pin them
 
 	processed := false
 	for _, token := range tokens {
@@ -388,9 +404,32 @@ func (cli *ChatCLI) drainPendingResumes(ctx context.Context) bool {
 		if cli.runResumeForToken(ctx, token, outcome, detail) {
 			cli.markRecentlyResumed(token)
 		}
+		cli.doneResuming(token)
 		processed = true
 	}
 	return processed
+}
+
+// doneResuming clears the mark drainPendingResumes put on tokens: resumed
+// or failed, the drain is through with them.
+func (cli *ChatCLI) doneResuming(tokens ...string) {
+	cli.pendingResumeMu.Lock()
+	defer cli.pendingResumeMu.Unlock()
+	for _, token := range tokens {
+		delete(cli.resumingParks, token)
+	}
+}
+
+// holdsPark reports whether this process still has a use for token's
+// snapshot: it owns the park's wake path, or a drain took it off the queue
+// and has not finished resuming it.
+func (cli *ChatCLI) holdsPark(token string) bool {
+	if cli.ownsPark(token) {
+		return true
+	}
+	cli.pendingResumeMu.Lock()
+	defer cli.pendingResumeMu.Unlock()
+	return cli.resumingParks[token]
 }
 
 // hasPendingResume reports whether token is already sitting in the
@@ -454,19 +493,23 @@ func (cli *ChatCLI) parkPrune() {
 		fmt.Println(colorize("  ⚠ "+e.Error(), ColorYellow))
 	}
 	fmt.Printf("  %s: %d removed, %d still pending\n",
-		colorize("✓ parked prune", ColorGreen), len(rep.removed), len(rep.live))
+		colorize("✓ parked prune", ColorGreen), len(rep.removed), len(rep.live)+len(rep.unknown))
+	if len(rep.unknown) > 0 {
+		fmt.Println(colorize("  "+i18n.T("leftovers.parked.prune_unknown", len(rep.unknown), strings.Join(parkShorts(rep.unknown), ", ")), ColorGray))
+	}
 }
 
 // parkSweepReport is what one sweep of the snapshot directory did.
 type parkSweepReport struct {
-	removed []string // tokens deleted
+	removed []string // tokens deleted: proven finished
 	live    []string // tokens kept: an agent is still waiting on them
+	unknown []string // tokens kept: nothing proves them finished
 	errs    []error  // snapshots that could not be deleted
 }
 
-// sweepDeadParks deletes the snapshots no agent is waiting on any more and
-// never a live one. With olderThan > 0 only snapshots created before that
-// age are looked at. The one body of /parked prune and @park prune.
+// sweepDeadParks deletes the snapshots proven finished and nothing else.
+// With olderThan > 0 only snapshots created before that age are looked
+// at. The one body of /parked prune and @park prune.
 func (cli *ChatCLI) sweepDeadParks(olderThan time.Duration) parkSweepReport {
 	var rep parkSweepReport
 	snaps, _ := park.List()
@@ -475,41 +518,122 @@ func (cli *ChatCLI) sweepDeadParks(olderThan time.Duration) parkSweepReport {
 		if olderThan > 0 && !s.CreatedAt.Before(cutoff) {
 			continue
 		}
-		if cli.parkStillWaiting(s) {
+		switch cli.parkStatusOf(s).verdict {
+		case parkWaiting:
 			rep.live = append(rep.live, s.Token)
-			continue
+		case parkUnknown:
+			rep.unknown = append(rep.unknown, s.Token)
+		default:
+			if err := park.Delete(s.Token); err != nil {
+				rep.errs = append(rep.errs, fmt.Errorf("%s: %w", parkShort(s.Token), err))
+				continue
+			}
+			rep.removed = append(rep.removed, s.Token)
 		}
-		if err := park.Delete(s.Token); err != nil {
-			rep.errs = append(rep.errs, fmt.Errorf("%s: %w", parkShort(s.Token), err))
-			continue
-		}
-		rep.removed = append(rep.removed, s.Token)
 	}
 	return rep
 }
 
-// parkStillWaiting reports whether an agent can still be woken through s.
-// A park with a turn blocked on it or a resume already queued here, or that
-// another live process mirrors, is waiting whatever this scheduler says: a
-// fired job is terminal while its resume still needs the snapshot, and the
-// other process's job is unknown here — reading "missing" as "orphaned"
-// deleted the snapshot under an agent about to resume. Otherwise the
-// scheduler job decides: terminal, missing or absent means nobody wakes it.
-func (cli *ChatCLI) parkStillWaiting(s *park.Snapshot) bool {
-	if cli.parkWaiter(s.Token) != nil || cli.hasPendingResume(s.Token) {
-		return true
+// parkVerdict is what this process can establish about a snapshot.
+type parkVerdict int
+
+const (
+	// parkWaiting: an agent can still be woken through it.
+	parkWaiting parkVerdict = iota
+	// parkFinished: positive evidence that nobody will wake it.
+	parkFinished
+	// parkUnknown: neither. Not knowing is never read as finished — the
+	// sweep is offered to the model as @park prune, and a silent hub or a
+	// scheduler that never heard of the job used to count as "orphaned".
+	parkUnknown
+)
+
+// parkStatus is a verdict with what a caller needs to explain it.
+type parkStatus struct {
+	verdict parkVerdict
+	// heldBy names the other live process that owns the park, "" if none.
+	heldBy string
+	// resumed: the snapshot was already consumed by a resume.
+	resumed bool
+}
+
+// parkStatusOf weighs the evidence about s, strongest first:
+//
+//  1. this process holds it (owns its wake path, or is resuming it), or
+//     another process heartbeats for it in the hub: waiting;
+//  2. it was created moments ago: unknown — its owner may not have
+//     registered or heartbeaten yet;
+//  3. the scheduler of this process knows its job: finished if the job is
+//     terminal, waiting otherwise (the job will fire here);
+//  4. a resume already consumed it: finished;
+//  5. it records its owner process, on this host: waiting while that
+//     process lives, finished once it is gone.
+//
+// Anything else is unknown: a job this scheduler never heard of belongs
+// to another process, and a mirror that is silent, slow or stale says
+// nothing about whether that process is alive.
+func (cli *ChatCLI) parkStatusOf(s *park.Snapshot) parkStatus {
+	if cli.holdsPark(s.Token) {
+		return parkStatus{verdict: parkWaiting}
 	}
-	if _, alive := remoteParkLiveOwner(s.Token); alive {
-		return true
+	if owner, alive := remoteParkLiveOwner(s.Token); alive {
+		return parkStatus{verdict: parkWaiting, heldBy: describeParkOwner(owner)}
 	}
-	if cli.scheduler == nil || s.SchedulerJobID == "" {
-		return false
+	if time.Since(s.CreatedAt) < parkPruneGrace() {
+		return parkStatus{verdict: parkUnknown}
 	}
-	j, err := cli.scheduler.Query(scheduler.JobID(s.SchedulerJobID))
-	if err != nil || j == nil {
-		return false
+	resumed := !s.LastResumeAt.IsZero()
+	if cli.scheduler != nil && s.SchedulerJobID != "" {
+		if j, err := cli.scheduler.Query(scheduler.JobID(s.SchedulerJobID)); err == nil && j != nil {
+			if j.Status.IsTerminal() {
+				return parkStatus{verdict: parkFinished, resumed: resumed}
+			}
+			return parkStatus{verdict: parkWaiting}
+		}
 	}
-	return !j.Status.IsTerminal()
+	if resumed {
+		return parkStatus{verdict: parkFinished, resumed: true}
+	}
+	if s.OwnerPID != 0 && s.OwnerHost != "" && s.OwnerHost == parkHostname() {
+		// Its own pid and not held: this very process parked it and has
+		// since let go of it.
+		if s.OwnerPID != os.Getpid() && parkOwnerAlive(s.OwnerPID) {
+			return parkStatus{verdict: parkWaiting, heldBy: i18n.T("leftovers.park.owner_process", s.OwnerPID)}
+		}
+		return parkStatus{verdict: parkFinished}
+	}
+	return parkStatus{verdict: parkUnknown}
+}
+
+// parkOwnerAlive reports whether pid is a running process on this host.
+// A variable so tests can stand in for a process that is, or is not, there.
+var parkOwnerAlive = gatewayProcessAlive
+
+// parkHostname is this machine's name as snapshots record it ("" when the
+// system will not say, which matches no snapshot).
+func parkHostname() string {
+	host, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return host
+}
+
+// parkPruneGrace is how young a park is left alone whatever the evidence:
+// two hub ticks, and never under half a minute. Owner rows are written on
+// the tick, so a park created since the owner's last one has no row yet.
+func parkPruneGrace() time.Duration {
+	return max(2*squadMailPollInterval(), 30*time.Second)
+}
+
+// parkShorts maps tokens to their short form, sorted.
+func parkShorts(tokens []string) []string {
+	out := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		out = append(out, parkShort(token))
+	}
+	sort.Strings(out)
+	return out
 }
 
 // parkShort is the 8-character token prefix every park listing shows.
@@ -559,7 +683,7 @@ func SweepStaleParks(cutoff time.Time) (int, []error) {
 
 // printParkedUsage prints the /parked subcommands.
 func printParkedUsage() {
-	for _, key := range []string{"park.cmd.usage_list", "park.cmd.usage_prune", "park.cmd.usage_gc", "parkpar.usage_wake", "parkpar.usage_verbs"} {
+	for _, key := range []string{"park.cmd.usage_list", "leftovers.parked.usage_prune", "leftovers.parked.usage_gc", "parkpar.usage_wake", "parkpar.usage_verbs"} {
 		fmt.Println(colorize("  "+i18n.T(key), ColorGray))
 	}
 }

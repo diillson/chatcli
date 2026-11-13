@@ -115,7 +115,9 @@ func (*BuiltinProcPlugin) Usage() string {
 Subcommands (cmd + args):
   start  {command, dir?, pty?}  launch a background process, returns its id;
                                 pty:true attaches a real pseudo-terminal so
-                                REPLs/debuggers/ssh run for real (Unix)
+                                REPLs/debuggers/ssh run for real (Unix). In
+                                argv form pty is the bare flag --pty (or
+                                --pty=true|false), never "--pty true"
   stdin  {id, text, no_enter?}  type into a pty process's terminal (Enter is
                                 pressed unless no_enter:true)
   wait   {id, pattern?, timeout?}  block until the output matches pattern (regexp, case-insensitive; e.g. "listening on|ready"), the process exits, or timeout seconds pass (default 60, max 600) — use it right after start instead of polling logs
@@ -129,9 +131,10 @@ Workflow: start the server, wait {"id":"p1","pattern":"listening on"} until it
 is ready, exercise it (e.g. @coder exec curl), read logs (grep "error" for
 the failures), stop it when done. Interactive flow:
 start {"command":"python3","pty":true} → stdin {"id":"p1","text":"1+1"} →
-logs to read the REPL's answer. The ids are this session's own: processes
-other sessions of the same chatcli started are not listed and cannot be
-reached. Everything still running dies with chatcli.
+logs to read the REPL's answer. The ids are this session's own, numbered
+from p1: processes other sessions of the same chatcli started are not
+listed and cannot be reached (callers that name no session at all share
+one table among themselves). Everything still running dies with chatcli.
 
 Only the arguments listed above are read: an unknown one, or one missing
 its value, is an error and nothing starts or stops. The command to run is
@@ -139,7 +142,7 @@ ONE value — its own flags go inside it ("npm run dev -- --port 3000").`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinProcPlugin) Version() string { return "1.2.0" }
+func (*BuiltinProcPlugin) Version() string { return "1.2.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinProcPlugin) Path() string { return "" }

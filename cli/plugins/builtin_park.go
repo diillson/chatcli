@@ -80,11 +80,13 @@ Subcommands:
             scheduler job are removed and that agent never continues. This is
             what the user's /cancel-park does. token is required. Refused
             when another live process is known to own the park
-  prune    {older_than?:"24h"|"7d"} — delete the snapshots no agent is waiting
-            on any more (their scheduler job is finished or gone), as the
-            user's /parked prune does. older_than limits it to snapshots
-            older than that age. A park still waiting is NEVER removed, at any
-            age: it is listed as kept — use discard to end one on purpose
+  prune    {older_than?:"24h"|"7d"} — delete the snapshots PROVEN finished
+            (their scheduler job ended, they already resumed, or the process
+            that parked them is gone), as the user's /parked prune does.
+            older_than limits it to snapshots older than that age. A park
+            that is still waiting, or whose state cannot be established from
+            here, is NEVER removed, at any age: it is listed as kept — use
+            discard to end one on purpose
 
 cancel and resume both CONTINUE the parked agent (they differ in the outcome
 it is told); discard ENDS it. Durations always carry a unit ("30s", "5m").
@@ -104,7 +106,7 @@ cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.
-func (*BuiltinParkPlugin) Version() string { return "1.4.0" }
+func (*BuiltinParkPlugin) Version() string { return "1.4.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinParkPlugin) Path() string { return "" }
@@ -221,7 +223,7 @@ func (*BuiltinParkPlugin) Schema() string {
 			},
 			{
 				"name":        "prune",
-				"description": "Delete the snapshots no agent is waiting on any more: their scheduler job is finished or gone (what the user's /parked prune does). A park that is still waiting is never removed, whatever its age — it is reported as kept; end one deliberately with discard.",
+				"description": "Delete the snapshots proven finished: their scheduler job ended, they already resumed, or the process that parked them is gone (what the user's /parked prune does). A park that is still waiting, or whose state cannot be established from this process, is never removed, whatever its age — it is reported as kept; end one deliberately with discard.",
 				"flags": []map[string]interface{}{
 					{"name": "older_than", "type": "string", "description": `Only snapshots older than this age: a Go duration or whole days ("24h", "7d")`},
 				},

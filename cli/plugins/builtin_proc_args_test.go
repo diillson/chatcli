@@ -76,7 +76,7 @@ func TestProcFlattenedArgvReachesTheAdapter(t *testing.T) {
 		{[]string{"start", "--command=sleep 5", "--pty=false"}, "start|sleep 5|"},
 		{[]string{"stdin", "--id", "p1", "--no_enter", "--text", "--help"}, "stdin|p1|--help|false"},
 		{[]string{"stdin", "--id", "p1", "--text", "1+1"}, "stdin|p1|1+1|true"},
-		{[]string{"stdin", "p1", "--no-enter", "true", "--text", "y"}, "stdin|p1|y|false"},
+		{[]string{"stdin", "p1", "--no-enter", "--text", "y"}, "stdin|p1|y|false"},
 		{[]string{"status", "--id", "p1"}, "status|p1"},
 		{[]string{"status", "p2"}, "status|p2"},
 		{[]string{"wait", "--id", "p1", "--pattern", "listening on", "--timeout", "90"}, "wait|p1|listening on|90"},

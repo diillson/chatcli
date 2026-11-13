@@ -19,6 +19,7 @@ package plugins
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -107,7 +108,7 @@ func procArgvToInner(sub string, argv []string) (string, error) {
 			if tok == "--" {
 				i++
 			}
-			if rest := strings.Join(argv[i:], " "); strings.TrimSpace(rest) != "" {
+			if rest := procCommandLine(argv[i:]); strings.TrimSpace(rest) != "" {
 				in[primary] = rest
 			}
 			break
@@ -122,12 +123,18 @@ func procArgvToInner(sub string, argv []string) (string, error) {
 			return "", fmt.Errorf("%s: --%s given more than once", sub, name)
 		}
 		if kind == procArgBool {
+			// Bare, or --flag=value. The word AFTER a bare flag is never its
+			// value: "true" and "false" are programs, and `start --pty true`
+			// starts one.
 			on := true
 			if hasInline {
-				on = inline != "false"
-			} else if i+1 < len(argv) && (argv[i+1] == "true" || argv[i+1] == "false") {
-				i++
-				on = argv[i] == "true"
+				switch strings.ToLower(inline) {
+				case "true", "1":
+				case "false", "0":
+					on = false
+				default:
+					return "", fmt.Errorf("%s: --%s is a bare flag; an explicit value must be --%s=true or --%s=false, got %q", sub, name, name, name, inline)
+				}
 			}
 			in[name] = on
 			continue
@@ -152,6 +159,37 @@ func procArgvToInner(sub string, argv []string) (string, error) {
 	}
 	b, err := json.Marshal(in)
 	return string(b), err
+}
+
+// procCommandLine turns the positional words of a start into the line the
+// shell runs. One word is already a whole line ("npm run dev") and stays
+// as it is. Several words are an argv, and one of them that carries
+// whitespace, or is empty, was a single quoted argument where it was
+// typed: joined bare it would split again (`sh -c "echo hi; sleep 5"`
+// became `sh -c echo hi; sleep 5`), so it is quoted for the shell. Words
+// without whitespace are left alone — `&&`, `|` and `>` typed between
+// commands keep meaning what they meant.
+func procCommandLine(words []string) string {
+	if len(words) == 1 {
+		return words[0]
+	}
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = w
+		if w == "" || strings.ContainsAny(w, " \t\n") {
+			out[i] = procShellQuote(w)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// procShellQuote quotes one argument for the platform shell the supervisor
+// runs commands with: single quotes for sh, double quotes for cmd.exe.
+func procShellQuote(arg string) string {
+	if runtime.GOOS == "windows" {
+		return `"` + strings.ReplaceAll(arg, `"`, `""`) + `"`
+	}
+	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
 // procCheckEnvelope applies the same rule to the args object of a JSON

@@ -31,13 +31,21 @@ const (
 // fails if the call is still waiting long before any worker timeout.
 func detachedVerdict(t *testing.T, lines chan string, gone chan struct{}) string {
 	t.Helper()
+	return detachedVerdictOf(t, func(pa *workerPolicyAdapter) {
+		pa.liveStdin = func() (<-chan string, <-chan struct{}) { return lines, gone }
+	})
+}
+
+// detachedVerdictOf is detachedVerdict over an adapter the caller wires.
+func detachedVerdictOf(t *testing.T, wire func(pa *workerPolicyAdapter)) string {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	withStdinInteractive(t, true)
 	pa, err := newWorkerPolicyAdapter(zap.NewNop())
 	if err != nil || pa.pm.Check(detachedAskTool, detachedAskArgs) != coder.ActionAsk {
 		t.Fatalf("the test needs an ask verdict (%v)", err)
 	}
-	pa.liveStdin = func() (<-chan string, <-chan struct{}) { return lines, gone }
+	wire(pa)
 	got := make(chan string, 1)
 	var once sync.Once
 	a := newTestTaskGraphAdapter(t)

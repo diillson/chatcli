@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/diillson/chatcli/cli"
+	"github.com/diillson/chatcli/cli/agent/proc"
 	"github.com/diillson/chatcli/cli/agentevents"
 	"github.com/diillson/chatcli/config"
 	"github.com/diillson/chatcli/i18n"
@@ -517,11 +518,15 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTool(w http.ResponseWriter, r *http.Request, name string) {
 	var req struct {
 		Args string `json:"args"`
+		// Session scopes the call to a web session's state (its process
+		// table). Optional: a call without one gets the backend's table
+		// for sessionless callers, never the terminal's.
+		Session string `json:"session"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	out, err := s.opts.Backend.CallTool(r.Context(), name, req.Args)
+	out, err := s.opts.Backend.CallTool(proc.WithSession(r.Context(), req.Session), name, req.Args)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "tool", err.Error())
 		return

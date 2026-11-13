@@ -37,17 +37,14 @@ type procToolAdapter struct {
 
 // An RPC session id and a gateway principal spelled alike are still
 // different owners: each kind has its namespace.
-func procSessionOwner(session string) string  { return "session:" + session }
+func procSessionOwner(session string) string  { return proc.SessionOwner(session) }
 func procTenantOwner(principal string) string { return "tenant:" + principal }
 
 // WithProcSession marks ctx as serving session, so /proc and @proc run
 // under it use that session's process table. The RPC surfaces (ACP, web,
 // MCP) call it; an empty session leaves ctx on the terminal's table.
 func WithProcSession(ctx context.Context, session string) context.Context {
-	if session == "" {
-		return ctx
-	}
-	return proc.WithOwner(ctx, procSessionOwner(session))
+	return proc.WithSession(ctx, session)
 }
 
 // withTenantProcOwner gives the gateway tenant whose store set is installed

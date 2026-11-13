@@ -200,6 +200,11 @@ type AgentMode struct {
 	// See agent_typeahead.go.
 	salvageMu     sync.Mutex
 	salvagedLines []string
+	// detachedPrompts counts the permission prompts of detached runs that
+	// are reading stdinLines; withdrawnPromptLines is what a teardown took
+	// back from one (guarded by stdinMu). See noteDetachedPrompt.
+	detachedPrompts      atomic.Int32
+	withdrawnPromptLines []string
 	// stdinCarry is the half-typed line (no Enter yet) a teardown
 	// interrupted; the next reader spawn — or the line-editing prompt —
 	// picks it up so a suspend never eats keystrokes. Guarded by stdinMu.
@@ -526,6 +531,8 @@ func (a *AgentMode) stopStdinReader() {
 // fields. Caller holds stdinMu.
 func (a *AgentMode) teardownStdinReaderLocked() {
 	if a.stdinDone != nil {
+		// Read before the close: it is the close that withdraws the prompt.
+		promptOpen := a.detachedPrompts.Load() > 0
 		close(a.stdinDone)
 
 		done := make(chan struct{})
@@ -544,8 +551,13 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		// Lines submitted but not yet drained at a turn boundary survive
 		// the teardown: a suspend (final-answer prompt, @ask overlay) used
 		// to nil the channel with the user's follow-up still inside it.
-		a.salvageTypeahead(drainLinesNonBlocking(a.stdinLines))
+		left := drainLinesNonBlocking(a.stdinLines)
 		a.stdinCarry = a.typeaheadPreviewSnapshot()
+		if promptOpen {
+			a.stdinCarry = a.parkWithdrawnPromptLines(left, a.stdinCarry)
+		} else {
+			a.salvageTypeahead(left)
+		}
 		a.stdinLines = nil
 		a.stdinDone = nil
 		a.stdinCtl = nil
@@ -555,6 +567,7 @@ func (a *AgentMode) teardownStdinReaderLocked() {
 		a.stdinCbreakRestore = nil
 	}
 	a.setTypeaheadPreview("")
+	a.announceWithdrawnPrompt()
 }
 
 // takeStdinCarry hands over (and clears) the half-typed line a teardown
@@ -4791,6 +4804,7 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 		pa.unattended = a.cli.unattended // no human: "ask" is refused unless automode admits it
 		pa.autoApprove = a.askAutoApproved
 		pa.liveStdin = a.liveStdinLines
+		pa.detachedPrompt = a.noteDetachedPrompt
 		a.policyAdapter = pa
 		a.agentDispatcher.SetPolicyChecker(pa)
 		a.logger.Info("Policy enforcement enabled for parallel workers")
