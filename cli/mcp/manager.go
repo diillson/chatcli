@@ -1032,15 +1032,15 @@ func (m *Manager) startStdioServer(ctx context.Context, conn *ServerConnection) 
 	// this, /mcp status would keep showing "connected" against a dead
 	// process and only /mcp restart could recover.
 	srvName := conn.Config.Name
-	transport.onClose = func(reason error) {
+	transport.setOnClose(func(reason error) {
 		m.markDisconnected(srvName, reason)
-	}
+	})
 	// Tee stderr into the per-server log ring so /mcp logs can show
 	// recent output (npm 404s, panics, the server's own info chatter)
 	// without the user having to crank up --debug logging.
-	transport.onLog = func(line string) {
+	transport.setOnLog(func(line string) {
 		m.appendLog(srvName, line)
-	}
+	})
 
 	conn.transport = transport
 	conn.Process = transport.cmd.Process
