@@ -54,6 +54,11 @@ type embeddedSynth struct {
 	paths   provisionedPaths
 	provErr error
 
+	// refreshMu serializes the replacement of a cached model that predates
+	// the requested voice; refreshed holds the paths after one.
+	refreshMu sync.Mutex
+	refreshed provisionedPaths
+
 	warnVoiceOnce  sync.Once
 	warnFFmpegOnce sync.Once
 }
@@ -118,11 +123,94 @@ func (e *embeddedSynth) Synthesize(ctx context.Context, text, voice, format stri
 	if err != nil {
 		return Audio{}, err
 	}
-	wav, err := e.runKokoro(ctx, paths, e.resolveVoice(text, voice), text)
+	name := e.resolveVoice(text, voice)
+	if paths, err = e.modelWithVoice(ctx, paths, name); err != nil {
+		return Audio{}, err
+	}
+	wav, err := e.runKokoro(ctx, paths, name, text)
 	if err != nil {
 		return Audio{}, err
 	}
 	return e.deliver(ctx, wav, format)
+}
+
+// kokoroVoiceRecordBytes is the size of one speaker in voices.bin: a style
+// table of 510 rows of 256 float32 values.
+const kokoroVoiceRecordBytes = 510 * 256 * 4
+
+// cachedVoiceCount reports how many speakers the cached voices.bin holds.
+// ok is false when the file does not look like a voice table, in which case
+// nothing is concluded from it.
+func cachedVoiceCount(voicesPath string) (n int, ok bool) {
+	fi, err := os.Stat(voicesPath)
+	if err != nil || fi.Size() < kokoroVoiceRecordBytes || fi.Size()%kokoroVoiceRecordBytes != 0 {
+		return 0, false
+	}
+	return int(fi.Size() / kokoroVoiceRecordBytes), true
+}
+
+// modelWithVoice makes sure the cached model holds the speaker the voice
+// maps to. Upstream grows the voice table in place, so a cache provisioned
+// before a voice existed has no row for it, and the engine would be handed
+// an id past the end of the table. Only then is the model fetched again:
+// a cache that already serves the requested voice is never touched, so the
+// voices installed keep working offline.
+func (e *embeddedSynth) modelWithVoice(ctx context.Context, paths provisionedPaths, voice string) (provisionedPaths, error) {
+	info, known := voiceInfo(voice)
+	if !known {
+		return paths, nil
+	}
+	e.refreshMu.Lock()
+	defer e.refreshMu.Unlock()
+	if e.refreshed.voices != "" {
+		paths = e.refreshed // an earlier call already replaced the model
+	}
+	have, ok := cachedVoiceCount(paths.voices)
+	if !ok || info.sid < have {
+		return paths, nil
+	}
+	fresh, err := e.refreshModel(ctx)
+	if err != nil {
+		return paths, fmt.Errorf("tts: voice %q needs a newer voice model than the cached one, which holds %d voices, and fetching it failed: %w — the voices already installed keep working", voice, have, err)
+	}
+	e.refreshed = fresh
+	return fresh, nil
+}
+
+// refreshModel replaces the cached voice model with the pinned one. The old
+// model is set aside first and put back if the download or its
+// verification fails, so a failed refresh costs nothing.
+func (e *embeddedSynth) refreshModel(ctx context.Context) (provisionedPaths, error) {
+	root, err := e.root()
+	if err != nil {
+		return provisionedPaths{}, err
+	}
+	modelDir := filepath.Join(root, "kokoro")
+	aside := modelDir + ".previous"
+	_ = os.RemoveAll(aside)
+	if err := os.Rename(modelDir, aside); err != nil {
+		return provisionedPaths{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, provisionTimeout)
+	defer cancel()
+	err = e.provisionPiece(ctx, e.modelURL, kokoroArchive, modelDir, e.minModelBytes, "voice model (~126MB)")
+	fresh, located := provisionedPaths{}, false
+	if err == nil {
+		fresh, located = locateProvisioned(root)
+	}
+	if err != nil || !located {
+		_ = os.RemoveAll(modelDir)
+		if rerr := os.Rename(aside, modelDir); rerr != nil {
+			return provisionedPaths{}, fmt.Errorf("restore the previous model: %w", rerr)
+		}
+		if err == nil {
+			err = fmt.Errorf("the downloaded model is incomplete")
+		}
+		return provisionedPaths{}, err
+	}
+	_ = os.RemoveAll(aside)
+	e.logger.Info("tts: embedded voice model refreshed", zap.String("cache", root))
+	return fresh, nil
 }
 
 // resolveVoice picks the speaker: an explicit, known voice wins; unknown
