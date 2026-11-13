@@ -195,7 +195,7 @@ examples or generated artifacts.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.5.0" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.5.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
@@ -362,12 +362,18 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		}
 		return adapter.UpdateProfile(fields)
 	case "forget":
-		var in struct {
-			Match  string `json:"match"`
-			ID     string `json:"id"`
-			DryRun bool   `json:"dry_run"`
+		// dry_run is read tolerantly: decoded as a strict bool, the
+		// string "true" failed and the preview became a deletion.
+		var raw map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(inner), &raw)
+		in := struct {
+			Match, ID string
+			DryRun    bool
+		}{
+			Match:  jsonString(raw, "match"),
+			ID:     jsonString(raw, "id"),
+			DryRun: jsonBool(raw, "dry_run", "dryRun", "preview"),
 		}
-		_ = json.Unmarshal([]byte(inner), &in)
 		fb, hasBrowser := adapter.(FactBrowser)
 		if id := strings.TrimSpace(in.ID); id != "" {
 			if !hasBrowser {
@@ -390,13 +396,15 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 		if !ok {
 			return "", errors.New("@memory list: not available in this session")
 		}
+		// limit arrives as a string from the flattened form; decoded as
+		// a strict int it failed and the listing ignored it.
 		var in struct {
-			Match    string `json:"match"`
-			Category string `json:"category"`
-			Limit    int    `json:"limit"`
+			Match    string          `json:"match"`
+			Category string          `json:"category"`
+			Limit    json.RawMessage `json:"limit"`
 		}
 		_ = json.Unmarshal([]byte(inner), &in)
-		return fb.ListFacts(in.Match, in.Category, in.Limit)
+		return fb.ListFacts(in.Match, in.Category, lenientInt(in.Limit))
 	case "recall":
 		var in struct {
 			Query string `json:"query"`

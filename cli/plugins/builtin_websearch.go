@@ -56,7 +56,7 @@ func NewBuiltinWebSearchPlugin() *BuiltinWebSearchPlugin {
 func (p *BuiltinWebSearchPlugin) Name() string        { return "@websearch" }
 func (p *BuiltinWebSearchPlugin) Description() string { return "Searches the web and returns results" }
 func (p *BuiltinWebSearchPlugin) Usage() string       { return "@websearch <query>" }
-func (p *BuiltinWebSearchPlugin) Version() string     { return "2.2.0" }
+func (p *BuiltinWebSearchPlugin) Version() string     { return "2.2.1" }
 func (p *BuiltinWebSearchPlugin) Path() string        { return "[builtin]" }
 
 func (p *BuiltinWebSearchPlugin) Schema() string {
@@ -131,26 +131,21 @@ func parseWebSearchArgs(args []string) (string, int) {
 	}
 	subcmd := args[0]
 	if subcmd == "search" && len(args) > 1 {
-		var queryParts []string
-		query := ""
-		for i := 1; i < len(args); i++ {
-			switch args[i] {
-			case "--query":
-				if i+1 < len(args) {
-					query = args[i+1]
-					i++
-				}
-			case "--maxResults":
-				if i+1 < len(args) {
-					_, _ = fmt.Sscanf(args[i+1], "%d", &maxResults)
-					i++
-				}
-			default:
-				queryParts = append(queryParts, args[i])
-			}
+		// The flattened envelope: the same names the JSON form accepts
+		// (q, term, max_results, limit, ...), not just --query/--maxResults.
+		intKeys := map[string]bool{}
+		for _, k := range searchLimitKeys {
+			intKeys[k] = true
 		}
-		if query == "" && len(queryParts) > 0 {
-			query = strings.Join(queryParts, " ")
+		positional, inner := argvToInnerJSON(args[1:], nil, intKeys)
+		var m map[string]interface{}
+		_ = json.Unmarshal([]byte(inner), &m)
+		query, limit := searchFields(m)
+		if query == "" {
+			query = positional
+		}
+		if limit > 0 {
+			maxResults = limit
 		}
 		return query, maxResults
 	}

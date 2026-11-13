@@ -75,7 +75,7 @@ func NewBuiltinMailPlugin() *BuiltinMailPlugin { return &BuiltinMailPlugin{} }
 func (p *BuiltinMailPlugin) Name() string        { return "@mail" }
 func (p *BuiltinMailPlugin) Description() string { return i18n.T("plugins.mail.description") }
 func (p *BuiltinMailPlugin) Usage() string       { return "@mail send|inbox|peek|history" }
-func (p *BuiltinMailPlugin) Version() string     { return "1.1.0" }
+func (p *BuiltinMailPlugin) Version() string     { return "1.1.1" }
 func (p *BuiltinMailPlugin) Path() string        { return "[builtin]" }
 
 // Schema documents the tool for the agent system prompt catalog.
@@ -204,7 +204,7 @@ func parseMailInvocation(args []string) (string, map[string]json.RawMessage, err
 	// "history [--limit n]".
 	sub := first
 	inner := map[string]json.RawMessage{}
-	if sub == "send" || sub == "post" {
+	if (sub == "send" || sub == "post") && !argvHasFlags(args[1:]) {
 		if len(args) >= 3 {
 			rawTo, _ := json.Marshal(args[1])
 			rawText, _ := json.Marshal(strings.Join(args[2:], " "))
@@ -218,6 +218,14 @@ func parseMailInvocation(args []string) (string, map[string]json.RawMessage, err
 		if err := json.Unmarshal([]byte(innerJSON), &inner); err != nil {
 			inner = map[string]json.RawMessage{}
 		}
+	}
+	if positional != "" && (sub == "send" || sub == "post") {
+		// "send coder --text ..." : a leading bare word is the recipient.
+		if _, ok := inner["to"]; !ok {
+			raw, _ := json.Marshal(positional)
+			inner["to"] = raw
+		}
+		return sub, inner, nil
 	}
 	if positional != "" {
 		key := "for"

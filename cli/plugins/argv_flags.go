@@ -90,6 +90,20 @@ func argvToInnerJSON(argv []string, arrayKeys, intKeys map[string]bool) (positio
 	return strings.Join(pos, " "), string(b)
 }
 
+// argvHasFlags reports whether argv carries any --flag. The agent loop
+// flattens a JSON envelope {"cmd":X,"args":{...}} into [X, "--k", "v", ...]
+// before a plugin sees it, so a subcommand that reads its arguments by
+// position must first rule that form out: read positionally,
+// ["send","--text","hi","--to","coder"] makes "--text" the recipient.
+func argvHasFlags(argv []string) bool {
+	for _, a := range argv {
+		if strings.HasPrefix(a, "--") {
+			return true
+		}
+	}
+	return false
+}
+
 // isFlatArgs reports whether a parsed JSON object is a flat native-tool-calling
 // arg object (no "cmd" field but carrying other fields), so the caller can apply
 // a default subcommand instead of rejecting it.

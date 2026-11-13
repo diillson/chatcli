@@ -81,7 +81,7 @@ Subcommands (cmd + args):
 }
 
 // Version is semver.
-func (*BuiltinSkillPlugin) Version() string { return "1.1.0" }
+func (*BuiltinSkillPlugin) Version() string { return "1.1.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinSkillPlugin) Path() string { return "" }
@@ -569,7 +569,7 @@ func parseSkillInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalSkillCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: create|update|list|show|remove)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: create|update|list|show|remove|restore|stats|export|import)", cmdStr)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {

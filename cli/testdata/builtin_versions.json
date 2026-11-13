@@ -24,7 +24,7 @@
     "surface": "a86cb056d41203ce"
   },
   "@channels": {
-    "version": "1.1.0",
+    "version": "1.1.1",
     "surface": "5c0fbc6c349daaf2"
   },
   "@coder": {
@@ -56,8 +56,8 @@
     "surface": "966e614c9f5f1d4e"
   },
   "@diff": {
-    "version": "1.0.0",
-    "surface": "46e081995da09b82"
+    "version": "1.1.0",
+    "surface": "a085ca717c3be688"
   },
   "@docs-flatten": {
     "version": "2.2.0",
@@ -92,19 +92,19 @@
     "surface": "2b86b242f447bf7d"
   },
   "@lsp": {
-    "version": "1.1.0",
-    "surface": "62b9fc2e1941f681"
+    "version": "1.1.1",
+    "surface": "61c6b86867a90f3c"
   },
   "@mail": {
-    "version": "1.1.0",
+    "version": "1.1.1",
     "surface": "8ef1e2248dd0fb26"
   },
   "@mcp-login": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "surface": "6a9a6b03d9d04f25"
   },
   "@memory": {
-    "version": "1.5.0",
+    "version": "1.5.1",
     "surface": "f49a44826a769349"
   },
   "@moa": {
@@ -112,7 +112,7 @@
     "surface": "674eed3978be2ffc"
   },
   "@model": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "surface": "c0798287cca9e140"
   },
   "@osv": {
@@ -160,7 +160,7 @@
     "surface": "82196f70144a199c"
   },
   "@skill": {
-    "version": "1.1.0",
+    "version": "1.1.1",
     "surface": "c2f9b7e9376ff5e6"
   },
   "@speak": {
@@ -196,7 +196,7 @@
     "surface": "4d3606d75a3d7fa5"
   },
   "@websearch": {
-    "version": "2.2.0",
+    "version": "2.2.1",
     "surface": "d541893ef9a57165"
   },
   "@wikipedia": {

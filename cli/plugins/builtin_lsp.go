@@ -100,18 +100,18 @@ Subcommands (cmd + args; line/column are 1-based):
   hover       {file, line, column}                     signature/type/docs at the position
   implementation   {file, line, column}                concrete implementations of the interface/method at the position
   workspace_symbol {query, file?, limit?}              search symbols across the whole workspace (file only picks the language server)
-  rename      {file, line, column, new_name, dry_run?} rename the symbol everywhere. dry_run defaults to TRUE and only
-                                                       lists the files/ranges that would change; pass "dry_run": false
+  rename      {file, line, column, new_name, apply?} rename the symbol everywhere. It previews by default and only
+                                                       lists the files/ranges that would change; pass "apply": true
                                                        to write the edits (inside the workspace, atomic per file)
 
 Workflow: after editing a file, diagnostics tells you if it still compiles;
 before changing a symbol, references shows the blast radius; symbols maps an
-unfamiliar file faster than reading it; rename with dry_run first, then
-dry_run:false, then diagnostics on the touched files.`
+unfamiliar file faster than reading it; rename as a preview first, then
+with "apply": true, then diagnostics on the touched files.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinLSPPlugin) Version() string { return "1.1.0" }
+func (*BuiltinLSPPlugin) Version() string { return "1.1.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinLSPPlugin) Path() string { return "" }
@@ -176,14 +176,15 @@ func (*BuiltinLSPPlugin) Schema() string {
 			},
 			{
 				"name":        "rename",
-				"description": "rename the symbol at file:line:column everywhere it is referenced. dry_run (default true) only lists the files and ranges that would change; dry_run:false writes the edits to disk (workspace-bounded, atomic per file, refused if a target changed meanwhile)",
+				"description": "rename the symbol at file:line:column everywhere it is referenced. by default it only lists the files and ranges that would change; \"apply\": true writes the edits to disk (workspace-bounded, atomic per file, refused if a target changed meanwhile)",
 				"flags": []map[string]interface{}{fileFlag, lineFlag, colFlag,
 					{"name": "new_name", "description": "the new identifier", "type": "string", "required": true},
-					{"name": "dry_run", "description": "true (default) previews; false applies the edits", "type": "bool", "default": "true"},
+					{"name": "apply", "description": "true writes the edits; omitted, the rename is only previewed", "type": "bool", "default": "false"},
+					{"name": "dry_run", "description": "true (default) previews. To write, pass \"apply\": true", "type": "bool", "default": "true"},
 				},
 				"examples": []string{
 					`{"cmd":"rename","args":{"file":"cli/cli.go","line":128,"column":14,"new_name":"handleTurn"}}`,
-					`{"cmd":"rename","args":{"file":"cli/cli.go","line":128,"column":14,"new_name":"handleTurn","dry_run":false}}`,
+					`{"cmd":"rename","args":{"file":"cli/cli.go","line":128,"column":14,"new_name":"handleTurn","apply":true}}`,
 				},
 			},
 		},
