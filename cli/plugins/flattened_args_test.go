@@ -118,14 +118,14 @@ func TestLSPRenameApplySurvivesFlattening(t *testing.T) {
 // An unknown verb used to become "login" (opening a browser) or "use"
 // (switching the model for the rest of the task).
 func TestUnknownVerbIsNotAnAction(t *testing.T) {
-	if _, _, err := parseMCPLoginInvocation([]string{`{"cmd":"restart","args":{"server":"aws"}}`}); err == nil {
-		t.Fatal("@mcp-login restart started a login")
+	if _, _, err := parseMCPLoginInvocation([]string{`{"cmd":"reload","args":{"server":"aws"}}`}); err == nil {
+		t.Fatal("@mcp-login reload started a login")
 	}
-	if _, _, err := parseMCPLoginInvocation([]string{"restart", "--server", "aws"}); err == nil {
-		t.Fatal("@mcp-login restart --server started a login")
+	if _, _, err := parseMCPLoginInvocation([]string{"reload", "--server", "aws"}); err == nil {
+		t.Fatal("@mcp-login reload --server started a login")
 	}
-	if _, _, err := parseMCPLoginInvocation([]string{"restart", "aws"}); err == nil {
-		t.Fatal("@mcp-login restart aws started a login")
+	if _, _, err := parseMCPLoginInvocation([]string{"reload", "aws"}); err == nil {
+		t.Fatal("@mcp-login reload aws started a login")
 	}
 	// What worked keeps working.
 	for _, argv := range [][]string{{"aws"}, {"login", "aws"}, {`{"cmd":"login","args":{"server":"aws"}}`}, {`{"server":"aws"}`}} {

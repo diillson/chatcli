@@ -24,9 +24,12 @@ func contextSubcommand(args []string) (cmd, name string) {
 // detach/delete mutate the context store or the session, so they are NOT
 // read-only and (in coder mode) go through the policy confirmation.
 func (*BuiltinContextPlugin) IsReadOnly(args []string) bool {
-	switch cmd, _ := contextSubcommand(args); cmd {
+	switch cmd, name := contextSubcommand(args); cmd {
 	case "list", "status", "show", "inspect", "metrics":
 		return true
+	case "watch":
+		// Without a name it only lists what is being watched.
+		return name == ""
 	default:
 		return false
 	}

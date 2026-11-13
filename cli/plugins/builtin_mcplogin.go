@@ -36,6 +36,17 @@ type MCPAuthAdapter interface {
 	Status() (string, error)
 }
 
+// MCPServerAdapter is the optional part of the adapter behind restart and
+// tools. Separate from MCPAuthAdapter so an adapter written against the
+// original interface keeps compiling.
+type MCPServerAdapter interface {
+	// Restart stops and starts one server that is already in the user's
+	// configuration. It never starts every server and never adds one.
+	Restart(server string) (string, error)
+	// Tools lists the tools one server exposes (all servers when empty).
+	Tools(server string) (string, error)
+}
+
 type mcpAuthAdapterHolder struct{ a MCPAuthAdapter }
 
 var mcpAuthAdapterAtom atomic.Value // mcpAuthAdapterHolder
@@ -66,7 +77,7 @@ func (*BuiltinMCPLoginPlugin) Name() string { return "@mcp-login" }
 
 // Description surfaces the tool in /plugin list and the agent tool catalog.
 func (*BuiltinMCPLoginPlugin) Description() string {
-	return "Authorize a remote OAuth-protected MCP server so its tools become usable. Call this when an mcp_* tool fails with an 'authorization required' error, or a server shows as needing login. It runs the OAuth flow (opens a browser for the user to approve), stores the token securely, refreshes it automatically thereafter, and reconnects the server. Subcommands: login {server}, status, logout {server}."
+	return "Authorize a remote OAuth-protected MCP server so its tools become usable. Call this when an mcp_* tool fails with an 'authorization required' error, or a server shows as needing login. It runs the OAuth flow (opens a browser for the user to approve), stores the token securely, refreshes it automatically thereafter, and reconnects the server. It can also restart one configured server that crashed or hung, and list a server's tools. Subcommands: login {server}, status, logout {server}, restart {server}, tools {server?}."
 }
 
 // Usage explains the canonical invocation forms.
@@ -77,6 +88,10 @@ Subcommands:
   login  {server}   run the OAuth flow for the server and reconnect it (opens a browser)
   status            show each MCP server's authorization state
   logout {server}   forget a server's stored credential
+  restart {server}  stop and start ONE configured server (crashed, hung, or
+                    its tools went missing). Never all servers, never a server
+                    the user stopped or that is not in their configuration
+  tools  {server?}  list the tools a server exposes (every server when omitted)
 
 When an mcp_* call returns "authorization required for server X", call:
   {"cmd":"login","args":{"server":"X"}}
@@ -84,7 +99,7 @@ then retry the original tool.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMCPLoginPlugin) Version() string { return "1.0.1" }
+func (*BuiltinMCPLoginPlugin) Version() string { return "1.1.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMCPLoginPlugin) Path() string { return "" }
@@ -113,6 +128,18 @@ func (*BuiltinMCPLoginPlugin) Schema() string {
 				"description": "forget a server's stored OAuth credential",
 				"flags":       []map[string]interface{}{serverFlag},
 				"examples":    []string{`{"cmd":"logout","args":{"server":"aws"}}`},
+			},
+			{
+				"name":        "restart",
+				"description": "stop and start one server from the user's MCP configuration — use it when the server crashed, hung, or its mcp_* tools disappeared. Refused for a server the user stopped and for names that are not configured; there is no way to restart every server",
+				"flags":       []map[string]interface{}{serverFlag},
+				"examples":    []string{`{"cmd":"restart","args":{"server":"filesystem"}}`},
+			},
+			{
+				"name":        "tools",
+				"description": "list the tools a server exposes, with their parameters (read-only)",
+				"flags":       []map[string]interface{}{{"name": "server", "description": "name of the configured MCP server; omit for every server", "type": "string"}},
+				"examples":    []string{`{"cmd":"tools","args":{"server":"filesystem"}}`},
 			},
 		},
 	}
@@ -151,9 +178,28 @@ func (p *BuiltinMCPLoginPlugin) ExecuteWithStream(ctx context.Context, args []st
 			return "", errors.New(`@mcp-login: "server" is required for logout`)
 		}
 		return adapter.Logout(server)
+	case "restart", "tools":
+		return mcpServerVerb(adapter, cmd, server)
 	default:
-		return "", fmt.Errorf("@mcp-login: unknown cmd %q (valid: login|status|logout)", cmd)
+		return "", errUnknownMCPLoginCmd(cmd)
 	}
+}
+
+// mcpServerVerb runs restart / tools through the optional adapter surface.
+func mcpServerVerb(adapter MCPAuthAdapter, cmd, server string) (string, error) {
+	srv, ok := adapter.(MCPServerAdapter)
+	if !ok {
+		return "", fmt.Errorf("@mcp-login: %s is not available in this session", cmd)
+	}
+	if cmd == "tools" {
+		return srv.Tools(server)
+	}
+	// "all" is how /mcp restart with no name behaves; here it must be an
+	// explicit refusal, not a server lookup that happens to fail.
+	if server == "" || strings.EqualFold(server, "all") || server == "*" {
+		return "", errors.New(`@mcp-login: restart needs the name of ONE configured server, e.g. {"cmd":"restart","args":{"server":"filesystem"}}. Restarting every server is done by the user with /mcp restart`)
+	}
+	return srv.Restart(server)
 }
 
 // parseMCPLoginInvocation extracts the subcommand and server name from any of
@@ -227,7 +273,9 @@ func parseMCPLoginInvocation(args []string) (cmd string, server string, err erro
 			}
 		default:
 			if strings.HasPrefix(f, "-") {
-				continue // unknown flag — ignore
+				// Reported, not skipped: a dropped flag ran the verb with
+				// less than the model asked for.
+				return "", "", fmt.Errorf("unknown argument %q (valid: --server)", f)
 			}
 			positionals = append(positionals, trimQuotes(f))
 		}
@@ -269,6 +317,10 @@ func canonicalMCPLoginCmd(cmd string) string {
 		return "status"
 	case "logout", "signout", "forget", "revoke":
 		return "logout"
+	case "restart", "reconnect":
+		return "restart"
+	case "tools":
+		return "tools"
 	default:
 		return ""
 	}
@@ -287,5 +339,5 @@ func firstNonEmptyStr(vals ...string) string {
 // fall through to "login", so asking to restart a server opened a browser
 // for an OAuth flow nobody requested.
 func errUnknownMCPLoginCmd(cmd string) error {
-	return fmt.Errorf("@mcp-login: unknown cmd %q (valid: login|logout|status). Restarting or reloading a server is done by the user with /mcp", strings.TrimSpace(cmd))
+	return fmt.Errorf("@mcp-login: unknown cmd %q (valid: login|logout|status|restart|tools). Starting, stopping or reloading servers is done by the user with /mcp", strings.TrimSpace(cmd))
 }

@@ -38,12 +38,18 @@ import (
 //	                   fired but the snapshot was kept for forensics.
 //	/parked gc <dur> — remove snapshots older than <dur> regardless of
 //	                   job state, e.g. "/parked gc 24h".
+//	/parked wake <token> [reason...] — resume the agent now with
+//	                   outcome=cancelled (what @park cancel does), in
+//	                   whichever live process owns the park.
 func (cli *ChatCLI) handleParkedCommand(userInput string) {
 	args := strings.Fields(strings.TrimSpace(userInput))
 	if len(args) >= 2 {
 		switch args[1] {
 		case "prune":
 			cli.parkPrune()
+			return
+		case "wake":
+			cli.parkWake(args[2:])
 			return
 		case "gc":
 			cli.parkGC(args[2:])
@@ -207,25 +213,73 @@ func (cli *ChatCLI) handleCancelParkCommand(userInput string) {
 		return
 	}
 
-	snap, loadErr := park.Load(token)
-	if loadErr == nil && snap.SchedulerJobID != "" && cli.scheduler != nil {
-		owner := scheduler.Owner{Kind: "park", ID: "agent", Tag: snap.Token}
-		if cancelErr := cli.scheduler.Cancel(scheduler.JobID(snap.SchedulerJobID), "user requested /cancel-park", owner); cancelErr != nil {
-			fmt.Println(colorize("  ⚠ "+i18n.T("park.cancel.job_failed", cancelErr), ColorYellow))
-		}
+	jobErr, delErr := cli.discardPark(token, "user requested /cancel-park")
+	if jobErr != nil {
+		fmt.Println(colorize("  ⚠ "+i18n.T("park.cancel.job_failed", jobErr), ColorYellow))
 	}
-	if delErr := park.Delete(token); delErr != nil {
+	if delErr != nil {
 		fmt.Println(colorize("  ⚠ "+i18n.T("park.cancel.delete_failed", delErr), ColorYellow))
 		return
 	}
+	fmt.Println(colorize("  ✓ "+i18n.T("park.cancel.ok", token), ColorGreen))
+}
 
+// discardPark removes a park without resuming it: scheduler job (best
+// effort, reported as jobErr) and snapshot. The one body of /cancel-park
+// and @park discard.
+func (cli *ChatCLI) discardPark(token, reason string) (jobErr, err error) {
+	snap, loadErr := park.Load(token)
+	if loadErr == nil && snap.SchedulerJobID != "" && cli.scheduler != nil {
+		owner := scheduler.Owner{Kind: "park", ID: "agent", Tag: snap.Token}
+		jobErr = cli.scheduler.Cancel(scheduler.JobID(snap.SchedulerJobID), reason, owner)
+	}
+	if err := park.Delete(token); err != nil {
+		return jobErr, err
+	}
 	// Drop any pending resume for this token so the auto-resume hook
 	// doesn't fire it after the snapshot is gone, and stop capturing
 	// directives for it.
 	cli.dropPendingResume(token)
 	cli.unregisterActivePark(token)
+	// On an unattended surface the parked turn is blocked on its in-turn
+	// waiter and nothing else will wake it now: end it here (the turn finds
+	// the snapshot gone and closes) and stop mirroring the park.
+	if ch := cli.parkWaiter(token); ch != nil {
+		select {
+		case ch <- parkOutcome{Outcome: parkDiscardOutcome, Detail: reason}:
+		default:
+		}
+		cli.unregisterParkWaiter(token)
+	}
+	return jobErr, nil
+}
 
-	fmt.Println(colorize("  ✓ "+i18n.T("park.cancel.ok", token), ColorGreen))
+// parkDiscardOutcome is handed to the in-turn waiter of a discarded park.
+const parkDiscardOutcome = "discarded"
+
+// parkWake implements /parked wake <token> [reason...], the human side of
+// @park cancel. Unlike /cancel-park it keeps the agent: it resumes with
+// outcome=cancelled and the reason, here or in the process that owns it.
+func (cli *ChatCLI) parkWake(args []string) {
+	if len(args) == 0 {
+		fmt.Println(colorize("  "+i18n.T("parkpar.wake.usage"), ColorYellow))
+		return
+	}
+	token, err := cli.resolveParkToken(args[0])
+	if err != nil {
+		fmt.Println(colorize("  "+err.Error(), ColorYellow))
+		return
+	}
+	reason := strings.TrimSpace(strings.Join(args[1:], " "))
+	if reason == "" {
+		reason = "cancelled via /parked wake"
+	}
+	detail, err := newLiveParkAdapter(cli).CancelPark(token, reason)
+	if err != nil {
+		fmt.Println(colorize("  ⚠ "+i18n.T("parkpar.wake.failed", err), ColorYellow))
+		return
+	}
+	fmt.Println(colorize("  ✓ "+i18n.T("parkpar.wake.ok", token[:min(8, len(token))], detail), ColorGreen))
 }
 
 // resolveParkToken accepts a prefix and returns the unique full token
@@ -466,7 +520,7 @@ func SweepStaleParks(cutoff time.Time) (int, []error) {
 
 // printParkedUsage prints the /parked subcommands.
 func printParkedUsage() {
-	for _, key := range []string{"park.cmd.usage_list", "park.cmd.usage_prune", "park.cmd.usage_gc"} {
+	for _, key := range []string{"park.cmd.usage_list", "park.cmd.usage_prune", "park.cmd.usage_gc", "parkpar.usage_wake", "parkpar.usage_verbs"} {
 		fmt.Println(colorize("  "+i18n.T(key), ColorGray))
 	}
 }

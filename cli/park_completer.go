@@ -34,7 +34,9 @@ func (cli *ChatCLI) getParkedSuggestions(d prompt.Document) []prompt.Suggest {
 	// "/parked" alone — suggest subcommand verbs (or accept blank to
 	// list all parked agents, which is also a valid invocation).
 	if len(args) == 0 || (len(args) == 1 && !trailingSpace) {
-		return prompt.FilterHasPrefix(parkedSubcommandSuggestions, current, true)
+		// wake is added per call: i18n resolves at runtime, not at package init.
+		subs := append([]prompt.Suggest{{Text: "wake", Description: i18n.T("complete.parkpar.sub_wake")}}, parkedSubcommandSuggestions...)
+		return prompt.FilterHasPrefix(subs, current, true)
 	}
 
 	sub := args[0]
@@ -49,6 +51,8 @@ func (cli *ChatCLI) getParkedSuggestions(d prompt.Document) []prompt.Suggest {
 				{Text: "168h", Description: "older than 1 week"},
 			}, current, true)
 		}
+	case "wake":
+		return cli.getParkTokenSuggestions("/parked wake", d)
 	case "prune", "help":
 		// terminal subcommands — no further suggestions.
 		return nil

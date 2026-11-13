@@ -71,12 +71,23 @@ Subcommands:
             inform, redirect, or ask it to change its park cadence next cycle)
   cancel   {token?:"<prefix>", reason?:"..."} — cancel a parked wait NOW: the
             scheduled wake is dropped and the agent resumes immediately with
-            outcome=cancelled (newest park when token omitted)
+            outcome=cancelled (newest park when token omitted). The user's
+            equivalent is /parked wake <token> [reason] — NOT /cancel-park
+  resume   {token?:"<prefix>"} — wake a parked agent NOW with outcome=manual,
+            as the user's /resume does (newest park when token omitted)
+  discard  {token:"<prefix>"} — delete a park WITHOUT resuming it: snapshot and
+            scheduler job are removed and that agent never continues. This is
+            what the user's /cancel-park does. token is required. Refused
+            when another live process is known to own the park
+
+cancel and resume both CONTINUE the parked agent (they differ in the outcome
+it is told); discard ENDS it. Durations always carry a unit ("30s", "5m").
 
 When the park completes (timer fires, probe matches, or deadline passes)
 the agent resumes from where it stopped and a synthetic tool result with
 the outcome is appended to the loop's context. The user can also force a
-resume via /resume <token> or cancel via /cancel-park <token>.
+resume via /resume <token>, wake it as cancelled via /parked wake <token>,
+or throw it away via /cancel-park <token>.
 
 IMPORTANT — in report/monitoring cycles: deliver the report or analysis
 the user expects as plain text in the SAME response, BEFORE calling
@@ -87,7 +98,7 @@ cycle's report.`
 }
 
 // Version is bumped whenever the surface changes.
-func (*BuiltinParkPlugin) Version() string { return "1.2.1" }
+func (*BuiltinParkPlugin) Version() string { return "1.3.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinParkPlugin) Path() string { return "" }
@@ -186,6 +197,22 @@ func (*BuiltinParkPlugin) Schema() string {
 					`cancel --token b733521e --reason "CI is green"`,
 				},
 			},
+			{
+				"name":        "resume",
+				"description": "Wake a parked agent now with outcome=manual — the same thing the user's /resume does. Like cancel it continues the agent (only the outcome it is told differs) and works across processes. Newest park when token is omitted.",
+				"flags": []map[string]interface{}{
+					{"name": "token", "type": "string", "description": "Token prefix from list; newest park when omitted"},
+				},
+				"examples": []string{`{"cmd":"resume","args":{"token":"b733521e"}}`},
+			},
+			{
+				"name":        "discard",
+				"description": "Delete a park WITHOUT resuming it: the snapshot and its scheduler job are removed and that agent never continues (what the user's /cancel-park does). Use cancel instead when the agent should wrap up. Refused when another live process is known to own the park (it mirrors the park and its heartbeat is fresh); a park whose owner cannot be seen is discarded.",
+				"flags": []map[string]interface{}{
+					{"name": "token", "type": "string", "required": true, "description": "Token prefix from list"},
+				},
+				"examples": []string{`{"cmd":"discard","args":{"token":"b733521e"}}`},
+			},
 		},
 	}
 	data, _ := json.Marshal(schema)
@@ -230,6 +257,12 @@ func (p *BuiltinParkPlugin) ExecuteWithStream(ctx context.Context, args []string
 			return "", fmt.Errorf("@park: %w", cerr)
 		}
 		return out, nil
+	case "resume", "discard":
+		out, merr := executeParkManage(cmd, inner)
+		if merr != nil {
+			return "", fmt.Errorf("@park: %w", merr)
+		}
+		return out, nil
 	}
 
 	req, err := buildParkRequest(cmd, inner)
@@ -269,7 +302,7 @@ func parseParkInvocation(args []string) (string, string, error) {
 		}
 		canon := canonicalParkCmd(cmdStr)
 		if canon == "" {
-			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd|list|note|cancel)", cmdStr)
+			return "", "", fmt.Errorf("missing or unknown cmd %q (valid: delay|until|for_url|for_cmd|list|note|cancel|resume|discard)", cmdStr)
 		}
 		var inner string
 		if rargs, ok := raw["args"]; ok && len(rargs) > 0 {
@@ -314,8 +347,64 @@ func canonicalParkCmd(s string) string {
 		return "note"
 	case "cancel", "abort", "wake", "resume_now", "unpark":
 		return "cancel"
+	case "resume":
+		return "resume"
+	case "discard", "drop", "delete":
+		return "discard"
 	}
 	return ""
+}
+
+// ParkManager is the optional part of the runtime hook behind resume and
+// discard — the tool-side halves of /resume and /cancel-park.
+type ParkManager interface {
+	// ResumePark wakes a parked agent now with outcome=manual.
+	ResumePark(token string) (string, error)
+	// DiscardPark deletes the snapshot and its scheduler job; the agent
+	// never resumes.
+	DiscardPark(token string) (string, error)
+}
+
+// executeParkManage runs resume / discard through the runtime hook.
+func executeParkManage(cmd, inner string) (string, error) {
+	var raw map[string]any
+	if strings.TrimSpace(inner) != "" {
+		if err := json.Unmarshal([]byte(inner), &raw); err != nil {
+			return "", fmt.Errorf(`%s: parse args: %w`, cmd, err)
+		}
+	}
+	for k := range raw {
+		if k != "token" && k != "id" {
+			return "", fmt.Errorf("%s: unknown argument %q", cmd, k)
+		}
+	}
+	mgr, ok := currentParkCanceller().(ParkManager)
+	if !ok {
+		return "", fmt.Errorf("%s: no park runtime wired in this process", cmd)
+	}
+	prefix := strings.TrimSpace(asParkString(raw, "token"))
+	if prefix == "" {
+		prefix = strings.TrimSpace(asParkString(raw, "id"))
+	}
+	if prefix == "" && cmd == "discard" {
+		// Deleting "the newest park" by default would destroy an agent the
+		// model never named.
+		return "", errors.New(`discard: token is required (use cmd=list). Expected {"token":"<prefix>"}`)
+	}
+	target, err := resolveParkTarget(cmd, prefix)
+	if err != nil {
+		return "", err
+	}
+	var detail string
+	if cmd == "resume" {
+		detail, err = mgr.ResumePark(target.Token)
+	} else {
+		detail, err = mgr.DiscardPark(target.Token)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", cmd, err)
+	}
+	return fmt.Sprintf("%s park token=%s mode=%s\n%s", cmd, parkShortToken(target.Token), target.Park.Mode, detail), nil
 }
 
 // ParkCanceller is the runtime hook that ends a parked wait early: it drops
@@ -403,7 +492,7 @@ func executeParkCancel(inner string) (string, error) {
 	}
 	canceller := currentParkCanceller()
 	if canceller == nil {
-		return "", fmt.Errorf("cancel: no park runtime wired in this process; run /cancel-park %s in the session that owns the park", parkShortToken(target.Token))
+		return "", fmt.Errorf("cancel: no park runtime wired in this process; the user can run /parked wake %s in an interactive session", parkShortToken(target.Token))
 	}
 	if reason == "" {
 		reason = "cancelled via @park cancel"
@@ -557,6 +646,12 @@ func buildParkRequest(cmd, innerJSON string) (park.Request, error) {
 		return park.Request{}, fmt.Errorf("parse args: %w", err)
 	}
 
+	for _, k := range []string{"duration", "when", "interval", "deadline", "timeout"} {
+		if err := parkCheckTimeArg(raw, k); err != nil {
+			return park.Request{}, err
+		}
+	}
+
 	r := park.Request{Note: asParkString(raw, "note")}
 
 	switch cmd {
@@ -674,6 +769,22 @@ func parseAbsoluteOrRelative(s string, now time.Time) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unrecognized time format %q (try RFC3339, \"+5m\", or \"in 5m\")", s)
+}
+
+// parkCheckTimeArg rejects a time argument that is not text. The flattener
+// turns {"duration":300} into "--duration 300", which reads back as a JSON
+// number; it was then dropped and the error said "duration is required" for
+// a duration that had been given. A bare number is not guessed as seconds:
+// a wait off by a factor of 60 is worse than one more round trip.
+func parkCheckTimeArg(raw map[string]any, key string) error {
+	switch v := raw[key].(type) {
+	case nil, string:
+		return nil
+	case float64:
+		return fmt.Errorf(`%s: %v has no unit — write a duration such as "%vs", "5m" or "1h"`, key, v, v)
+	default:
+		return fmt.Errorf(`%s: expected a duration string such as "30s" or "5m"`, key)
+	}
 }
 
 // asParkString safely extracts a string field from a map[string]any,
