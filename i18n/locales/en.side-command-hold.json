@@ -1,0 +1,3 @@
+{
+  "scheduler.wait.block_mid_turn": "A turn is running: holding here would stall it. The job runs in the background."
+}

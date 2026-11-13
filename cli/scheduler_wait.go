@@ -85,10 +85,11 @@ func (cli *ChatCLI) handleWaitCommand(ctx context.Context, input string) {
 	fmt.Println(colorize("  ✔ "+i18n.T("scheduler.wait.registered", in.Name, out.JobID), ColorGreen))
 
 	headless := cli.schedulerHeadless()
-	if block && headless {
+	if why := cli.holdUnavailable(); block && why != "" {
 		// A held command would pin this surface's single command slot
-		// for every session until the condition is met.
-		fmt.Println(colorize("  "+i18n.T("scheduler.wait.block_unavailable"), ColorYellow))
+		// for every session, or the running turn, until the condition
+		// is met.
+		fmt.Println(colorize("  "+why, ColorYellow))
 		block = false
 	}
 	if block {
@@ -125,7 +126,22 @@ func (cli *ChatCLI) schedulerEnqueueWait(ctx context.Context, in scheduler.ToolI
 // captured for the web page. Blocking there holds the surface, not a
 // person's prompt.
 func (cli *ChatCLI) schedulerHeadless() bool {
-	return cli.unattended || rpcCaptureActive.Load()
+	return cli.unattended || rpcCaptureActive.Load() || cli.sideCommandDepth.Load() > 0
+}
+
+// holdUnavailable returns why this command cannot hold the prompt, as a
+// message for the user, or "" when it can. Besides the headless surfaces
+// there is the command typed while a turn is running: it executes inside
+// the turn, where the first check used to look at a flag the one-shot
+// loops never set, so a blocking wait typed mid-run held the turn itself.
+func (cli *ChatCLI) holdUnavailable() string {
+	switch {
+	case cli.sideCommandDepth.Load() > 0:
+		return i18n.T("scheduler.wait.block_mid_turn")
+	case cli.schedulerHeadless():
+		return i18n.T("scheduler.wait.block_unavailable")
+	}
+	return ""
 }
 
 // followJob holds the prompt until the job ends, printing a sign of life
@@ -582,9 +598,9 @@ func (cli *ChatCLI) jobsWait(ctx context.Context, args []string) {
 		fmt.Println(colorize("  "+msg, ColorYellow))
 		return
 	}
-	if cli.schedulerHeadless() {
+	if why := cli.holdUnavailable(); why != "" {
 		// Nothing to hold here: report where the job stands instead.
-		fmt.Println(colorize("  "+i18n.T("scheduler.wait.block_unavailable"), ColorYellow))
+		fmt.Println(colorize("  "+why, ColorYellow))
 		if j := cli.schedulerQuery(ctx, id); j != nil {
 			fmt.Println(scheduler.RenderShow(j))
 		}
