@@ -623,7 +623,10 @@ func (a *ACP) commandAdvertised(token string) (ACPCommandBackend, bool) {
 	if !ok {
 		return nil, false
 	}
-	name := strings.TrimPrefix(token, "/")
+	// An alias (/status, /settings, /limits, /v) is the command it stands
+	// for: unresolved, it matched nothing and the line went to the model
+	// as chat text.
+	name := strings.TrimPrefix(palette.Canonical(token), "/")
 	for _, c := range cb.ACPCommands() {
 		if c.Name == name {
 			return cb, true

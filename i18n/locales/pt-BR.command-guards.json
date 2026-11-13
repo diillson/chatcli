@@ -1,0 +1,16 @@
+{
+  "update.repl.unknown_arg": "Argumento desconhecido %q. Use /update para instalar a última versão, ou /update check para só verificar.",
+  "chan.cmd.confirm_bad_answer": "%q não é sim nem não. Uso: /channel confirm <id> [yes|no]",
+  "wt.cmd.did_you_mean": "%q parece %s digitado errado. Para criar um worktree para uma branch com esse nome mesmo, use /worktree create %s.",
+  "park.cmd.unknown_sub": "Subcomando desconhecido %q.",
+  "park.cmd.usage_list": "/parked          — lista os agentes estacionados",
+  "park.cmd.usage_prune": "/parked prune    — remove snapshots cujo job do agendador já terminou",
+  "park.cmd.usage_gc": "/parked gc <idade> — remove snapshots mais antigos que <idade> (ex.: 24h, 7d)",
+  "park.cmd.gc_usage": "Uso: /parked gc <idade>   (ex.: /parked gc 24h, /parked gc 7d)",
+  "park.cmd.gc_bad_duration": "%q não é uma idade positiva. Exemplos: 90m, 24h, 7d.",
+  "context.inspect.bad_chunk": "%q não é um número de chunk. Uso: /context inspect <nome> --chunk <n>",
+  "complete.watch.flag_kind": "Tipo de recurso a observar (padrão: deployment)",
+  "complete.autocompact.default": "Volta ao limite padrão",
+  "complete.autocompact.percent": "Compacta quando a conversa atingir essa fração da janela",
+  "complete.autocompact.tokens": "Compacta quando a conversa atingir essa quantidade de tokens"
+}

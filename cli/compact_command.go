@@ -18,6 +18,12 @@ import (
 // Without instruction: runs automatic compaction.
 // With instruction: runs guided compaction preserving what the user specifies.
 func (cli *ChatCLI) handleCompactCommand(ctx context.Context, userInput string) {
+	// The route matches by prefix: "/compactx" used to run a guided
+	// compaction with the instruction "x".
+	if rest := strings.TrimPrefix(userInput, "/compact"); rest != "" && !strings.HasPrefix(rest, " ") && !strings.HasPrefix(rest, "\t") {
+		fmt.Println(i18n.T("error.unknown_command"))
+		return
+	}
 	instruction := strings.TrimSpace(strings.TrimPrefix(userInput, "/compact"))
 
 	if cli.Client == nil {

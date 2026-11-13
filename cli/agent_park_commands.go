@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,9 +49,13 @@ func (cli *ChatCLI) handleParkedCommand(userInput string) {
 			cli.parkGC(args[2:])
 			return
 		case "help", "-h", "--help":
-			fmt.Println(colorize("  /parked          — list parked agents", ColorGray))
-			fmt.Println(colorize("  /parked prune    — remove snapshots whose scheduler job is terminal", ColorGray))
-			fmt.Println(colorize("  /parked gc <dur> — remove snapshots older than <dur> (e.g. 24h)", ColorGray))
+			printParkedUsage()
+			return
+		case "list", "ls":
+		default:
+			// A mistyped subcommand used to list everything in silence.
+			fmt.Println(colorize("  "+i18n.T("park.cmd.unknown_sub", args[1]), ColorYellow))
+			printParkedUsage()
 			return
 		}
 	}
@@ -423,12 +428,12 @@ func (cli *ChatCLI) parkPrune() {
 // scheduler state. /parked gc 24h is the typical invocation.
 func (cli *ChatCLI) parkGC(args []string) {
 	if len(args) == 0 {
-		fmt.Println(colorize("  Usage: /parked gc <duration>   (e.g. /parked gc 24h)", ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("park.cmd.gc_usage"), ColorYellow))
 		return
 	}
-	d, err := time.ParseDuration(args[0])
+	d, err := parseParkAge(args[0])
 	if err != nil {
-		fmt.Println(colorize("  invalid duration: "+err.Error(), ColorYellow))
+		fmt.Println(colorize("  "+i18n.T("park.cmd.gc_bad_duration", args[0]), ColorYellow))
 		return
 	}
 	cutoff := time.Now().Add(-d)
@@ -457,4 +462,97 @@ func SweepStaleParks(cutoff time.Time) (int, []error) {
 		}
 	}
 	return removed, errs
+}
+
+// printParkedUsage prints the /parked subcommands.
+func printParkedUsage() {
+	for _, key := range []string{"park.cmd.usage_list", "park.cmd.usage_prune", "park.cmd.usage_gc"} {
+		fmt.Println(colorize("  "+i18n.T(key), ColorGray))
+	}
+}
+
+// parseParkAge reads the age for /parked gc: a Go duration, or whole days
+// ("7d", which the completer has always advertised and time.ParseDuration
+// rejects). It must be positive: a zero or negative age put the cutoff at
+// or after now, and the sweep then deleted every snapshot.
+func parseParkAge(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	var d time.Duration
+	if days, ok := strings.CutSuffix(raw, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil {
+			return 0, err
+		}
+		d = time.Duration(n) * 24 * time.Hour
+	} else {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			return 0, err
+		}
+		d = parsed
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("age must be positive")
+	}
+	return d, nil
+}
+
+// nearSubcommand returns the subcommand word is a near-miss of (one edit,
+// or two adjacent letters swapped), or "" when it is none or is one of
+// them exactly.
+func nearSubcommand(word string, subs ...string) string {
+	word = strings.ToLower(word)
+	for _, s := range subs {
+		if word == s {
+			return ""
+		}
+	}
+	for _, s := range subs {
+		if len(s) >= 4 && withinOneEdit(word, s) {
+			return s
+		}
+	}
+	return ""
+}
+
+// withinOneEdit reports whether a becomes b by one insertion, deletion or
+// substitution, or by swapping two adjacent letters.
+func withinOneEdit(a, b string) bool {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) == len(rb) {
+		var diff []int
+		for i := range ra {
+			if ra[i] != rb[i] {
+				diff = append(diff, i)
+			}
+		}
+		switch len(diff) {
+		case 1:
+			return true
+		case 2:
+			i, j := diff[0], diff[1]
+			return j == i+1 && ra[i] == rb[j] && ra[j] == rb[i]
+		}
+		return false
+	}
+	if len(ra) > len(rb) {
+		ra, rb = rb, ra
+	}
+	if len(rb)-len(ra) != 1 {
+		return false
+	}
+	i, j, skipped := 0, 0, false
+	for i < len(ra) && j < len(rb) {
+		if ra[i] == rb[j] {
+			i++
+			j++
+			continue
+		}
+		if skipped {
+			return false
+		}
+		skipped = true
+		j++
+	}
+	return true
 }
