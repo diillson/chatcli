@@ -116,7 +116,8 @@ func requestRemoteParkWake(token, outcome, detail string) bool {
 // in-turn waiter, and those whose resume is queued or running here. It
 // used to drop a park the moment its job fired — with the resume still
 // queued behind a running turn — and the owner then stopped announcing a
-// park it very much still owned.
+// park it very much still owned. A queued resume counts only where the
+// queue is drained: see resumeQueued.
 func (cli *ChatCLI) ownedParkTokens() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -138,7 +139,7 @@ func (cli *ChatCLI) ownedParkTokens() []string {
 	cli.parkWaiterMu.Unlock()
 	cli.pendingResumeMu.Lock()
 	for _, token := range cli.pendingResumeQueue {
-		if !seen[token] {
+		if !cli.unattended && !seen[token] {
 			seen[token] = true
 			out = append(out, token)
 		}
@@ -157,7 +158,7 @@ func (cli *ChatCLI) ownedParkTokens() []string {
 // registered the park, holds its in-turn waiter, or already queued its
 // resume.
 func (cli *ChatCLI) ownsPark(token string) bool {
-	if cli.parkWaiter(token) != nil || cli.hasPendingResume(token) {
+	if cli.parkWaiter(token) != nil || cli.resumeQueued(token) {
 		return true
 	}
 	cli.activeParkMu.Lock()

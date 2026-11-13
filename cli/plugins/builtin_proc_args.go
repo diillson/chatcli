@@ -111,7 +111,8 @@ func procArgvToInner(sub string, argv []string) (string, error) {
 			if tok == "--" {
 				i++
 			}
-			if rest := procCommandLine(argv[i:]); strings.TrimSpace(rest) != "" {
+			startDir, _ := in["dir"].(string)
+			if rest := procCommandLine(argv[i:], startDir); strings.TrimSpace(rest) != "" {
 				in[primary] = rest
 			}
 			break
@@ -170,13 +171,13 @@ func procArgvToInner(sub string, argv []string) (string, error) {
 // `sh -c echo hi; sleep 5`), so a later word that the shell would re-read
 // is quoted. This is a best effort over argv; a line with real shell
 // syntax belongs in the command value, which is passed as it is.
-func procCommandLine(words []string) string {
+func procCommandLine(words []string, startDir string) string {
 	out := make([]string, len(words))
 	for i, w := range words {
 		out[i] = w
 		switch {
 		case i == 0:
-			out[i] = procFirstWord(w, len(words) > 1)
+			out[i] = procFirstWord(w, startDir)
 		case procNeedsQuoting(w):
 			out[i] = procShellQuote(w)
 		}
@@ -185,17 +186,14 @@ func procCommandLine(words []string) string {
 }
 
 // procFirstWord renders the first positional word. It is the command, and
-// often a whole fragment of a command line ("npm run dev", "FOO=1 ./run"),
-// which quoting would turn into the name of a program that does not exist.
-// But a path with a space in it ("/opt/my tools/run") is ONE word that
-// must be quoted to run at all. The two are told apart by evidence: the
-// word names something that exists, or more words follow — so it is not
-// the whole line — and it is spelled like a path.
-func procFirstWord(w string, more bool) string {
-	if !strings.ContainsAny(w, " \t") {
-		return w
-	}
-	if !procPathExists(w) && (!more || !procLooksLikePath(w)) {
+// often a whole fragment of a command line ("npm run dev", "FOO=1 ./run",
+// "/usr/bin/env FOO=1 node"), which quoting would turn into the name of a
+// program that does not exist. Only evidence makes it one word: it holds
+// whitespace and names a file or directory that exists where the process
+// starts. Being spelled like a path is not evidence — "./manage.py
+// runserver" is spelled like one.
+func procFirstWord(w, startDir string) string {
+	if !strings.ContainsAny(w, " \t") || !procPathExists(w, startDir) {
 		return w
 	}
 	// A leading ~ must stay outside the quotes to be expanded.
@@ -205,31 +203,29 @@ func procFirstWord(w string, more bool) string {
 	return procShellQuote(w)
 }
 
-// procPathExists reports whether w names an existing file or directory,
-// with a leading ~ read as the home directory.
-func procPathExists(w string) bool {
-	path := w
-	if rest, ok := strings.CutPrefix(w, "~/"); ok {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return false
-		}
-		path = filepath.Join(home, rest)
+// procPathExists reports whether w names an existing file or directory:
+// a leading ~ is the home directory, and a relative path is looked up in
+// the directory the process starts in, not in chatcli's own.
+func procPathExists(w, startDir string) bool {
+	path := procExpandHome(w)
+	if !filepath.IsAbs(path) && startDir != "" {
+		path = filepath.Join(procExpandHome(startDir), path)
 	}
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-// procLooksLikePath reports whether w is spelled like a path: rooted,
-// relative to here or to home, or on a drive.
-func procLooksLikePath(w string) bool {
-	for _, prefix := range []string{"/", "./", "../", "~/", `.\`, `..\`} {
-		if strings.HasPrefix(w, prefix) {
-			return true
-		}
+// procExpandHome replaces a leading "~/" with the home directory.
+func procExpandHome(path string) string {
+	rest, ok := strings.CutPrefix(path, "~/")
+	if !ok {
+		return path
 	}
-	return len(w) > 2 && w[1] == ':' && (w[2] == '\\' || w[2] == '/') &&
-		((w[0] >= 'a' && w[0] <= 'z') || (w[0] >= 'A' && w[0] <= 'Z'))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, rest)
 }
 
 // procShellOperators are the words that are shell syntax when they stand
@@ -246,9 +242,9 @@ var procRedirection = regexp.MustCompile(`^(&>>?|[0-9]*(>>?|<<?<?))(&[0-9-]+|[^&
 // procNeedsQuoting reports whether a later positional word must be quoted
 // to reach the child as the one argument it was typed as: it is empty, or
 // carries whitespace, a quote, a backtick, a command substitution, or a
-// character the shell cuts a command at (; & | < > #). A word that is
-// itself an operator or a redirection, a plain $VAR or a glob is what the
-// user meant the shell to read, and stays.
+// character the shell cuts or groups a command at (; & | < > # and
+// parentheses). A word that is itself an operator or a redirection, a
+// plain $VAR or a glob is what the user meant the shell to read, and stays.
 func procNeedsQuoting(w string) bool {
 	if w == "" || strings.ContainsAny(w, " \t\n\r'\"`") || strings.Contains(w, "$(") {
 		return true
@@ -256,7 +252,7 @@ func procNeedsQuoting(w string) bool {
 	if procShellOperators[w] || procRedirection.MatchString(w) {
 		return false
 	}
-	return strings.ContainsAny(w, ";&|<>#")
+	return strings.ContainsAny(w, ";&|<>#()")
 }
 
 // procShellQuote quotes one argument for the platform shell the supervisor

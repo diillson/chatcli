@@ -1097,7 +1097,7 @@ func detectProjectDir() string {
 }
 
 func (cli *ChatCLI) executor(in string) {
-	in = strings.TrimSpace(in)
+	in = cli.undraftInjectedResume(strings.TrimSpace(in))
 
 	// Drain any pending park resumes BEFORE processing the user's
 	// command. Slash commands like /parked, /jobs and chat input all

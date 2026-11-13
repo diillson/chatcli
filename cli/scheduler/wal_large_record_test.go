@@ -69,59 +69,94 @@ func bigJobScheduler(t *testing.T, dir string) *Scheduler {
 	return s
 }
 
-// A job with a long prompt survives a restart, and one an earlier chatcli
-// already quarantined for being "corrupt" — it was only long — comes back.
+// A job with a long prompt survives a restart from the WAL alone.
 func TestSchedulerRestartKeepsAJobWithALongPrompt(t *testing.T) {
 	dir := t.TempDir()
 	prompt := strings.Repeat("please check the deploy and report. ", 240) // ~8 KB
 	s := bigJobScheduler(t, dir)
-	mk := func(name string) *Job {
-		j := NewJob(name, Owner{Kind: OwnerUser, ID: "u"}, Schedule{Kind: ScheduleRelative, Relative: 10 * time.Hour},
-			Action{Type: ActionLLMPrompt, Payload: map[string]any{"prompt": prompt}})
-		created, err := s.Enqueue(context.Background(), j)
-		if err != nil {
-			t.Fatalf("enqueue %s: %v", name, err)
-		}
-		return created
+	j := NewJob("long-prompt", Owner{Kind: OwnerUser, ID: "u"}, Schedule{Kind: ScheduleRelative, Relative: 10 * time.Hour},
+		Action{Type: ActionLLMPrompt, Payload: map[string]any{"prompt": prompt}})
+	kept, err := s.Enqueue(context.Background(), j)
+	if err != nil {
+		t.Fatal(err)
 	}
-	kept, lost := mk("long-prompt"), mk("quarantined-by-the-old-reader")
 	s.DrainAndShutdown(2 * time.Second)
-
 	// The process crashed rather than shut down: no snapshot was written,
 	// and the WAL alone is what the restart has.
 	if err := os.Remove(filepath.Join(dir, "snapshot.json")); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	// What the old reader did to the second one on some earlier start.
-	walDir := filepath.Join(dir, "wal")
-	lostPath := filepath.Join(walDir, recordName(lost.ID))
-	if err := os.Rename(lostPath, lostPath+".corrupt"); err != nil {
+	s2 := bigJobScheduler(t, dir)
+	defer s2.DrainAndShutdown(2 * time.Second)
+	got, err := s2.Query(kept.ID)
+	if err != nil {
+		t.Fatalf("the long job is gone after the restart: %v", err)
+	}
+	if p, _ := got.Action.Payload["prompt"].(string); p != prompt || got.Status.IsTerminal() {
+		t.Fatalf("the long job came back changed (status %s, %d bytes of prompt)", got.Status, len(p))
+	}
+}
+
+// A quarantined record has no effect at all, as before. Released versions
+// quarantined every record over ~4 KB while the job itself lived on in the
+// snapshot: the ".wal.corrupt" copy is a STALE picture of a job that was
+// later cancelled, or ran. Once that job is finished and its record acked,
+// the stale copy is all that is left on disk — reading it back would fire
+// a cancelled job again. So it is never read: not on replay, not by the
+// read-only view of the store.
+func TestQuarantinedRecordsAreNeverBroughtBack(t *testing.T) {
+	dir := t.TempDir()
+	prompt := strings.Repeat("please check the deploy and report. ", 240) // ~8 KB
+	s := bigJobScheduler(t, dir)
+	owner := Owner{Kind: OwnerUser, ID: "u"}
+	j := NewJob("cancelled-long-ago", owner, Schedule{Kind: ScheduleRelative, Relative: 10 * time.Hour},
+		Action{Type: ActionLLMPrompt, Payload: map[string]any{"prompt": prompt}})
+	job, err := s.Enqueue(context.Background(), j)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// And a record that really is corrupt stays quarantined.
-	junk := filepath.Join(walDir, "junk.wal.corrupt")
-	if err := writeBytesToFile(junk, []byte("not a frame")); err != nil {
+	walDir := filepath.Join(dir, "wal")
+	record := filepath.Join(walDir, recordName(job.ID))
+	pending, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The old reader quarantined the record while the job was pending...
+	stale := record + ".corrupt"
+	if err := os.WriteFile(stale, pending, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// ...the user cancelled the job, and after its TTL the record was acked.
+	if err := s.Cancel(job.ID, "not needed", owner); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.wal.Ack(job.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.DrainAndShutdown(2 * time.Second)
+	if err := os.Remove(filepath.Join(dir, "snapshot.json")); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 
 	s2 := bigJobScheduler(t, dir)
 	defer s2.DrainAndShutdown(2 * time.Second)
-	for name, id := range map[string]JobID{"the long job": kept.ID, "the quarantined job": lost.ID} {
-		j, err := s2.Query(id)
-		if err != nil {
-			t.Fatalf("%s is gone after the restart: %v", name, err)
-		}
-		if got, _ := j.Action.Payload["prompt"].(string); got != prompt || j.Status.IsTerminal() {
-			t.Fatalf("%s came back changed (status %s, %d bytes of prompt)", name, j.Status, len(got))
-		}
+	if got, err := s2.Query(job.ID); err == nil {
+		t.Fatalf("a job the user cancelled came back as %s from its quarantined copy", got.Status)
 	}
-	if _, err := os.Stat(lostPath); err != nil {
-		t.Errorf("the recovered record must be back under its own name: %v", err)
+	if _, ok := s2.FindByName("cancelled-long-ago"); ok {
+		t.Fatal("the cancelled job is live again")
 	}
-	if _, err := os.Stat(lostPath + ".corrupt"); !os.IsNotExist(err) {
-		t.Errorf("the recovered record must not stay quarantined too: %v", err)
+	if jobs, err := s2.StoredJobs(nil); err != nil || len(jobs) != 0 {
+		t.Fatalf("the read-only view of the store must not count a quarantined file: %d job(s) %v", len(jobs), err)
 	}
-	if _, err := os.Stat(junk); err != nil {
-		t.Errorf("a record that does not read back stays quarantined, untouched: %v", err)
+	if _, err := s2.StoredJob(job.ID); err == nil {
+		t.Fatal("a quarantined file must not answer for its job id")
+	}
+	after, err := os.ReadFile(stale)
+	if err != nil || string(after) != string(pending) {
+		t.Fatalf("the quarantined file must be left exactly as it was: %v", err)
+	}
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("nothing may be restored under the record's name: %v", err)
 	}
 }

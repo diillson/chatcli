@@ -16,7 +16,9 @@
  * Nothing is assumed here: terminal A is a real child process that really
  * parks, its scheduler really fires the job, its token really sits in its
  * resume queue; terminal B is this process, started before A parked, and
- * its sweep sees exactly what a second terminal would see.
+ * its sweep sees exactly what a second terminal would see. The child is
+ * never stopped or signaled except to be killed, and exits by itself if
+ * this process disappears.
  */
 package cli
 
@@ -24,11 +26,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -104,6 +106,13 @@ func TestParkOwnerProcess(t *testing.T) {
 	if dir == "" {
 		t.Skip("run as the child of the two-process park tests")
 	}
+	// The parent holds the other end of stdin for as long as it lives. If
+	// it goes away without cleaning up — killed, crashed — the read ends
+	// and so does this process: no child is ever left behind.
+	go func() {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(3)
+	}()
 	cli := parkTerminal(t, filepath.Join(dir, "store"), func(context.Context) error {
 		touch(t, dir, "resumed", "")
 		return nil
@@ -163,11 +172,15 @@ func twoTerminals(t *testing.T, mode string, loop func(context.Context) error) (
 	a.Env = append(os.Environ(), parkOwnerDirEnv+"="+dir, parkOwnerModeEnv+"="+mode)
 	var out bytes.Buffer
 	a.Stdout, a.Stderr = &out, &out
+	lifeline, err := a.StdinPipe() // see the watchdog in TestParkOwnerProcess
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Start(); err != nil {
 		t.Fatalf("start terminal A: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = a.Process.Signal(syscall.SIGCONT)
+		_ = lifeline.Close()
 		_ = a.Process.Kill()
 		_, _ = a.Process.Wait()
 		if t.Failed() {
@@ -276,53 +289,20 @@ func TestOwnerDeadAfterTheJobFiredIsKeptForRetry(t *testing.T) {
 	}
 }
 
-// A polling park: its snapshot names the POLL job, which ends when the
-// probe matches, while the resume is a separate job that fires a moment
-// later. In that window the park's own job is terminal and the agent has
-// not been woken. A is frozen there (a stopped process is alive), B
-// prunes, A continues: the agent resumes.
-func TestPruneInThePollToResumeWindowKeepsThePark(t *testing.T) {
-	b, a, dir := twoTerminals(t, "for_cmd", nil)
+// A polling park: its snapshot names the POLL job, while the wake is a
+// separate resume job. Right after the wake is delivered both records
+// still say running; a moment later both are finished — and through all
+// of it the agent is waiting for its owner's drain. B prunes at both
+// points and leaves the park; A drains and the agent resumes.
+//
+// (The instant in between — poll job finished, resume job still pending —
+// is not held open here: in a real run the resume fires before either
+// record is rewritten. The rule does not depend on it: with a live owner
+// no job state is consulted.)
+func TestPruneFromAnotherTerminalKeepsAPollingParkAroundItsWake(t *testing.T) {
+	b, _, dir := twoTerminals(t, "for_cmd", nil)
 	token := waitForFile(t, dir, "token", 60*time.Second)
-	pollID := scheduler.JobID(mustLoadPark(t, token).SchedulerJobID)
-
-	// Freeze A the moment the store shows the poll job ended with the
-	// resume job still pending.
-	frozenInWindow := false
-	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline) && !fileExists(dir, "queued"); {
-		jobs, err := b.scheduler.StoredJobs(func(j *scheduler.Job) bool { return j.Owner.Kind == "park" && j.Owner.Tag == token })
-		if err != nil {
-			t.Fatal(err)
-		}
-		resumePending := false
-		for _, j := range jobs {
-			if j.ID != pollID && !j.Status.IsTerminal() {
-				resumePending = true
-			}
-		}
-		if !resumePending {
-			time.Sleep(time.Millisecond)
-			continue
-		}
-		_ = a.Process.Signal(syscall.SIGSTOP)
-		poll, perr := b.scheduler.StoredJob(pollID)
-		if perr == nil && poll.Status.IsTerminal() && !fileExists(dir, "queued") {
-			frozenInWindow = true
-			break
-		}
-		_ = a.Process.Signal(syscall.SIGCONT) // not there yet: let it run a little more
-		time.Sleep(200 * time.Microsecond)
-	}
-	if frozenInWindow {
-		sweepBothWays(t, b, token, "between the poll job ending and the resume job firing")
-	} else {
-		t.Log("the window closed before A could be frozen in it; checking the queued state instead")
-	}
-	_ = a.Process.Signal(syscall.SIGCONT)
 	waitForFile(t, dir, "queued", 90*time.Second)
-	// Whether or not the window was caught, the state after it is the one
-	// that bit: the poll job the snapshot names and the resume job are
-	// both finished, and the agent is still waiting for the owner's drain.
 	sweepBothWays(t, b, token, "with the wake just delivered")
 	waitParkJobsDone(t, b, token)
 	sweepBothWays(t, b, token, "with both of the park's jobs finished and the resume queued in the owner")

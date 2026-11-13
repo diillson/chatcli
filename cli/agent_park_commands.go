@@ -444,11 +444,21 @@ func (cli *ChatCLI) doneResuming(tokens ...string) {
 	}
 }
 
+// resumeQueued reports whether a resume of token is queued in a process
+// that will run it. Only the terminal drains the queue, between prompts.
+// On an unattended surface a wake that found no in-turn waiter is queued
+// and stays queued for the life of the process: that token is not this
+// process's to hold, announce or call "resuming" — another process may
+// resume it, and the sweep reads it for what it is.
+func (cli *ChatCLI) resumeQueued(token string) bool {
+	return !cli.unattended && cli.hasPendingResume(token)
+}
+
 // isResuming reports whether a resume of token is queued, under way or
 // just done in this process — the one notion the sweep, the wake verbs and
 // the notes share of "this park is no longer waiting to be woken".
 func (cli *ChatCLI) isResuming(token string) bool {
-	if cli.hasPendingResume(token) || cli.wasRecentlyResumed(token) {
+	if cli.resumeQueued(token) || cli.wasRecentlyResumed(token) {
 		return true
 	}
 	cli.pendingResumeMu.Lock()

@@ -35,6 +35,10 @@ type promptDraftState struct {
 	text    string
 	shown   bool
 	rebuild bool
+	// onLine is the draft the running prompt was built with, until the
+	// executor has taken a line from that prompt. It outlives "spent": the
+	// keystrokes that spend a draft may be ones nobody typed.
+	onLine string
 }
 
 // offerPromptDraft hands text to the next REPL prompt. A surface with no
@@ -47,7 +51,9 @@ func (cli *ChatCLI) offerPromptDraft(text string) {
 	d := &cli.promptDraft
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.text = strings.TrimSpace(d.text + " " + text)
+	if d.text != text { // offering back what is still pending adds nothing
+		d.text = strings.TrimSpace(d.text + " " + text)
+	}
 	d.shown = false
 	if cli.promptRunning {
 		d.rebuild = true
@@ -62,7 +68,34 @@ func (cli *ChatCLI) promptInitialText() string {
 	defer d.mu.Unlock()
 	d.rebuild = false
 	d.shown = d.text != ""
+	d.onLine = d.text
 	return d.text
+}
+
+// undraftInjectedResume is called with every line the prompt submits. When
+// a park fires while the terminal idles, the bridge types "/resume <token>"
+// and Enter into the terminal; with a draft on the input line the result
+// is the draft glued to that command, which is no command at all and went
+// to the model as the user's message — with nobody at the keyboard. A line
+// that is exactly the draft this prompt was showing, followed by the
+// resume of a token that IS queued, is that resume: the draft is offered
+// again, unchanged. Any other line is the user's and is returned as it is.
+func (cli *ChatCLI) undraftInjectedResume(line string) string {
+	d := &cli.promptDraft
+	d.mu.Lock()
+	shown := d.onLine
+	d.onLine = ""
+	d.mu.Unlock()
+	rest, ok := strings.CutPrefix(line, shown)
+	if shown == "" || !ok {
+		return line
+	}
+	token, isResume := parsePendingResumeLine(strings.TrimSpace(rest))
+	if !isResume || !cli.hasPendingResume(token) {
+		return line
+	}
+	cli.offerPromptDraft(shown)
+	return "/resume " + token
 }
 
 // promptShouldRebuild is the prompt's exit check, called by go-prompt on

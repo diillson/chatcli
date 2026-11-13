@@ -104,8 +104,10 @@ func TestLiveParkAdapter_CancelParkWakesTheAgent(t *testing.T) {
 	_, err = park.Load(snap.Token)
 	require.NoError(t, err)
 
-	// A park already queued for resume is not woken twice.
+	// A park already queued for resume is not woken twice — in a terminal,
+	// which is the process that drains that queue.
 	cli.unregisterParkWaiter(snap.Token)
+	cli.unattended = false
 	cli.pendingResumeQueue = []string{snap.Token}
 	_, err = adapter.CancelPark(snap.Token, "")
 	require.Error(t, err)

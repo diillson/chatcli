@@ -21,7 +21,9 @@ import (
 
 func newParkBridgeCLI(t *testing.T) *ChatCLI {
 	t.Helper()
-	cli := &ChatCLI{logger: zap.NewNop(), unattended: true}
+	// A terminal: only a process that drains its resume queue owns what is
+	// queued in it, which the last part of this test relies on.
+	cli := &ChatCLI{logger: zap.NewNop()}
 	cli.schedulerBridge = newSchedulerBridge(cli)
 	return cli
 }

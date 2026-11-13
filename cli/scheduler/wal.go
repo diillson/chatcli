@@ -182,10 +182,6 @@ func (w *schedulerWAL) List() ([]*Job, error) {
 			continue
 		}
 		name := e.Name()
-		if job := w.recoverQuarantined(name); job != nil {
-			out = append(out, job)
-			continue
-		}
 		if strings.Contains(name, ".tmp.") {
 			// Stale in-flight Append; clean up.
 			if rmErr := os.Remove(filepath.Join(w.dir, name)); rmErr != nil {
@@ -217,43 +213,12 @@ func (w *schedulerWAL) List() ([]*Job, error) {
 	return out, nil
 }
 
-// quarantineSuffix marks a record List could not read.
-const quarantineSuffix = ".wal.corrupt"
-
-// recoverQuarantined restores a record an earlier chatcli quarantined
-// although it was sound: its reader could not get past about 4 KB, and
-// every long job ended up as "<id>.wal.corrupt". A quarantined file that
-// reads back whole with the fixed reader, and whose place no newer record
-// took, is renamed back and returned. Anything else is left exactly as it
-// is — nil — for the operator to inspect.
-func (w *schedulerWAL) recoverQuarantined(name string) *Job {
-	if !strings.HasSuffix(name, quarantineSuffix) {
-		return nil
-	}
-	path := filepath.Join(w.dir, name)
-	job, err := readWALRecord(path)
-	if err != nil || job == nil || job.ID.IsZero() || recordName(job.ID)+".corrupt" != name {
-		return nil
-	}
-	restored := filepath.Join(w.dir, recordName(job.ID))
-	if _, err := os.Stat(restored); err == nil {
-		return nil // a current record exists; List reads that one
-	}
-	if err := os.Rename(path, restored); err != nil {
-		w.logger.Warn("scheduler wal: a quarantined record reads back whole but could not be restored",
-			zap.String("file", name), zap.Error(err))
-		return nil
-	}
-	w.logger.Info("scheduler wal: restored a job record an earlier version quarantined by mistake",
-		zap.String("job", string(job.ID)), zap.String("name", job.Name), zap.String("status", string(job.Status)))
-	return job
-}
-
 // scan returns every record that reads back, WITHOUT touching the
-// directory: no quarantine, no cleanup, no restore. For a process looking
-// at a store it shares with others — what it cannot read is somebody
-// else's to deal with. Records quarantined by mistake count: the next
-// replay restores them.
+// directory: no quarantine, no cleanup. For a process looking at a store
+// it shares with others — what it cannot read is somebody else's to deal
+// with. Only live ".wal" records are read: a quarantined file is a stale
+// picture of a job that may since have been cancelled or have run, and
+// has no effect anywhere.
 func (w *schedulerWAL) scan() ([]*Job, error) {
 	entries, err := os.ReadDir(w.dir)
 	if err != nil {
@@ -265,7 +230,7 @@ func (w *schedulerWAL) scan() ([]*Job, error) {
 	var out []*Job
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || strings.Contains(name, ".tmp.") || (!strings.HasSuffix(name, ".wal") && !strings.HasSuffix(name, quarantineSuffix)) {
+		if e.IsDir() || strings.Contains(name, ".tmp.") || !strings.HasSuffix(name, ".wal") {
 			continue
 		}
 		if job, rerr := readWALRecord(filepath.Join(w.dir, name)); rerr == nil && job != nil {
@@ -332,6 +297,9 @@ func readWALRecord(path string) (*Job, error) {
 	// at most what its buffer holds, so a payload past about 4 KB came
 	// back short, failed its CRC, and the record was quarantined as
 	// corrupt — a job with a long prompt was lost on the next start.
+	// Files quarantined that way before this fix are NOT read back: by now
+	// they are stale copies of jobs that went on living in the snapshot
+	// and may have been cancelled or have run since.
 	if _, err := io.ReadFull(br, head); err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}

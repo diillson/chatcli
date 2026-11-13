@@ -159,6 +159,11 @@ func (a *liveParkAdapter) wakePark(token, outcome, reason string) (string, error
 	owned := a.cli.ownsPark(token)
 	if !owned {
 		if owner, alive := remoteParkLiveOwner(token); alive {
+			// Its owner drops a wake for a park it is already resuming:
+			// say that, instead of promising a resume with this outcome.
+			if pending, fired := a.cli.parkJobIndex().of(snap); snap.ResumeState == park.ResumeRunning || (fired && !pending) {
+				return "", fmt.Errorf("park %s is already resuming in the process that owns it (%s): its wake already fired and a resume is under way there; nothing was changed", token, describeParkOwner(owner))
+			}
 			if !requestRemoteParkWake(token, outcome, reason) {
 				return "", fmt.Errorf("park %s is owned by %s but the wake request could not be recorded in the hub", token, describeParkOwner(owner))
 			}
