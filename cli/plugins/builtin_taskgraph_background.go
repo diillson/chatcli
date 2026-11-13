@@ -115,6 +115,68 @@ func taskGraphPollCall(id string) string {
 // call's values but not its cancellation: the tool call returns at once
 // and must not take the run down with it.
 func startTaskGraphBackground(ctx context.Context, adapter TaskGraphAdapter, runID, graphJSON string) (string, error) {
+	id, err := StartTaskGraphBackgroundRun(ctx, adapter, runID, graphJSON)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("background run %s started. Poll with %s (show/list work too); stop with {\"cmd\":\"cancel\"}. The final report appears in status once the run finishes.",
+		id, taskGraphPollCall(id)), nil
+}
+
+// TaskGraphBackgroundActiveID names the background run still going, or "".
+func TaskGraphBackgroundActiveID() string {
+	taskGraphBG.mu.Lock()
+	defer taskGraphBG.mu.Unlock()
+	if run := taskGraphBG.run; run != nil && run.active() {
+		return run.id
+	}
+	return ""
+}
+
+// TaskGraphWithBackground appends the background run's state and output
+// tail to a status/show answer, exactly as the tool's own status does.
+func TaskGraphWithBackground(out string, err error, id string) (string, error) {
+	return withTaskGraphBackground(out, err, id)
+}
+
+// CancelTaskGraphBackgroundRun requests the stop of the background run and
+// returns its id WITHOUT waiting: /taskgraph runs on the stdin reader and
+// the capture slot. One lock for id and cancel, so a concurrent start
+// cannot hand back another run's id.
+func CancelTaskGraphBackgroundRun() (string, bool) {
+	taskGraphBG.mu.Lock()
+	defer taskGraphBG.mu.Unlock()
+	run := taskGraphBG.run
+	if run == nil || !run.active() {
+		return "", false
+	}
+	run.cancel()
+	return run.id, true
+}
+
+// taskGraphDetachedKey marks the context of a detached run.
+type taskGraphDetachedKey struct{}
+
+// TaskGraphNoTurn marks ctx for a run /taskgraph starts: no agent turn
+// holds it, so nothing in it may ever ask a person.
+func TaskGraphNoTurn(ctx context.Context) context.Context {
+	return context.WithValue(ctx, taskGraphDetachedKey{}, false)
+}
+
+// TaskGraphDetached reports whether ctx belongs to a background run and
+// whether an agent turn started it (it may be over when a worker asks).
+func TaskGraphDetached(ctx context.Context) (detached, fromTurn bool) {
+	fromTurn, detached = ctx.Value(taskGraphDetachedKey{}).(bool)
+	return detached, fromTurn
+}
+
+// LoadTaskGraphPlanFile reads a plan file by the tool's rules (size cap, ~).
+func LoadTaskGraphPlanFile(path string) (string, error) { return taskGraphPlanFromFile(path) }
+
+// StartTaskGraphBackgroundRun resolves the run id and starts the run on its
+// own goroutine, refusing while another background run is active. Exported
+// for /taskgraph: one slot for tool and command, never two graphs at once.
+func StartTaskGraphBackgroundRun(ctx context.Context, adapter TaskGraphAdapter, runID, graphJSON string) (string, error) {
 	resolver, ok := adapter.(TaskGraphRunResolver)
 	if !ok {
 		return "", errors.New("@taskgraph run: background execution not available in this session (run without background)")
@@ -129,6 +191,9 @@ func startTaskGraphBackground(ctx context.Context, adapter TaskGraphAdapter, run
 	if err != nil {
 		return "", err
 	}
+	if detached, _ := TaskGraphDetached(ctx); !detached {
+		ctx = context.WithValue(ctx, taskGraphDetachedKey{}, true)
+	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	run := &taskGraphBackgroundRun{id: id, cancel: cancel, done: make(chan struct{}), started: time.Now(), tail: &taskGraphTail{}}
 	taskGraphBG.run = run
@@ -140,8 +205,7 @@ func startTaskGraphBackground(ctx context.Context, adapter TaskGraphAdapter, run
 		run.result, run.err, run.finished = result, rerr, time.Now()
 		run.mu.Unlock()
 	}()
-	return fmt.Sprintf("background run %s started. Poll with %s (show/list work too); stop with {\"cmd\":\"cancel\"}. The final report appears in status once the run finishes.",
-		id, taskGraphPollCall(id)), nil
+	return id, nil
 }
 
 // taskGraphBackgroundSummary renders the background run's state and output

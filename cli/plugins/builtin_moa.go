@@ -98,7 +98,8 @@ Subcommands (cmd + args):
   ask {prompt, models?, aggregator?, layers?, positions?}
        prompt      the question (required); self-contained: the models do
                    not see this conversation
-       models      optional list like ["openai","anthropic:claude-opus-4-8","googleai"]
+       models      optional list like ["openai","anthropic:claude-opus-4-8","googleai"],
+                   or the same as one comma-separated string
                    (default: a set drawn from your configured providers)
        aggregator  optional "provider" or "provider:model" to synthesize
                    (default: your current session model)
@@ -113,7 +114,7 @@ Subcommands (cmd + args):
 }
 
 // Version is semver.
-func (*BuiltinMoaPlugin) Version() string { return "1.1.0" }
+func (*BuiltinMoaPlugin) Version() string { return "1.1.1" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMoaPlugin) Path() string { return "" }
@@ -128,7 +129,7 @@ func (*BuiltinMoaPlugin) Schema() string {
 				"description": "Query several models in parallel and synthesize one best answer.",
 				"flags": []map[string]interface{}{
 					{"name": "prompt", "type": "string", "required": true, "description": "The question to ask all member models, self-contained: they do not see this conversation, so include the facts, constraints and excerpts they need."},
-					{"name": "models", "type": "array", "required": false, "description": "Member models: each 'provider' or 'provider:model'. Defaults to configured providers."},
+					{"name": "models", "type": "array", "required": false, "description": "Member models: each 'provider' or 'provider:model'; a single comma-separated string (\"openai,googleai\") is split into its members. Defaults to configured providers."},
 					{"name": "aggregator", "type": "string", "required": false, "description": "Model that synthesizes the final answer. Defaults to the current session model."},
 					{"name": "layers", "type": "integer", "required": false, "description": "Rounds (1-4). From the second on, each model reads the others' answers and revises its own before the synthesis; use 2 for contested, high-stakes questions. Defaults to CHATCLI_MOA_LAYERS, else 1."},
 					{"name": "positions", "type": "string", "required": false, "description": "How much of each model's own answer the result shows: 'lead' (each model's bottom line per round, before the synthesis), 'full' (the same, plus every whole answer appended after the synthesis; long with several rounds) or 'off'. Defaults to CHATCLI_MOA_PANEL, else lead."},

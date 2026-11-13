@@ -46,12 +46,18 @@ const (
 	// outputRingCap bounds each process's captured combined output.
 	outputRingCap = 256 * 1024 // 256KiB
 
-	// stopGrace is how long Stop waits after TERM before escalating to KILL.
-	stopGrace = 5 * time.Second
-
 	// DefaultTailLines / MaxTailLines bound a logs read.
 	DefaultTailLines = 100
 	MaxTailLines     = 1000
+)
+
+// stopGrace is how long Stop waits after TERM before KILL; killWaitBound how
+// long it then waits to reap. A descendant that left the process group but
+// kept the output pipe blocks cmd.Wait while it lives: unbounded, Stop hung
+// with it. Variables only so tests can shorten them.
+var (
+	stopGrace     = 5 * time.Second
+	killWaitBound = 2 * time.Second
 )
 
 // State is a process's lifecycle state.
@@ -73,6 +79,9 @@ type Info struct {
 	Started  time.Time
 	Ended    time.Time // zero while running
 	PTY      bool      // started on a pseudo-terminal (accepts Stdin)
+	// PipesAbandoned: killed, but a descendant outside the process group
+	// still holds the output pipe, so Stop gave up waiting on it.
+	PipesAbandoned bool
 }
 
 // Validator vets a command before it runs — injected so @proc shares the
@@ -355,13 +364,42 @@ func (s *Supervisor) Stop(id string) (Info, error) {
 		case <-mp.done:
 		case <-time.After(stopGrace):
 			killGroup(mp.cmd)
-			<-mp.done
+			s.awaitKilled(mp, time.After(killWaitBound))
 		}
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return mp.info, nil
+}
+
+// StopAsync requests Stop and returns the current snapshot at once, for
+// callers that must not be held for the grace. The stop is bounded, and
+// CloseAll still covers the process if the session ends first.
+func (s *Supervisor) StopAsync(id string) (Info, error) {
+	info, err := s.Status(id)
+	if err == nil && info.State == StateRunning {
+		go func() { _, _ = s.Stop(id) }()
+	}
+	return info, err
+}
+
+// awaitKilled waits for a KILLed process to be reaped until bound fires,
+// then records it as exited with its pipes abandoned (the reaper still
+// fills in the real exit code if the pipes ever close).
+func (s *Supervisor) awaitKilled(mp *managedProcess, bound <-chan time.Time) {
+	select {
+	case <-mp.done:
+		return
+	case <-bound:
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mp.info.State == StateRunning {
+		mp.info.State, mp.info.Ended, mp.info.ExitCode = StateExited, time.Now(), -1
+		mp.info.PipesAbandoned = true
+		s.logger.Warn("proc: killed, output pipes abandoned (a descendant left the process group)", zap.String("id", mp.info.ID))
+	}
 }
 
 // Remove forgets an exited process (and its logs). Running processes must be
@@ -414,12 +452,13 @@ func (s *Supervisor) CloseAll() {
 		terminateGroup(mp.cmd)
 	}
 	deadline := time.After(stopGrace)
+	bound := time.After(stopGrace + killWaitBound)
 	for _, mp := range running {
 		select {
 		case <-mp.done:
 		case <-deadline:
 			killGroup(mp.cmd)
-			<-mp.done
+			s.awaitKilled(mp, bound)
 		}
 	}
 }

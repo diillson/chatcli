@@ -20,6 +20,9 @@ func taskGraphSubcommandSuggestions() []prompt.Suggest {
 		{Text: "status", Description: i18n.T("complete.taskgraph.status")},
 		{Text: "show", Description: i18n.T("complete.taskgraph.show")},
 		{Text: "list", Description: i18n.T("complete.taskgraph.list")},
+		{Text: "plan", Description: i18n.T("complete.taskgraph.plan")},
+		{Text: "run", Description: i18n.T("complete.taskgraph.run")},
+		{Text: "retry", Description: i18n.T("complete.taskgraph.retry")},
 		{Text: "dash", Description: i18n.T("complete.taskgraph.dash")},
 		{Text: "prune", Description: i18n.T("complete.taskgraph.prune")},
 		{Text: "cancel", Description: i18n.T("complete.taskgraph.cancel")},
@@ -56,8 +59,13 @@ func (cli *ChatCLI) getTaskGraphSuggestions(d prompt.Document) []prompt.Suggest 
 	}
 
 	switch args[0] {
-	case "status", "st", "dash":
+	case "status", "st", "dash", "retry":
 		return prompt.FilterHasPrefix(runIDSuggestions(), current, true)
+	case "plan":
+		return cli.filePathCompleter(current)
+	case "run":
+		// A plan file or a persisted run id: offer both.
+		return append(prompt.FilterHasPrefix(runIDSuggestions(), current, true), cli.filePathCompleter(current)...)
 	case "show", "task":
 		// First arg is a task id (unknown here); the second is a run id.
 		if len(args) >= 2 && trailingSpace || len(args) >= 3 {

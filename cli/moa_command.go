@@ -20,6 +20,8 @@
  *   CHATCLI_MOA_AGGREGATOR="claudeai:claude-opus-4-8"   (defaults to current model)
  *   CHATCLI_MOA_PANEL=lead|full|off   (each member's position, see moa_panel.go)
  *   CHATCLI_MOA_LAYERS=1..4           (cross-review rounds; /moa --layers N per run)
+ * Per run: --models a,b  --aggregator <provider[:model]>  --positions
+ * lead|full|off  --layers N; "/moa list" shows who can take part.
  */
 package cli
 
@@ -53,17 +55,32 @@ var (
 
 // runMoACommand runs one /moa turn; shared by the REPL and one-shot (-p).
 func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
-	layers, prompt, err := parseMoALayers(strings.TrimSpace(strings.TrimPrefix(input, "/moa")))
+	opts, err := parseMoAOptions(strings.TrimSpace(strings.TrimPrefix(input, "/moa")))
 	if err != nil {
+		fmt.Println(colorize("  "+err.Error(), ColorYellow))
 		printMoAUsage()
 		return err
 	}
+	layers, prompt := opts.layers, opts.prompt
 	if prompt == "" {
 		printMoAUsage()
 		return errMoAUsage
 	}
+	if prompt == "list" {
+		out, err := (&moaPluginAdapter{cli: cli}).List(ctx)
+		if err == nil {
+			fmt.Println(out)
+		}
+		return err
+	}
+	if opts.layersAsked != 0 {
+		fmt.Println(colorize("  "+i18n.T("moa.cmd.layers_clamped", opts.layersAsked, layers, moa.MaxLayers), ColorYellow))
+	}
 
-	refs := moa.ParseRefs(os.Getenv("CHATCLI_MOA_MODELS"))
+	refs := opts.models
+	if len(refs) == 0 {
+		refs = moa.ParseRefs(os.Getenv("CHATCLI_MOA_MODELS"))
+	}
 	if len(refs) == 0 {
 		// No env configured → behave like the @moa tool: use the configured
 		// providers (capped) so /moa works out of the box.
@@ -77,6 +94,9 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	aggregator := moa.Ref{Provider: cli.Provider, Model: cli.Model}
 	if agg := moa.ParseRefs(os.Getenv("CHATCLI_MOA_AGGREGATOR")); len(agg) > 0 {
 		aggregator = agg[0]
+	}
+	if opts.aggregator != nil {
+		aggregator = *opts.aggregator
 	}
 
 	// Every panel member gets the same briefing a regular chat turn gets: the
@@ -113,7 +133,7 @@ func (cli *ChatCLI) runMoACommand(ctx context.Context, input string) error {
 	// Each member's position prints as soon as it lands, round by round;
 	// the synthesis follows once the last round is done.
 	start := time.Now()
-	hooks := cli.moaPanelHooks(moaPanelMode(), start)
+	hooks := cli.moaPanelHooks(opts.positions, start)
 	hooks.OnSynthesis = func() {
 		fmt.Printf("  %s\n", colorize(i18n.T("moa.panel.synthesizing", moa.Ref{Provider: strings.ToLower(aggregator.Provider), Model: aggregator.Model}.String()), ColorCyan))
 	}
@@ -162,24 +182,87 @@ func moaLayersFromEnv() int {
 	return moa.ClampLayers(n)
 }
 
-// parseMoALayers takes a leading "--layers N" (or "--layers=N") off a /moa
-// prompt; without one the layer count comes from CHATCLI_MOA_LAYERS.
-func parseMoALayers(args string) (int, string, error) {
-	rest, ok := strings.CutPrefix(args, "--layers")
-	if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '=') {
-		return moaLayersFromEnv(), args, nil
+// moaRunOptions is one /moa invocation: the per-run flags, then the prompt.
+// Anything a flag does not set keeps its env/session default.
+type moaRunOptions struct {
+	layers      int
+	layersAsked int // the --layers value when it had to be clamped, else 0
+	models      []moa.Ref
+	aggregator  *moa.Ref
+	positions   string
+	prompt      string
+}
+
+// parseMoAOptions takes the leading "--flag value" (or "--flag=value") pairs
+// off a /moa line; the rest is the prompt. An unknown flag is an error, not
+// prompt text: "--model x question" would go to the default panel verbatim
+// and bill for it. A lone "--" ends the flags for a dashed prompt.
+func parseMoAOptions(args string) (moaRunOptions, error) {
+	opts := moaRunOptions{layers: moaLayersFromEnv(), positions: moaPanelMode()}
+	rest := strings.TrimSpace(args)
+	for strings.HasPrefix(rest, "--") {
+		head, tail, _ := strings.Cut(rest, " ")
+		rest = strings.TrimSpace(tail)
+		if head == "--" {
+			break
+		}
+		name, value, inline := strings.Cut(head, "=")
+		if !inline {
+			value, tail, _ = strings.Cut(rest, " ")
+			rest = strings.TrimSpace(tail)
+		}
+		if value == "" || strings.HasPrefix(value, "--") {
+			return opts, errors.New(i18n.T("execparity.flag_needs_value", name))
+		}
+		if err := opts.set(name, value); err != nil {
+			return opts, err
+		}
 	}
-	rest = strings.TrimLeft(rest, " =")
-	value, prompt, _ := strings.Cut(rest, " ")
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, "", errMoALayers
+	opts.prompt = rest
+	return opts, nil
+}
+
+// set applies one flag.
+func (o *moaRunOptions) set(name, value string) error {
+	switch name {
+	case "--layers":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return errMoALayers
+		}
+		if o.layers = moa.ClampLayers(n); o.layers != n {
+			o.layersAsked = n
+		}
+	case "--models":
+		// "a, b q" splits at the space: panel "a", prompt "b q", silently.
+		if strings.HasSuffix(value, ",") {
+			return errors.New(i18n.T("moa.cmd.models_trailing_comma", value))
+		}
+		if o.models = moa.ParseRefs(value); len(o.models) == 0 {
+			return errors.New(i18n.T("execparity.flag_needs_value", name))
+		}
+	case "--aggregator":
+		refs := moa.ParseRefs(value)
+		if len(refs) != 1 {
+			return errors.New(i18n.T("moa.cmd.bad_aggregator", value))
+		}
+		o.aggregator = &refs[0]
+	case "--positions":
+		switch mode := strings.ToLower(value); mode {
+		case moaPanelLead, moaPanelFull, moaPanelOff:
+			o.positions = mode
+		default:
+			return errors.New(i18n.T("moa.cmd.bad_positions", value))
+		}
+	default:
+		return errors.New(i18n.T("moa.cmd.unknown_flag", name))
 	}
-	return moa.ClampLayers(n), strings.TrimSpace(prompt), nil
+	return nil
 }
 
 // printMoAUsage prints the /moa usage, layers included.
 func printMoAUsage() {
 	fmt.Println(colorize("  "+i18n.T("moa.usage"), ColorGray))
 	fmt.Println(colorize("  "+i18n.T("moa.layers.usage"), ColorGray))
+	fmt.Println(colorize("  "+i18n.T("moa.cmd.flags_usage"), ColorGray))
 }

@@ -24,8 +24,8 @@
     "surface": "a86cb056d41203ce"
   },
   "@channels": {
-    "version": "1.1.1",
-    "surface": "5c0fbc6c349daaf2"
+    "version": "1.2.0",
+    "surface": "e4068d2ddbd708dc"
   },
   "@coder": {
     "version": "2.2.0",
@@ -108,8 +108,8 @@
     "surface": "00a98e5ef8c6518d"
   },
   "@moa": {
-    "version": "1.1.0",
-    "surface": "674eed3978be2ffc"
+    "version": "1.1.1",
+    "surface": "8b9b9ebbbbb6da0d"
   },
   "@model": {
     "version": "1.0.1",
@@ -168,8 +168,8 @@
     "surface": "df2da12174b88fda"
   },
   "@taskgraph": {
-    "version": "1.1.0",
-    "surface": "7628d24ba7c22ceb"
+    "version": "1.1.1",
+    "surface": "e53e57c749acdcc3"
   },
   "@todo": {
     "version": "1.2.0",

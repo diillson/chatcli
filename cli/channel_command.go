@@ -5,8 +5,9 @@
  *
  * Subcommands:
  *
- *   list                 default — show recent messages + unread count
- *   <channel-name>       filter list to that channel
+ *   list [channel] [--limit N]   default — recent messages + unread count
+ *   <channel-name> [--limit N]   same, filtered to a channel the inbox knows
+ *   unread               only what arrived since the last ack
  *   inject               splice last 10 messages into the next turn
  *                        as a system message (legacy behavior preserved)
  *   ack                  clear unread + pending notify banner
@@ -22,7 +23,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -52,6 +55,10 @@ func (cli *ChatCLI) handleChannelCommand(ctx context.Context, userInput string) 
 	}
 
 	switch subcommand {
+	case "", "list":
+		cli.runChannelListArgs(ch, args[min(len(args), 2):])
+	case "unread":
+		cli.runChannelUnread(ch)
 	case "inject":
 		cli.runChannelInject(ch)
 	case "ack":
@@ -71,8 +78,78 @@ func (cli *ChatCLI) handleChannelCommand(ctx context.Context, userInput string) 
 	case "run":
 		cli.runChannelRun(ctx, args)
 	default:
-		cli.runChannelList(ch, subcommand)
+		// A bare word is a filter only for a channel the inbox or a rule
+		// knows: a mistyped subcommand used to print an empty inbox.
+		if subcommand != "*" && !slices.Contains(cli.channelKnownNames(ch), subcommand) {
+			fmt.Println(colorize("  "+i18n.T("chan.cmd.unknown_word", subcommand), ColorYellow))
+			return
+		}
+		cli.runChannelListArgs(ch, args[1:])
 	}
+}
+
+// channelListDefault is how many messages a list shows without --limit.
+const channelListDefault = 20
+
+// parseChannelListArgs reads "[channel] [--limit N]".
+func parseChannelListArgs(tokens []string) (string, int, error) {
+	filter, limit := "", channelListDefault
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		switch {
+		case tok == "--limit":
+			if i+1 >= len(tokens) {
+				return "", 0, errors.New(i18n.T("execparity.flag_needs_value", tok))
+			}
+			i++
+			n, err := strconv.Atoi(tokens[i])
+			if err != nil || n < 1 {
+				return "", 0, errors.New(i18n.T("chan.cmd.bad_limit", tokens[i]))
+			}
+			limit = n
+		case strings.HasPrefix(tok, "--"):
+			return "", 0, errors.New(i18n.T("execparity.unknown_flag", "/channel list", tok))
+		case filter == "":
+			filter = tok
+		default:
+			return "", 0, errors.New(i18n.T("execparity.extra_arg", "/channel list", tok))
+		}
+	}
+	return filter, limit, nil
+}
+
+// runChannelListArgs lists with the filter and limit the user typed.
+func (cli *ChatCLI) runChannelListArgs(ch channelLister, tokens []string) {
+	filter, limit, err := parseChannelListArgs(tokens)
+	if err != nil {
+		fmt.Println(colorize("  "+err.Error(), ColorYellow))
+		return
+	}
+	cli.runChannelList(ch, filter, limit)
+}
+
+// channelKnownNames lists the channels the inbox or a rule names.
+func (cli *ChatCLI) channelKnownNames(ch channelLister) []string {
+	seen := map[string]bool{"": true, "*": true}
+	var names []string
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, m := range ch.GetRecent(ch.Count()) {
+		add(m.Channel)
+	}
+	for _, r := range cli.channelTriggerRules() {
+		add(r.Channel)
+	}
+	return names
+}
+
+// runChannelUnread is the human's view of what @channels unread shows.
+func (cli *ChatCLI) runChannelUnread(ch channelLister) {
+	cli.printChannelMessages(ch, i18n.T("chan.cmd.box_title_unread"), ch.UnreadSince())
 }
 
 // runChannelInject preserves the legacy /channel inject behavior.
@@ -107,7 +184,13 @@ func (cli *ChatCLI) runChannelAck() {
 // confirm actions are NOT dropped either way — they gate real actions
 // and must be decided explicitly via /channel confirm <id> [no].
 func (cli *ChatCLI) runChannelClear(args []string) {
-	all := len(args) >= 3 && (args[2] == "--all" || args[2] == "all")
+	// Only the dashed flag purges the audit trail: a bare "all" used to do
+	// it too, and anything else was silently read as the plain clear.
+	if len(args) > 3 || (len(args) == 3 && args[2] != "--all") {
+		fmt.Println(colorize("  "+i18n.T("chan.cmd.clear_bad_arg", args[len(args)-1]), ColorYellow))
+		return
+	}
+	all := len(args) == 3
 	notify, _ := cli.channelTriggerAck()
 
 	if !all {
@@ -132,38 +215,16 @@ func (cli *ChatCLI) runChannelClear(args []string) {
 // runChannelList is the default subcommand — prints recent messages
 // optionally filtered by name. Identical to the legacy default minus
 // the additional "unread" indicator on the header.
-func (cli *ChatCLI) runChannelList(ch channelLister, channelFilter string) {
-	if channelFilter == "list" {
-		channelFilter = ""
-	}
-
-	type msgRow struct {
-		Server, Channel, Content, Timestamp string
-		Seq                                 uint64
-	}
-	var msgs []msgRow
-
+func (cli *ChatCLI) runChannelList(ch channelLister, channelFilter string, limit int) {
 	if channelFilter != "" {
-		for _, m := range ch.GetByChannel(channelFilter, 20) {
-			msgs = append(msgs, msgRow{
-				Server: m.ServerName, Channel: m.Channel, Content: m.Content,
-				Timestamp: m.Timestamp.Format("15:04:05"), Seq: m.Seq,
-			})
-		}
-	} else {
-		for _, m := range ch.GetRecent(20) {
-			msgs = append(msgs, msgRow{
-				Server: m.ServerName, Channel: m.Channel, Content: m.Content,
-				Timestamp: m.Timestamp.Format("15:04:05"), Seq: m.Seq,
-			})
-		}
+		cli.printChannelMessages(ch, i18n.T("chan.cmd.box_title_filtered", channelFilter), ch.GetByChannel(channelFilter, limit))
+		return
 	}
+	cli.printChannelMessages(ch, i18n.T("chan.cmd.box_title"), ch.GetRecent(limit))
+}
 
-	title := i18n.T("chan.cmd.box_title")
-	if channelFilter != "" {
-		title = i18n.T("chan.cmd.box_title_filtered", channelFilter)
-	}
-
+// printChannelMessages renders one titled box of inbox messages.
+func (cli *ChatCLI) printChannelMessages(ch channelLister, title string, msgs []mcp.ChannelMessage) {
 	fmt.Println()
 	fmt.Println(uiBox("📡", title, ColorCyan))
 	p := uiPrefix(ColorCyan)
@@ -175,8 +236,8 @@ func (cli *ChatCLI) runChannelList(ch channelLister, channelFilter string) {
 		for _, m := range msgs {
 			fmt.Println(p + fmt.Sprintf("  #%d %s%s%s %s%s%s/%s%s%s %s",
 				m.Seq,
-				ColorGray, m.Timestamp, ColorReset,
-				ColorCyan, m.Server, ColorReset,
+				ColorGray, m.Timestamp.Format("15:04:05"), ColorReset,
+				ColorCyan, m.ServerName, ColorReset,
 				ColorPurple, m.Channel, ColorReset,
 				truncateStr(m.Content, 60)))
 		}
@@ -206,6 +267,7 @@ type channelLister interface {
 	Unread() int
 	GetRecent(int) []mcp.ChannelMessage
 	GetByChannel(string, int) []mcp.ChannelMessage
+	UnreadSince() []mcp.ChannelMessage
 }
 
 // runChannelRules shows the active rule set and supports a
@@ -319,6 +381,7 @@ func defaultIfEmpty(s, fallback string) string {
 func (cli *ChatCLI) getChannelSuggestions(d prompt.Document) []prompt.Suggest {
 	subcommands := []prompt.Suggest{
 		{Text: "list", Description: i18n.T("chan.cmd.suggest_list")},
+		{Text: "unread", Description: i18n.T("chan.cmd.suggest_unread")},
 		{Text: "inject", Description: i18n.T("chan.cmd.suggest_inject")},
 		{Text: "ack", Description: i18n.T("chan.cmd.suggest_ack")},
 		{Text: "clear", Description: i18n.T("chan.cmd.suggest_clear")},
@@ -346,6 +409,14 @@ func (cli *ChatCLI) getChannelSuggestions(d prompt.Document) []prompt.Suggest {
 
 	// Argument slot (position 1+): branch on the subcommand.
 	switch strings.ToLower(fields[0]) {
+	case "list":
+		out := []prompt.Suggest{{Text: "--limit", Description: i18n.T("chan.cmd.suggest_limit")}}
+		if cli.mcpManager != nil {
+			for _, name := range cli.channelKnownNames(cli.mcpManager.Channels()) {
+				out = append(out, prompt.Suggest{Text: name})
+			}
+		}
+		return prompt.FilterHasPrefix(out, word, true)
 	case "clear":
 		return prompt.FilterHasPrefix([]prompt.Suggest{
 			{Text: "--all", Description: i18n.T("chan.cmd.suggest_clear_all")},

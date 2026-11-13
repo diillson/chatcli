@@ -164,6 +164,9 @@ func (a *procToolAdapter) Stop(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if info.PipesAbandoned {
+		return fmt.Sprintf("stopped %s: killed, but a descendant that left its process group still holds the output pipe and may still be running (find it with ps); its pipes were abandoned", info.ID), nil
+	}
 	return fmt.Sprintf("stopped %s (exit code %d)", info.ID, info.ExitCode), nil
 }
 

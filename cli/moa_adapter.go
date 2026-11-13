@@ -142,6 +142,11 @@ func (a *moaPluginAdapter) resolveMembers(specs []string) []moaMember {
 		}
 	}
 
+	// One spec may carry several members ("a,b"): the flattened argv hands
+	// a comma string over as a single value, and unsplit it became one
+	// member named "a,b" that no provider answers to.
+	specs = strings.FieldsFunc(strings.Join(specs, ","), func(r rune) bool { return r == ',' || r == ';' || r == '\n' })
+
 	if len(specs) > 0 {
 		out := make([]moaMember, 0, len(specs))
 		for _, s := range specs {

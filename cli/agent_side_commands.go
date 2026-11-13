@@ -37,7 +37,7 @@ import (
 // sideCommandRoots are the slash-command words runnable mid-run. Matching
 // is exact-word or word+space (same shape as the command router's
 // word-prefix routes).
-var sideCommandRoots = []string{"/agents", "/board", "/mail", "/jobs", "/taskgraph", "/dash", "/web"}
+var sideCommandRoots = []string{"/agents", "/board", "/mail", "/jobs", "/taskgraph", "/proc", "/dash", "/web"}
 
 // isSideCommand reports whether line is an allowlisted mid-run command.
 func isSideCommand(line string) bool {

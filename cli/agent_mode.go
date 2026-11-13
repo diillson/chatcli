@@ -4766,6 +4766,7 @@ func (a *AgentMode) initMultiAgent(ctx context.Context) bool {
 	if pa, err := newWorkerPolicyAdapter(a.logger); err == nil {
 		pa.unattended = a.cli.unattended // no human: "ask" is refused unless automode admits it
 		pa.autoApprove = a.askAutoApproved
+		pa.liveStdin = a.liveStdinLines
 		a.policyAdapter = pa
 		a.agentDispatcher.SetPolicyChecker(pa)
 		a.logger.Info("Policy enforcement enabled for parallel workers")

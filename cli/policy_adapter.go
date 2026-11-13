@@ -13,6 +13,7 @@ import (
 	"github.com/diillson/chatcli/cli/agent/workers"
 	"github.com/diillson/chatcli/cli/coder"
 	"github.com/diillson/chatcli/cli/metrics"
+	"github.com/diillson/chatcli/cli/plugins"
 	"github.com/diillson/chatcli/i18n"
 	"go.uber.org/zap"
 )
@@ -33,6 +34,10 @@ type workerPolicyAdapter struct {
 	// When set, security prompts read from this channel instead of spawning
 	// a goroutine on os.Stdin, avoiding orphaned readers after Ctrl+C.
 	stdinCh <-chan string
+
+	// liveStdin is the agent loop's stdin channel while its reader runs, nil
+	// otherwise. A detached run asks through it: stdinCh outlives the turn.
+	liveStdin func() <-chan string
 
 	// unattended marks a run with no human to answer an "ask" prompt
 	// (gateway, server, RPC surfaces): PromptSecurityCheck would block on a
@@ -80,6 +85,13 @@ func (a *workerPolicyAdapter) setRestoreInput(fn func()) {
 
 func (a *workerPolicyAdapter) setStdinCh(ch <-chan string) {
 	a.stdinCh = ch
+}
+
+// liveStdinLines is the stdin channel while the reader goroutine runs.
+func (a *AgentMode) liveStdinLines() <-chan string {
+	a.stdinMu.Lock()
+	defer a.stdinMu.Unlock()
+	return a.stdinLines
 }
 
 // pauseSpinner stops the spinner output. The Timer.onPause callback
@@ -165,7 +177,16 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		// Unattended (gateway, server, RPC): nobody can answer, and blocking
 		// on stdin would hang the worker. Without the automode opt-in above,
 		// "ask" is refused.
-		if a.unattended {
+		// A detached task-graph run is the same case, unless the agent turn
+		// that started it is reading stdin NOW (else nobody feeds the prompt).
+		stdinCh, nobody := a.stdinCh, a.unattended
+		if detached, fromTurn := plugins.TaskGraphDetached(ctx); detached {
+			if stdinCh = nil; fromTurn && a.liveStdin != nil {
+				stdinCh = a.liveStdin()
+			}
+			nobody = nobody || stdinCh == nil
+		}
+		if nobody {
 			a.logger.Info("Worker tool call denied (unattended, no automode opt-in)",
 				zap.String("tool", toolName))
 			return false, i18n.T("agent.policy.unattended_denied", toolName)
@@ -206,7 +227,7 @@ func (a *workerPolicyAdapter) CheckAndPrompt(ctx context.Context, toolName, args
 		secCtx := buildSecurityContext(ctx)
 
 		// Prompt the user with full context
-		decision := coder.PromptSecurityCheckWithContextGuarded(ctx, toolName, args, secCtx, a.stdinCh)
+		decision := coder.PromptSecurityCheckWithContextGuarded(ctx, toolName, args, secCtx, stdinCh)
 		pattern := coder.GetSuggestedPattern(toolName, args)
 
 		// Clear the prompt area and resume spinner
