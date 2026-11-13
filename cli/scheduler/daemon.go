@@ -313,6 +313,9 @@ func (d *Daemon) handleEnqueue(ctx context.Context, frame Frame) Frame {
 		return errFrame(frame.ID, "owner is required")
 	}
 	adapter := NewToolAdapter(d.sched)
+	// Reserved tags arrive in their own field; WithTrustedJobTags keeps
+	// only the reserved namespace, and the input is still checked.
+	ctx = WithTrustedJobTags(ctx, frame.TrustedTags)
 	out, _ := adapter.ScheduleJob(ctx, *frame.Owner, string(frame.Input))
 	return Frame{ID: frame.ID, Kind: KindOK, Result: json.RawMessage(out)}
 }

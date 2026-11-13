@@ -19,6 +19,9 @@ package plugins
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -171,35 +174,89 @@ func procCommandLine(words []string) string {
 	out := make([]string, len(words))
 	for i, w := range words {
 		out[i] = w
-		// The first word is the command, or a whole fragment of a command
-		// line ("npm run dev", "FOO=1 ./run.sh"): quoting it would make the
-		// shell look for a program of that full name.
-		if i > 0 && procNeedsQuoting(w) {
+		switch {
+		case i == 0:
+			out[i] = procFirstWord(w, len(words) > 1)
+		case procNeedsQuoting(w):
 			out[i] = procShellQuote(w)
 		}
 	}
 	return strings.Join(out, " ")
 }
 
+// procFirstWord renders the first positional word. It is the command, and
+// often a whole fragment of a command line ("npm run dev", "FOO=1 ./run"),
+// which quoting would turn into the name of a program that does not exist.
+// But a path with a space in it ("/opt/my tools/run") is ONE word that
+// must be quoted to run at all. The two are told apart by evidence: the
+// word names something that exists, or more words follow — so it is not
+// the whole line — and it is spelled like a path.
+func procFirstWord(w string, more bool) string {
+	if !strings.ContainsAny(w, " \t") {
+		return w
+	}
+	if !procPathExists(w) && (!more || !procLooksLikePath(w)) {
+		return w
+	}
+	// A leading ~ must stay outside the quotes to be expanded.
+	if rest, ok := strings.CutPrefix(w, "~/"); ok {
+		return "~/" + procShellQuote(rest)
+	}
+	return procShellQuote(w)
+}
+
+// procPathExists reports whether w names an existing file or directory,
+// with a leading ~ read as the home directory.
+func procPathExists(w string) bool {
+	path := w
+	if rest, ok := strings.CutPrefix(w, "~/"); ok {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return false
+		}
+		path = filepath.Join(home, rest)
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// procLooksLikePath reports whether w is spelled like a path: rooted,
+// relative to here or to home, or on a drive.
+func procLooksLikePath(w string) bool {
+	for _, prefix := range []string{"/", "./", "../", "~/", `.\`, `..\`} {
+		if strings.HasPrefix(w, prefix) {
+			return true
+		}
+	}
+	return len(w) > 2 && w[1] == ':' && (w[2] == '\\' || w[2] == '/') &&
+		((w[0] >= 'a' && w[0] <= 'z') || (w[0] >= 'A' && w[0] <= 'Z'))
+}
+
 // procShellOperators are the words that are shell syntax when they stand
 // alone between the words of a command line.
 var procShellOperators = map[string]bool{
 	"&&": true, "||": true, "|": true, "|&": true, ";": true, "&": true,
-	">": true, ">>": true, "<": true, "<<": true, "2>": true, "2>>": true,
-	"&>": true, "&>>": true, "2>&1": true, "1>&2": true, ">&2": true, ">&1": true,
 	"(": true, ")": true, "{": true, "}": true, "!": true,
 }
 
+// procRedirection matches a word that is a redirection, alone or with its
+// target attached: ">", "2>&1", ">out.log", "2>/dev/null", "&>both".
+var procRedirection = regexp.MustCompile(`^(&>>?|[0-9]*(>>?|<<?<?))(&[0-9-]+|[^&|<>;]*)$`)
+
 // procNeedsQuoting reports whether a later positional word must be quoted
 // to reach the child as the one argument it was typed as: it is empty, or
-// carries whitespace, a quote, a backtick, a command substitution or a
-// command separator. A word that is itself an operator, a plain $VAR or a
-// glob is what the user meant the shell to read, and stays.
+// carries whitespace, a quote, a backtick, a command substitution, or a
+// character the shell cuts a command at (; & | < > #). A word that is
+// itself an operator or a redirection, a plain $VAR or a glob is what the
+// user meant the shell to read, and stays.
 func procNeedsQuoting(w string) bool {
-	if procShellOperators[w] {
+	if w == "" || strings.ContainsAny(w, " \t\n\r'\"`") || strings.Contains(w, "$(") {
+		return true
+	}
+	if procShellOperators[w] || procRedirection.MatchString(w) {
 		return false
 	}
-	return w == "" || strings.ContainsAny(w, " \t\n\r'\"`;") || strings.Contains(w, "$(")
+	return strings.ContainsAny(w, ";&|<>#")
 }
 
 // procShellQuote quotes one argument for the platform shell the supervisor

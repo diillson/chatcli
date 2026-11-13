@@ -146,7 +146,7 @@ by best effort.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinProcPlugin) Version() string { return "1.2.2" }
+func (*BuiltinProcPlugin) Version() string { return "1.2.3" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinProcPlugin) Path() string { return "" }

@@ -39,7 +39,12 @@ func TestParkNoteRefusesAParkThatWillNotReadIt(t *testing.T) {
 	if err := snap.Save(); err != nil {
 		t.Fatal(err)
 	}
-	finished := saveParkAged(t, time.Hour, enqueueParkJob(t, cli, true))
+	// Left behind by a released version: a resume started, its job is
+	// finished, no outcome was recorded — it completed under the old code.
+	finished := saveParkResumed(t, time.Hour, "", enqueueParkJob(t, cli, true))
+	// Its job fired and nobody resumed it: /resume still works, and a note
+	// recorded now would be read then.
+	fired := saveParkAged(t, time.Hour, enqueueParkJob(t, cli, true))
 	remote := saveParkAged(t, time.Hour, "job-in-another-process")
 	setRemoteParkProvider(&remoteParkProvider{owner: func(token string) (remoteParkOwner, bool) {
 		return remoteParkOwner{Instance: "abcd", Origin: "gateway"}, token == remote
@@ -77,6 +82,9 @@ func TestParkNoteRefusesAParkThatWillNotReadIt(t *testing.T) {
 	}
 	waiting = saveParkAged(t, time.Hour, enqueueParkJob(t, cli, false))
 
+	if out := note(fired); parkDirectives(t, fired) != "please read this" {
+		t.Errorf("a park whose job fired but that never resumed can still be resumed, and takes the note: %q", out)
+	}
 	// A park that is still waiting, and that nobody else holds, takes it.
 	if out := note(waiting); !strings.Contains(out, i18n.T("leftovers.park_note.queued", parkShort(waiting), parkShort(waiting))) || parkDirectives(t, waiting) != "please read this" {
 		t.Errorf("a waiting park must take the note: %q", out)

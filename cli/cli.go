@@ -264,15 +264,14 @@ type ChatCLI struct {
 	personaHandler        *PersonaHandler
 	skillHandler          *SkillHandler
 	executionProfile      ExecutionProfile
-	pendingAction         string // stores intended action before panic (for Windows go-prompt tearDown workaround)
-	replActive            bool   // true only inside the interactive Start() loop (gates the palette trigger)
-	promptRunning         bool   // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
-	themeReloadPending    bool   // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
-	promptDraft           string // initial text of the next prompt built (see offerPromptDraft); guarded by promptDraftMu
-	promptDraftMu         sync.Mutex
-	paletteRequested      bool   // a handler asked to open the command palette; the executor runs it in place
-	paletteTarget         string // command to scope the palette to ("" opens the categorized root)
-	suppressPaletteOnce   bool   // skip the palette trigger for the next handled command (the palette's own selection)
+	pendingAction         string           // stores intended action before panic (for Windows go-prompt tearDown workaround)
+	replActive            bool             // true only inside the interactive Start() loop (gates the palette trigger)
+	promptRunning         bool             // true only while go-prompt owns the terminal (gates the theme-driven prompt rebuild)
+	themeReloadPending    bool             // a theme switch landed mid-prompt; go-prompt must be rebuilt to repaint the input line
+	promptDraft           promptDraftState // text a finished turn hands to the next prompt (see prompt_draft.go)
+	paletteRequested      bool             // a handler asked to open the command palette; the executor runs it in place
+	paletteTarget         string           // command to scope the palette to ("" opens the categorized root)
+	suppressPaletteOnce   bool             // skip the palette trigger for the next handled command (the palette's own selection)
 
 	// Remote connection state (for /connect and /disconnect)
 	localClient   client.LLMClient           // saved local client when connected to remote
@@ -1389,7 +1388,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				prompt.OptionTitle("ChatCLI - LLM no seu Terminal"),
 				// What a finished turn handed back (a line typed for a prompt
 				// that was withdrawn): on the input line, not submitted.
-				prompt.OptionInitialBufferText(cli.takePromptDraft()),
+				prompt.OptionInitialBufferText(cli.promptInitialText()),
 				prompt.OptionLivePrefix(cli.changeLivePrefix),
 				// Input line + completion dropdown, painted from the ACTIVE
 				// theme (see prompt_theme.go). These used to be literals, so
@@ -1403,9 +1402,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 				// iteration below rebuild the prompt from the new palette;
 				// go-prompt has already restored cooked mode at this point,
 				// so the exit is clean.
-				prompt.OptionSetExitCheckerOnInput(func(string, bool) bool {
-					return cli.themeReloadPending
-				}),
+				prompt.OptionSetExitCheckerOnInput(cli.promptShouldRebuild),
 				prompt.OptionHistory(cli.commandHistory),
 				prompt.OptionMaxSuggestion(10),
 				prompt.OptionAddKeyBind(prompt.KeyBind{
@@ -1546,7 +1543,7 @@ func (cli *ChatCLI) Start(ctx context.Context) {
 			cli.promptRunning = true
 			p.Run()
 			cli.promptRunning = false
-			if cli.themeReloadPending {
+			if draftRebuild := cli.takePromptRebuild(); cli.themeReloadPending || draftRebuild {
 				cli.themeReloadPending = false
 				themeReload = true // loop again: rebuild the prompt, keep the REPL
 				return

@@ -343,7 +343,10 @@ func (cli *ChatCLI) runResumeForToken(ctx context.Context, token, outcome, detai
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		// RunResumed kept the snapshot for retry — surface the recovery
 		// path, otherwise the user only sees the failure print and has no
-		// idea an immediate /resume works.
+		// idea an immediate /resume works. And make the snapshot say what
+		// the message says: a resume refused before it started (another
+		// run in flight) never reached the code that records outcomes.
+		cli.agentMode.endParkResume(token, park.ResumeRetry)
 		short := token
 		if len(short) > 8 {
 			short = short[:8]
@@ -550,12 +553,13 @@ type parkSweepReport struct {
 func (cli *ChatCLI) sweepDeadParks(olderThan time.Duration) parkSweepReport {
 	var rep parkSweepReport
 	snaps, _ := park.List()
+	jobs := cli.parkJobIndex()
 	cutoff := time.Now().Add(-olderThan)
 	for _, s := range snaps {
 		if olderThan > 0 && !s.CreatedAt.Before(cutoff) {
 			continue
 		}
-		switch cli.parkStatusOf(s).verdict {
+		switch cli.parkStatusWith(jobs, s).verdict {
 		case parkWaiting:
 			rep.live = append(rep.live, s.Token)
 		case parkUnknown:
@@ -601,26 +605,35 @@ type parkStatus struct {
 	resumed bool
 }
 
-// parkStatusOf weighs the evidence about s, strongest first:
-//
-//  1. this process holds it (owns its wake path, or is resuming it), or
-//     another process heartbeats for it in the hub: waiting;
-//  2. it was created moments ago: unknown — its owner may not have
-//     registered or heartbeaten yet;
-//  3. a resume was attempted: finished if it completed, kept for retry if
-//     it failed or its process died mid-run, held while that process runs;
-//  4. its job is known — to this scheduler, or in the store every chatcli
-//     of the user shares: waiting while the job is pending (it fires here,
-//     or when a scheduler next replays the store), finished once terminal;
-//  5. it records its owner process, on this host: waiting while that
-//     process lives. Once it is gone the park is finished only when the
-//     store positively holds no job for it — a dead owner alone proves
-//     nothing, the pending job outlives it.
-//
-// Anything else is unknown: a store this process cannot read, a mirror
-// that is silent, slow or stale, a snapshot from another host or another
-// pid namespace say nothing about whether the park is still waiting.
+// parkStatusOf is parkStatusWith over a job index built for this one call.
 func (cli *ChatCLI) parkStatusOf(s *park.Snapshot) parkStatus {
+	return cli.parkStatusWith(cli.parkJobIndex(), s)
+}
+
+// parkStatusWith weighs the evidence about s. One rule governs it:
+//
+//	a park is FINISHED only when a resume of it completed.
+//
+// Nothing else proves it. A terminal job proves that the wait is over —
+// not that the agent continued: the action that fires only queues the
+// resume in the owner, which may be mid-turn for an hour, or may have died
+// before draining. Three rounds of sweeps that read a job's state as the
+// park's each deleted a snapshot an agent still needed. So, in order:
+//
+//  1. held by this process (its wake path, or a resume queued or running
+//     here), or heartbeaten in the hub by another: waiting;
+//  2. a resume is recorded: finished if it completed; kept for retry if it
+//     failed, or was running in a process that is gone; held while that
+//     process lives;
+//  3. a snapshot from before outcomes were recorded, whose resume started:
+//     see parkLegacyStatus;
+//  4. no resume ever started. The owner process alive on this host:
+//     waiting, whatever the job says. The owner gone: waiting while any
+//     job of the park is pending (it fires when a scheduler replays the
+//     store); kept for retry when its job fired and nobody resumed it —
+//     /resume still works; unknown when no job is known at all. The owner
+//     not checkable from here: waiting on a pending job, otherwise unknown.
+func (cli *ChatCLI) parkStatusWith(jobs parkJobIndex, s *park.Snapshot) parkStatus {
 	if cli.holdsPark(s.Token) {
 		// Held and already running: its directives were taken at the start.
 		return parkStatus{verdict: parkWaiting, resumed: s.ResumeState == park.ResumeRunning}
@@ -628,41 +641,54 @@ func (cli *ChatCLI) parkStatusOf(s *park.Snapshot) parkStatus {
 	if owner, alive := remoteParkLiveOwner(s.Token); alive {
 		return parkStatus{verdict: parkWaiting, heldBy: describeParkOwner(owner)}
 	}
-	if time.Since(s.CreatedAt) < parkPruneGrace() {
-		return parkStatus{verdict: parkUnknown}
-	}
-	if st, attempted := parkResumeStatus(s); attempted {
+	if st, recorded := parkResumeStatus(s); recorded {
 		return st
 	}
-	job, known := cli.parkJob(s)
-	if job != nil {
-		if job.Status.IsTerminal() {
-			return parkStatus{verdict: parkFinished}
-		}
-		return parkStatus{verdict: parkWaiting}
+	owner := parkProcessState(s.OwnerPID, s.OwnerHost, s.OwnerPIDNS, s.OwnerStart)
+	pending, fired := jobs.of(s)
+	if !s.LastResumeAt.IsZero() {
+		return parkLegacyStatus(s, owner, pending, fired)
 	}
-	switch parkProcessState(s.OwnerPID, s.OwnerHost, s.OwnerPIDNS) {
-	case parkProcAlive:
+	switch {
+	case owner == parkProcAlive:
 		return parkStatus{verdict: parkWaiting, heldBy: i18n.T("leftovers.park.owner_process", s.OwnerPID)}
-	case parkProcGone:
-		// known: the store was read and holds no job for this park.
-		if known {
-			return parkStatus{verdict: parkFinished}
-		}
+	case pending:
+		return parkStatus{verdict: parkWaiting}
+	case owner == parkProcGone && fired:
+		return parkStatus{verdict: parkRetry}
 	}
 	return parkStatus{verdict: parkUnknown}
 }
 
-// parkResumeStatus reads what the snapshot records about a resume of it.
-// attempted is false when none ever started.
-func parkResumeStatus(s *park.Snapshot) (st parkStatus, attempted bool) {
+// parkLegacyStatus judges a snapshot whose resume started under a version
+// that did not record how it ended: LastResumeAt is set and resume_state
+// is absent. Those versions left one such snapshot behind per monitoring
+// cycle, its job finished, and /parked prune removed them; it must go on
+// doing so. With the job finished and no live owner the resume ran to its
+// end under the old code — a failure there was only ever logged, and the
+// same sweep removed those too. A live owner or a pending job still wins.
+func parkLegacyStatus(s *park.Snapshot, owner parkProc, pending, fired bool) parkStatus {
+	switch {
+	case owner == parkProcAlive:
+		return parkStatus{verdict: parkWaiting, resumed: true, heldBy: i18n.T("leftovers.park.owner_process", s.OwnerPID)}
+	case pending:
+		return parkStatus{verdict: parkWaiting, resumed: true}
+	case fired:
+		return parkStatus{verdict: parkFinished, resumed: true}
+	}
+	return parkStatus{verdict: parkUnknown, resumed: true}
+}
+
+// parkResumeStatus reads the outcome a resume recorded in the snapshot.
+// recorded is false when the snapshot carries none.
+func parkResumeStatus(s *park.Snapshot) (st parkStatus, recorded bool) {
 	switch s.ResumeState {
 	case park.ResumeDone:
 		return parkStatus{verdict: parkFinished, resumed: true}, true
 	case park.ResumeRetry:
 		return parkStatus{verdict: parkRetry}, true
 	case park.ResumeRunning:
-		switch parkProcessState(s.ResumerPID, s.ResumerHost, s.ResumerPIDNS) {
+		switch parkProcessState(s.ResumerPID, s.ResumerHost, s.ResumerPIDNS, s.ResumerStart) {
 		case parkProcAlive:
 			return parkStatus{verdict: parkWaiting, resumed: true, heldBy: i18n.T("leftovers.park.owner_process", s.ResumerPID)}, true
 		case parkProcGone:
@@ -672,34 +698,63 @@ func parkResumeStatus(s *park.Snapshot) (st parkStatus, attempted bool) {
 		}
 		return parkStatus{verdict: parkUnknown, resumed: true}, true
 	}
-	if !s.LastResumeAt.IsZero() {
-		// A snapshot from before the outcome was recorded: a resume
-		// started, and nothing says whether it completed.
-		return parkStatus{verdict: parkUnknown, resumed: true}, true
-	}
 	return parkStatus{}, false
 }
 
-// parkJob looks the park's scheduler job up: in this scheduler's memory,
-// then in the store on disk, where a job another process enqueued lives
-// until it fires. known reports that the lookup could be done at all — a
-// nil job with known set means the store positively holds none.
-func (cli *ChatCLI) parkJob(s *park.Snapshot) (job *scheduler.Job, known bool) {
-	if cli.scheduler == nil || s.SchedulerJobID == "" {
-		return nil, false
+// parkJobIndex is what the schedulers know about the jobs of every park:
+// this process's own, in memory, and the store on disk every chatcli of
+// the user shares — where a job another process enqueued lives until it
+// fires. A park has more than one job: a polling park's snapshot names its
+// poll job, and the wake is a separate park-resume job. They are found by
+// the owner tag every park job carries, and by the id the snapshot names.
+type parkJobIndex struct {
+	byToken map[string][]scheduler.JobStatus
+	byID    map[string]scheduler.JobStatus
+}
+
+// parkJobIndex reads memory and store once; a sweep shares it across all
+// snapshots. What cannot be read is simply absent: absence proves nothing
+// under the rule above, so there is no "unreadable" state to carry.
+func (cli *ChatCLI) parkJobIndex() parkJobIndex {
+	idx := parkJobIndex{byToken: map[string][]scheduler.JobStatus{}, byID: map[string]scheduler.JobStatus{}}
+	if cli.scheduler == nil {
+		return idx
 	}
-	id := scheduler.JobID(s.SchedulerJobID)
-	if j, err := cli.scheduler.Query(id); err == nil && j != nil {
-		return j, true
+	add := func(id scheduler.JobID, owner scheduler.Owner, status scheduler.JobStatus) {
+		if _, seen := idx.byID[string(id)]; seen {
+			return // memory was read first and is this process's truth
+		}
+		idx.byID[string(id)] = status
+		if owner.Kind == "park" && owner.Tag != "" {
+			idx.byToken[owner.Tag] = append(idx.byToken[owner.Tag], status)
+		}
 	}
-	j, err := cli.scheduler.StoredJob(id)
-	switch {
-	case err == nil && j != nil:
-		return j, true
-	case errors.Is(err, scheduler.ErrJobNotFound):
-		return nil, true
+	for _, sum := range cli.scheduler.List(scheduler.ListFilter{IncludeTerminal: true}) {
+		add(sum.ID, sum.Owner, sum.Status)
 	}
-	return nil, false
+	if stored, err := cli.scheduler.StoredJobs(nil); err == nil {
+		for _, j := range stored {
+			add(j.ID, j.Owner, j.Status)
+		}
+	}
+	return idx
+}
+
+// of reports whether any job of the park is still pending, and whether
+// any has fired (reached a terminal state).
+func (idx parkJobIndex) of(s *park.Snapshot) (pending, fired bool) {
+	statuses := idx.byToken[s.Token]
+	if status, ok := idx.byID[s.SchedulerJobID]; ok && s.SchedulerJobID != "" {
+		statuses = append(statuses[:len(statuses):len(statuses)], status)
+	}
+	for _, status := range statuses {
+		if status.IsTerminal() {
+			fired = true
+		} else {
+			pending = true
+		}
+	}
+	return pending, fired
 }
 
 // parkProc is what the process table says about a recorded pid.
@@ -710,22 +765,35 @@ const (
 	// another pid namespace — the number means nothing here.
 	parkProcUnknown parkProc = iota
 	parkProcAlive
-	// parkProcGone: no such process — or it is this very process, which a
+	// parkProcGone: no such process, or the pid now belongs to a process
+	// that started at another time — or it is this very process, which a
 	// caller only asks about once it has established it no longer holds
 	// the park.
 	parkProcGone
 )
 
 // parkProcessState checks a pid a snapshot recorded, if it was recorded
-// where this process can check it.
-func parkProcessState(pid int, host, pidNS string) parkProc {
+// where this process can check it. started is when that process started,
+// as recorded; a live process under the pid with another start time is a
+// later one that was given the same number.
+func parkProcessState(pid int, host, pidNS, started string) parkProc {
 	if pid == 0 || host == "" || host != parkHostname() || pidNS != parkPIDNamespace() {
 		return parkProcUnknown
 	}
-	if pid != os.Getpid() && parkOwnerAlive(pid) {
-		return parkProcAlive
+	if pid == os.Getpid() || !parkOwnerAlive(pid) {
+		return parkProcGone
 	}
-	return parkProcGone
+	if now, ok := parkProcessStart(pid); ok && started != "" && now != started {
+		return parkProcGone
+	}
+	return parkProcAlive
+}
+
+// parkProcessIdentity is this process as a snapshot records it.
+func parkProcessIdentity() (pid int, host, pidNS, started string) {
+	pid = os.Getpid()
+	started, _ = parkProcessStart(pid)
+	return pid, parkHostname(), parkPIDNamespace(), started
 }
 
 // parkOwnerAlive reports whether pid is a running process on this host.
@@ -751,13 +819,6 @@ func parkPIDNamespace() string {
 		return ""
 	}
 	return ns
-}
-
-// parkPruneGrace is how young a park is left alone whatever the evidence:
-// two hub ticks, and never under half a minute. Owner rows are written on
-// the tick, so a park created since the owner's last one has no row yet.
-func parkPruneGrace() time.Duration {
-	return max(2*squadMailPollInterval(), 30*time.Second)
 }
 
 // parkShorts maps tokens to their short form, sorted.

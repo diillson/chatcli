@@ -11,6 +11,7 @@ package cli
 import (
 	"errors"
 	"math"
+	"strconv"
 	"syscall"
 )
 
@@ -36,4 +37,21 @@ func parkProcessAlive(pid int) bool {
 		return true // it opened: it exists, and that is all that is asked
 	}
 	return code == parkStillActive
+}
+
+// parkProcessStart returns when pid started (its creation time).
+func parkProcessStart(pid int) (string, bool) {
+	if pid <= 0 || pid > math.MaxInt32 {
+		return "", false
+	}
+	h, err := syscall.OpenProcess(parkProcessQueryLimited, false, uint32(pid))
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = syscall.CloseHandle(h) }()
+	var created, exited, kernel, user syscall.Filetime
+	if err := syscall.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+		return "", false
+	}
+	return "filetime:" + strconv.FormatInt(created.Nanoseconds(), 10), true
 }

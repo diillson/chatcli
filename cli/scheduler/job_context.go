@@ -109,13 +109,40 @@ func WithTrustedJobTags(ctx context.Context, tags map[string]string) context.Con
 	return context.WithValue(ctx, trustedTagsKey{}, kept)
 }
 
+// trustedTagsFrom returns the reserved tags ctx carries, nil when none.
+func trustedTagsFrom(ctx context.Context) map[string]string {
+	tags, _ := ctx.Value(trustedTagsKey{}).(map[string]string)
+	return tags
+}
+
 // applyTrustedTags puts the reserved tags ctx carries on job.
 func applyTrustedTags(ctx context.Context, job *Job) {
-	tags, _ := ctx.Value(trustedTagsKey{}).(map[string]string)
-	for k, v := range tags {
+	for k, v := range trustedTagsFrom(ctx) {
 		if job.Tags == nil {
 			job.Tags = map[string]string{}
 		}
 		job.Tags[k] = v
 	}
+}
+
+// StoredJobs returns the jobs in the store on disk that match, whether or
+// not this process ever loaded them. Read-only, like StoredJob: nothing in
+// the shared directory is quarantined, cleaned or restored. An error means
+// the store could not be listed, and this process cannot tell what it
+// holds.
+func (s *Scheduler) StoredJobs(match func(*Job) bool) ([]*Job, error) {
+	if s == nil || s.wal == nil {
+		return nil, errors.New("scheduler: no store to read")
+	}
+	all, err := s.wal.scan()
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, j := range all {
+		if match == nil || match(j) {
+			out = append(out, j)
+		}
+	}
+	return out, nil
 }

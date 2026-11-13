@@ -107,7 +107,7 @@ func (a *liveParkAdapter) PrunePark(olderThan string) (string, error) {
 	}
 	if len(rep.retry) > 0 {
 		shorts := parkShorts(rep.retry)
-		fmt.Fprintf(&sb, "\nkept %d park(s) whose resume failed or was interrupted — the user was told to retry them and prune never removes these: %s. The user retries one with /resume %s; to end one on purpose use discard.",
+		fmt.Fprintf(&sb, "\nkept %d park(s) whose wait is over but whose agent did not continue — its resume failed or was interrupted, or its owner died before resuming it; prune never removes these: %s. The user retries one with /resume %s; to end one on purpose use discard.",
 			len(shorts), strings.Join(shorts, ", "), shorts[0])
 	}
 	for _, e := range rep.errs {
@@ -131,7 +131,7 @@ func (a *liveParkAdapter) NotePark(token, text string) error {
 	case st.resumed:
 		return fmt.Errorf("park %s already resumed (or is resuming now): nobody would read the note; nothing was recorded", parkShort(token))
 	case st.verdict == parkFinished:
-		return fmt.Errorf("park %s is finished (its scheduled wake ended): nobody would read the note; nothing was recorded", parkShort(token))
+		return fmt.Errorf("park %s is finished (its resume completed): nobody would read the note; nothing was recorded", parkShort(token))
 	case st.heldBy != "":
 		return fmt.Errorf("park %s is owned by another live process (%s), which rewrites its snapshot without a lock this process shares; the note must be sent from there. Nothing was recorded", parkShort(token), st.heldBy)
 	}

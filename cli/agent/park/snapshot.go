@@ -51,6 +51,11 @@ type Snapshot struct {
 	// while their pids mean different processes: a pid is only ever
 	// checked from the namespace that recorded it.
 	OwnerPIDNS string `json:"owner_pid_ns,omitempty"`
+	// OwnerStart is when the process OwnerPID started, as the platform
+	// reports it (empty where it does not, cheaply). A pid is reused once
+	// its process is gone: a live process under OwnerPID with another
+	// start time is not the owner.
+	OwnerStart string `json:"owner_start,omitempty"`
 
 	// ResumeState is how far a resume of this snapshot got: empty when
 	// none was ever attempted, ResumeRunning while one runs, ResumeDone
@@ -63,6 +68,7 @@ type Snapshot struct {
 	ResumerPID   int    `json:"resumer_pid,omitempty"`
 	ResumerHost  string `json:"resumer_host,omitempty"`
 	ResumerPIDNS string `json:"resumer_pid_ns,omitempty"`
+	ResumerStart string `json:"resumer_start,omitempty"`
 
 	// History is the cli.history at park time. Restored verbatim.
 	History []models.Message `json:"history"`

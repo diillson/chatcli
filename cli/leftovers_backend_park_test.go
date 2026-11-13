@@ -61,30 +61,55 @@ func sortedJoin(in ...string) string {
 }
 
 // saveParkOwnedBy writes an old snapshot that records its owner process on
-// this host, with a job no scheduler here knows.
-func saveParkOwnedBy(t *testing.T, pid int) string {
+// this host, tied to jobID ("" for a job no scheduler here knows).
+func saveParkOwnedBy(t *testing.T, pid int, jobID ...string) string {
 	t.Helper()
 	snap := &park.Snapshot{Token: park.NewToken(), CreatedAt: time.Now().Add(-48 * time.Hour),
-		SchedulerJobID: "job-in-its-owner", OwnerPID: pid, OwnerHost: parkHostname(),
+		SchedulerJobID: "job-in-its-owner", OwnerPID: pid, OwnerHost: parkHostname(), OwnerPIDNS: parkPIDNamespace(),
 		Park: park.Request{Mode: park.ModeDelay, Delay: time.Hour}}
+	if len(jobID) > 0 {
+		snap.SchedulerJobID = jobID[0]
+	}
 	if err := snap.Save(); err != nil {
 		t.Fatal(err)
 	}
 	return snap.Token
 }
 
+// saveParkResumed writes a snapshot a resume left behind in state, age ago.
+func saveParkResumed(t *testing.T, age time.Duration, state, jobID string) string {
+	t.Helper()
+	token := saveParkAged(t, age, jobID)
+	snap, err := park.Load(token)
+	if err == nil {
+		snap.LastResumeAt, snap.ResumeState = time.Now().Add(-age/2), state
+		err = snap.Save()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
 // Pids the fleet's snapshots record; parkOwnerAlive is stubbed over them.
+// (The sweep against REAL processes is in park_two_process_test.go; this
+// table is the map of the rule, one park per row.)
 const (
 	fleetLivePID = 2000001
 	fleetDeadPID = 2000002
 )
 
-// parkFleet is one park of every kind the sweep must tell apart.
+// parkFleet is one park of every kind the rule tells apart.
 type parkFleet struct {
-	cli                                         *ChatCLI
-	waiting, queued, inTurn, remote, ownerAlive string // an agent can still be woken
-	finished, resumed, ownerDead, letGo         string // proven finished
-	orphan, vanished, young                     string // nothing proves either
+	cli *ChatCLI
+	// an agent can still be woken
+	waiting, queued, inTurn, remote, ownerAlive, ownerAliveFired string
+	// a resume of it completed: the only finished
+	resumed, legacyResumed, recentlyResumed string
+	// a resume is owed: it failed, or the job fired and the owner died
+	failed, ownerDeadFired string
+	// nothing proves anything
+	fired, orphan, vanished, ownerDead, letGo string
 }
 
 func newParkFleet(t *testing.T) parkFleet {
@@ -95,15 +120,8 @@ func newParkFleet(t *testing.T) parkFleet {
 	const old = 48 * time.Hour
 	f := parkFleet{cli: cli}
 	f.waiting = saveParkAged(t, old, enqueueParkJob(t, cli, false))
-	f.finished = saveParkAged(t, old, enqueueParkJob(t, cli, true))
-	// No job at all, and a job this scheduler never heard of: either may
-	// be waiting in a process this one cannot see.
-	f.orphan = saveParkAged(t, old, "")
-	f.vanished = saveParkAged(t, old, "job-that-never-existed")
-	// Its job is finished, but it was parked seconds ago.
-	f.young = saveParkAged(t, time.Second, enqueueParkJob(t, cli, true))
-	// Its job fired (the scheduler calls it finished) and the resume is
-	// queued: the snapshot is what that resume will load.
+	// Its job fired and the resume is queued here: the snapshot is what
+	// that resume will load.
 	f.queued = saveParkAged(t, old, enqueueParkJob(t, cli, true))
 	cli.pendingResumeQueue = []string{f.queued}
 	// A turn of an unattended surface is blocked on this one.
@@ -115,18 +133,25 @@ func newParkFleet(t *testing.T) parkFleet {
 		return remoteParkOwner{Instance: "other"}, token == f.remote
 	}})
 	t.Cleanup(func() { setRemoteParkProvider(nil) })
-	// A resume of this one completed; it is kept for forensics.
-	f.resumed = saveParkAged(t, old, "job-purged-from-history")
-	snap, err := park.Load(f.resumed)
-	if err == nil {
-		snap.LastResumeAt, snap.ResumeState = time.Now().Add(-time.Hour), park.ResumeDone
-		err = snap.Save()
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The mirror is silent about these three; the process table is not.
+	// The mirror is silent about these; the process table is not. The
+	// second one's job has FIRED: its owner is alive with the resume
+	// queued, which no job state can tell.
 	f.ownerAlive = saveParkOwnedBy(t, fleetLivePID)
+	f.ownerAliveFired = saveParkOwnedBy(t, fleetLivePID, enqueueParkJob(t, cli, true))
+
+	f.resumed = saveParkResumed(t, old, park.ResumeDone, "job-purged-from-history")
+	f.recentlyResumed = saveParkResumed(t, time.Minute, park.ResumeDone, "")
+	// Written by a released version: a resume started, no outcome field.
+	f.legacyResumed = saveParkResumed(t, old, "", enqueueParkJob(t, cli, true))
+
+	f.failed = saveParkResumed(t, old, park.ResumeRetry, enqueueParkJob(t, cli, true))
+	f.ownerDeadFired = saveParkOwnedBy(t, fleetDeadPID, enqueueParkJob(t, cli, true))
+
+	// A finished job alone, with nobody known to own the park: the wait
+	// is over, and whether the agent continued is not known.
+	f.fired = saveParkAged(t, old, enqueueParkJob(t, cli, true))
+	f.orphan = saveParkAged(t, old, "")
+	f.vanished = saveParkAged(t, old, "job-that-never-existed")
 	f.ownerDead = saveParkOwnedBy(t, fleetDeadPID)
 	f.letGo = saveParkOwnedBy(t, os.Getpid()) // parked here, no longer held
 	prev := parkOwnerAlive
@@ -136,49 +161,47 @@ func newParkFleet(t *testing.T) parkFleet {
 }
 
 func (f parkFleet) live() []string {
-	return []string{f.waiting, f.queued, f.inTurn, f.remote, f.ownerAlive}
+	return []string{f.waiting, f.queued, f.inTurn, f.remote, f.ownerAlive, f.ownerAliveFired}
 }
-func (f parkFleet) dead() []string    { return []string{f.finished, f.resumed, f.ownerDead, f.letGo} }
-func (f parkFleet) unknown() []string { return []string{f.orphan, f.vanished, f.young} }
+func (f parkFleet) oldFinished() []string { return []string{f.resumed, f.legacyResumed} }
+func (f parkFleet) retry() []string       { return []string{f.failed, f.ownerDeadFired} }
+func (f parkFleet) unknown() []string {
+	return []string{f.fired, f.orphan, f.vanished, f.ownerDead, f.letGo}
+}
 
-// The sweep removes only what is proven finished. It never removes a park
-// an agent can still be woken through — including the ones this scheduler
-// alone would call dead: a queued resume, a park another process holds —
-// nor one it merely knows nothing about. An age only narrows it.
+// The sweep removes a park only when a resume of it completed. A finished
+// job, a dead owner, a silent hub — none of them is that. An age only
+// narrows the sweep.
 func TestSweepDeadParksRemovesOnlyTheProvenFinished(t *testing.T) {
 	f := newParkFleet(t)
 	rep := f.cli.sweepDeadParks(24 * time.Hour)
-	if sortedJoin(rep.removed...) != sortedJoin(f.dead()...) {
-		t.Fatalf("removed %v, want the four proven finished", parkShorts(rep.removed))
+	if sortedJoin(rep.removed...) != sortedJoin(f.oldFinished()...) || !parkOnDisk(f.recentlyResumed) {
+		t.Fatalf("removed %v, want the two old completed ones", parkShorts(rep.removed))
 	}
-	if sortedJoin(rep.live...) != sortedJoin(f.live()...) || sortedJoin(rep.unknown...) != sortedJoin(f.orphan, f.vanished) {
-		t.Fatalf("kept: live %v unknown %v (the young park is outside the age)", parkShorts(rep.live), parkShorts(rep.unknown))
+	if sortedJoin(rep.live...) != sortedJoin(f.live()...) || sortedJoin(rep.retry...) != sortedJoin(f.retry()...) || sortedJoin(rep.unknown...) != sortedJoin(f.unknown()...) {
+		t.Fatalf("kept: live %v retry %v unknown %v", parkShorts(rep.live), parkShorts(rep.retry), parkShorts(rep.unknown))
 	}
 	rep = f.cli.sweepDeadParks(0)
-	if len(rep.removed) != 0 || sortedJoin(rep.unknown...) != sortedJoin(f.unknown()...) {
-		t.Fatalf("without an age: removed %v unknown %v", parkShorts(rep.removed), parkShorts(rep.unknown))
+	if sortedJoin(rep.removed...) != f.recentlyResumed {
+		t.Fatalf("without an age the recent completed one goes too: %v", parkShorts(rep.removed))
 	}
-	for _, token := range append(f.live(), f.unknown()...) {
+	for _, token := range append(append(f.live(), f.retry()...), f.unknown()...) {
 		if !parkOnDisk(token) {
-			t.Errorf("park %s was deleted without proof that it is finished", parkShort(token))
-		}
-	}
-	for _, token := range f.dead() {
-		if parkOnDisk(token) {
-			t.Errorf("finished park %s is still on disk", parkShort(token))
+			t.Errorf("park %s was deleted although no resume of it completed", parkShort(token))
 		}
 	}
 	// The remote owner dies without cleaning up and the hub stops
-	// reporting it. That silence alone proves nothing...
+	// reporting it: silence proves nothing, the park stays, as unknown.
 	setRemoteParkProvider(nil)
 	if rep = f.cli.sweepDeadParks(0); len(rep.removed) != 0 || !parkOnDisk(f.remote) {
-		t.Fatalf("a silent mirror is not proof of death: %v", parkShorts(rep.removed))
+		t.Fatalf("a silent mirror is not proof of anything: %v", parkShorts(rep.removed))
 	}
-	// ...but the owner process that is gone from this host is, and so is
-	// its job turning terminal once the grace of a young park has passed.
+	// The owner processes die. Still nothing is finished: the one whose
+	// job fired is owed a resume, the other is unknown.
 	parkOwnerAlive = func(int) bool { return false }
-	if rep = f.cli.sweepDeadParks(0); sortedJoin(rep.removed...) != f.ownerAlive {
-		t.Fatalf("a dead owner's park must become prunable: %v", parkShorts(rep.removed))
+	rep = f.cli.sweepDeadParks(0)
+	if len(rep.removed) != 0 || !strings.Contains(sortedJoin(rep.retry...), f.ownerAliveFired) || !strings.Contains(sortedJoin(rep.unknown...), f.ownerAlive) {
+		t.Fatalf("dead owners: removed %v retry %v unknown %v", parkShorts(rep.removed), parkShorts(rep.retry), parkShorts(rep.unknown))
 	}
 }
 
@@ -186,19 +209,6 @@ func TestSweepDeadParksRemovesOnlyTheProvenFinished(t *testing.T) {
 // counts, the tool names what it left alone, why, and what can end it.
 func TestParkedPruneCommandAndToolShareTheSweep(t *testing.T) {
 	f := newParkFleet(t)
-	out := captureStdout(t, f.cli.parkPrune)
-	if !strings.Contains(out, "4 removed, 8 still pending") || !strings.Contains(out, i18n.T("leftovers.parked.prune_unknown", 3, strings.Join(parkShorts(f.unknown()), ", "))) {
-		t.Fatalf("/parked prune: %q", out)
-	}
-	dead, recent := saveParkOwnedBy(t, fleetDeadPID), saveParkOwnedBy(t, fleetDeadPID)
-	snap, err := park.Load(recent)
-	if err == nil {
-		snap.CreatedAt = time.Now().Add(-time.Hour)
-		err = snap.Save()
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
 	plugins.SetParkCanceller(newLiveParkAdapter(f.cli))
 	t.Cleanup(func() { plugins.SetParkCanceller(nil) })
 	p := plugins.NewBuiltinParkPlugin()
@@ -215,31 +225,34 @@ func TestParkedPruneCommandAndToolShareTheSweep(t *testing.T) {
 			t.Errorf("%v must be an error, got %q", argv, res)
 		}
 	}
-	if !parkOnDisk(dead) || !parkOnDisk(recent) {
+	if !parkOnDisk(f.resumed) || !parkOnDisk(f.recentlyResumed) {
 		t.Fatal("a rejected prune deleted a snapshot")
 	}
 
 	// Flattened {"cmd":"prune","args":{"older_than":"24h"}}.
 	res, err := p.Execute(context.Background(), []string{"prune", "--older_than", "24h"})
-	if err != nil || !strings.HasPrefix(res, "pruned 1 parked snapshot(s) proven finished") || !strings.Contains(res, "older than 24h0m0s") {
+	if err != nil || !strings.HasPrefix(res, "pruned 2 parked snapshot(s) proven finished") || !strings.Contains(res, "older than 24h0m0s") {
 		t.Fatalf("prune older_than: %q %v", res, err)
 	}
-	for _, token := range append(f.live(), f.orphan, f.vanished) {
+	for _, token := range append(append(f.live(), f.retry()...), f.unknown()...) {
 		if !strings.Contains(res, parkShort(token)) || !parkOnDisk(token) {
 			t.Errorf("park %s must be kept and named: %q", parkShort(token), res)
 		}
 	}
-	for _, want := range []string{"still waiting", `"cmd":"discard"`, "state is unknown here", "/parked gc"} {
+	for _, want := range []string{"still waiting", `"cmd":"discard"`, "state is unknown here", "/parked gc", "resume failed or was interrupted", "/resume "} {
 		if !strings.Contains(res, want) {
 			t.Errorf("the result must explain what it kept (%q missing): %q", want, res)
 		}
 	}
-	if parkOnDisk(dead) || !parkOnDisk(recent) {
-		t.Fatalf("old finished gone=%v, recent kept=%v", !parkOnDisk(dead), parkOnDisk(recent))
+	if !parkOnDisk(f.recentlyResumed) {
+		t.Fatal("the age must have spared the recent one")
 	}
-	// Flattened {"cmd":"prune"} takes the recent one too; whole days parse.
-	if res, err = p.Execute(context.Background(), []string{"prune"}); err != nil || !strings.HasPrefix(res, "pruned 1 parked snapshot(s) proven finished (all snapshots)") {
-		t.Fatalf("prune: %q %v", res, err)
+	// /parked prune takes the recent completed one, and says what it kept.
+	out := captureStdout(t, f.cli.parkPrune)
+	if !strings.Contains(out, "1 removed, 13 still pending") ||
+		!strings.Contains(out, i18n.T("leftovers.parked.prune_unknown", 5, strings.Join(parkShorts(f.unknown()), ", "))) ||
+		!strings.Contains(out, i18n.T("leftovers.parked.prune_retry", parkShort(f.failed), parkShort(f.failed))) {
+		t.Fatalf("/parked prune: %q", out)
 	}
 	if res, err = p.Execute(context.Background(), []string{"gc", "--older_than", "7d"}); err != nil || !strings.Contains(res, "older than 168h0m0s") {
 		t.Fatalf("prune by days: %q %v", res, err)
@@ -258,7 +271,7 @@ func TestParkedPruneCommandAndToolShareTheSweep(t *testing.T) {
 func TestParkedGCRemovesWaitingParksAndSaysSo(t *testing.T) {
 	f := newParkFleet(t)
 	out := captureStdout(t, func() { f.cli.handleParkedCommand("/parked gc 24h") })
-	if !strings.Contains(out, "11 removed") || parkOnDisk(f.waiting) || parkOnDisk(f.orphan) || !parkOnDisk(f.young) {
+	if !strings.Contains(out, "15 removed") || parkOnDisk(f.waiting) || parkOnDisk(f.orphan) || !parkOnDisk(f.recentlyResumed) {
 		t.Fatalf("/parked gc removes everything older than the age: %q", out)
 	}
 	help := captureStdout(t, func() { f.cli.handleParkedCommand("/parked help") })

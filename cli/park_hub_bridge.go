@@ -111,9 +111,12 @@ func requestRemoteParkWake(token, outcome, detail string) bool {
 	return p.requestWake(token, outcome, detail)
 }
 
-// ownedParkTokens lists the parks this process can still wake: those
-// registered as waiting by the REPL and those holding an in-turn waiter,
-// minus any whose resume is already queued (no longer waiting).
+// ownedParkTokens lists the parks this process owns until their resume
+// has completed: those registered as waiting by the REPL, those holding an
+// in-turn waiter, and those whose resume is queued or running here. It
+// used to drop a park the moment its job fired — with the resume still
+// queued behind a running turn — and the owner then stopped announcing a
+// park it very much still owned.
 func (cli *ChatCLI) ownedParkTokens() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -133,13 +136,21 @@ func (cli *ChatCLI) ownedParkTokens() []string {
 		}
 	}
 	cli.parkWaiterMu.Unlock()
-	waiting := out[:0]
-	for _, token := range out {
-		if !cli.hasPendingResume(token) {
-			waiting = append(waiting, token)
+	cli.pendingResumeMu.Lock()
+	for _, token := range cli.pendingResumeQueue {
+		if !seen[token] {
+			seen[token] = true
+			out = append(out, token)
 		}
 	}
-	return waiting
+	for token := range cli.resumingParks {
+		if !seen[token] {
+			seen[token] = true
+			out = append(out, token)
+		}
+	}
+	cli.pendingResumeMu.Unlock()
+	return out
 }
 
 // ownsPark reports whether this process holds token's wake path: it
@@ -185,7 +196,7 @@ func (cli *ChatCLI) honorRemoteParkWake(token, outcome, detail string) error {
 	if cli.schedulerBridge == nil {
 		return errors.New("park runtime not ready (scheduler bridge missing)")
 	}
-	if cli.hasPendingResume(token) || cli.wasRecentlyResumed(token) {
+	if cli.isResuming(token) {
 		return nil // already resuming: a second wake would queue a duplicate resume
 	}
 	if snap, err := park.Load(token); err == nil {

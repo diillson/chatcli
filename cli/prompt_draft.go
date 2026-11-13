@@ -6,38 +6,86 @@
 
 package cli
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
-// offerPromptDraft hands text to the next REPL prompt as its initial,
-// editable input — never as a submitted line. A turn that ends takes its
-// stdin reader down, and what the user had typed for it has nowhere else
-// to go: the line they typed for a permission prompt that was withdrawn
-// was announced as "not sent" and then dropped. A surface with no prompt
-// of its own takes none.
+// promptDraftState carries text from a finished turn to the next REPL
+// prompt as its initial, editable input — never as a submitted line. A
+// turn that ends takes its stdin reader down, and what the user had typed
+// for it has nowhere else to go: the line typed for a permission prompt
+// that was withdrawn was announced as "not sent" and then dropped.
 //
-// go-prompt reads its initial text only when it is built. A turn run from
-// its executor (a resume that fired while idle at the prompt) returns into
-// the SAME prompt, so that prompt is asked to rebuild — the mechanism a
-// theme change mid-prompt already uses.
+// go-prompt reads its initial text only when it is built, so the draft has
+// a small life cycle of its own:
+//
+//   - offered: stored; if a prompt is running (the turn ran from its
+//     executor) that prompt is asked to rebuild — with a flag of the
+//     draft's own. It used to borrow the theme-reload flag, which nothing
+//     clears when the typed line leaves the prompt by a mode switch: the
+//     next prompt was built with the draft, its first keystroke tripped the
+//     stale flag, and the rebuilt prompt had no draft left to show.
+//   - shown: a prompt was built with it. It is still pending — that prompt
+//     may be torn down before the user sees it.
+//   - spent: a prompt that showed it has read input. Only then is it
+//     cleared.
+type promptDraftState struct {
+	mu      sync.Mutex
+	text    string
+	shown   bool
+	rebuild bool
+}
+
+// offerPromptDraft hands text to the next REPL prompt. A surface with no
+// prompt of its own takes none.
 func (cli *ChatCLI) offerPromptDraft(text string) {
 	text = strings.TrimSpace(sanitizeTypeaheadPreview(text))
 	if text == "" || cli.unattended {
 		return
 	}
-	cli.promptDraftMu.Lock()
-	cli.promptDraft = strings.TrimSpace(cli.promptDraft + " " + text)
-	cli.promptDraftMu.Unlock()
+	d := &cli.promptDraft
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.text = strings.TrimSpace(d.text + " " + text)
+	d.shown = false
 	if cli.promptRunning {
-		cli.themeReloadPending = true
+		d.rebuild = true
 	}
 }
 
-// takePromptDraft returns the pending draft, once. The REPL calls it for
-// the initial buffer of each prompt it builds.
-func (cli *ChatCLI) takePromptDraft() string {
-	cli.promptDraftMu.Lock()
-	defer cli.promptDraftMu.Unlock()
-	draft := cli.promptDraft
-	cli.promptDraft = ""
-	return draft
+// promptInitialText is the text the prompt being built starts with. The
+// build is also what a rebuild request asked for.
+func (cli *ChatCLI) promptInitialText() string {
+	d := &cli.promptDraft
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.rebuild = false
+	d.shown = d.text != ""
+	return d.text
+}
+
+// promptShouldRebuild is the prompt's exit check, called by go-prompt on
+// every input event: whether it must be torn down and built again. Being
+// called at all means the running prompt is reading input, which spends a
+// draft it was showing.
+func (cli *ChatCLI) promptShouldRebuild(string, bool) bool {
+	d := &cli.promptDraft
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.shown {
+		d.text, d.shown = "", false
+	}
+	return cli.themeReloadPending || d.rebuild
+}
+
+// takePromptRebuild reports, once, that a draft asked for a prompt
+// rebuild. The REPL loop calls it when the prompt has exited.
+func (cli *ChatCLI) takePromptRebuild() bool {
+	d := &cli.promptDraft
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	asked := d.rebuild
+	d.rebuild = false
+	return asked
 }

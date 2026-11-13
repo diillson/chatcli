@@ -13,6 +13,14 @@ import (
 	"github.com/diillson/chatcli/i18n"
 )
 
+// spendPromptDraft is what the REPL does with a draft: build a prompt with
+// it, then read input on that prompt.
+func spendPromptDraft(cli *ChatCLI) string {
+	text := cli.promptInitialText()
+	cli.promptShouldRebuild("", false)
+	return text
+}
+
 // endTurnWith ends a turn through stopStdinReader, the real turn-end path,
 // with lines left on the reader's channel and a half-typed line.
 func endTurnWith(t *testing.T, cli *ChatCLI, promptOpen bool, typing string, lines ...string) (a *AgentMode, out string) {
@@ -43,10 +51,10 @@ func TestWithdrawnLineBecomesTheNextPromptText(t *testing.T) {
 	if got := a.takeSalvagedTypeahead(); len(got) != 0 {
 		t.Fatalf("the line was queued for the model: %q", got)
 	}
-	if got := cli.takePromptDraft(); got != "y and th" {
+	if got := spendPromptDraft(cli); got != "y and th" {
 		t.Fatalf("the next prompt must start with what was typed, cleaned of the escape sequence in it; got %q", got)
 	}
-	if got := cli.takePromptDraft(); got != "" {
+	if got := spendPromptDraft(cli); got != "" {
 		t.Fatalf("a draft is offered once, got %q again", got)
 	}
 
@@ -54,19 +62,19 @@ func TestWithdrawnLineBecomesTheNextPromptText(t *testing.T) {
 	// the prompt is asked to rebuild so the draft can be shown at all.
 	cli.promptRunning = true
 	endTurnWith(t, cli, true, "", "n")
-	if !cli.themeReloadPending || cli.takePromptDraft() != "n" {
+	if !cli.takePromptRebuild() || spendPromptDraft(cli) != "n" {
 		t.Fatal("a draft offered while the prompt runs must request its rebuild")
 	}
 
 	// No prompt was withdrawn: a turn's leftover type-ahead is reported as
 	// before, and nothing is put on the next prompt.
 	cli = &ChatCLI{}
-	if _, out = endTurnWith(t, cli, false, "half", "also run the linter"); !strings.Contains(out, "also run the linter") || cli.takePromptDraft() != "" {
+	if _, out = endTurnWith(t, cli, false, "half", "also run the linter"); !strings.Contains(out, "also run the linter") || spendPromptDraft(cli) != "" {
 		t.Fatalf("plain type-ahead must keep its own path: %q", out)
 	}
 	// A surface with no prompt of its own takes no draft.
 	cli = &ChatCLI{unattended: true}
-	if endTurnWith(t, cli, true, "", "y"); cli.takePromptDraft() != "" {
+	if endTurnWith(t, cli, true, "", "y"); spendPromptDraft(cli) != "" {
 		t.Fatal("an unattended surface has no next prompt to prefill")
 	}
 }

@@ -286,8 +286,10 @@ func TestDeadOwnerWithAPendingStoredJobIsStillWaiting(t *testing.T) {
 	if !parkOnDisk(pending) || sortedJoin(rep.live...) != pending {
 		t.Fatalf("a dead owner's park with a pending stored job must be kept as waiting: %+v", rep)
 	}
-	if sortedJoin(rep.removed...) != sortedJoin(fired, gone) {
-		t.Fatalf("with no pending job in the store a dead owner's park is finished: %+v", rep)
+	// A dead owner never makes a park finished: with its job fired the
+	// agent is owed a resume; with no job known, nothing is known.
+	if len(rep.removed) != 0 || sortedJoin(rep.retry...) != fired || sortedJoin(rep.unknown...) != gone {
+		t.Fatalf("dead owner: fired = kept for retry, no job known = unknown; got %+v", rep)
 	}
 
 	// A process that cannot read the store cannot tell: unknown, kept.

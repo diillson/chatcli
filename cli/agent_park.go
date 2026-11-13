@@ -60,11 +60,13 @@ func (a *AgentMode) handleAgentPark(
 	pendingToolCallID string,
 	pendingToolName string,
 ) error {
+	ownerPID, ownerHost, ownerNS, ownerStart := parkProcessIdentity()
 	snap := &park.Snapshot{
 		Token:              park.NewToken(),
-		OwnerPID:           os.Getpid(),
-		OwnerHost:          parkHostname(),
-		OwnerPIDNS:         parkPIDNamespace(),
+		OwnerPID:           ownerPID,
+		OwnerHost:          ownerHost,
+		OwnerPIDNS:         ownerNS,
+		OwnerStart:         ownerStart,
 		History:            append([]models.Message(nil), a.cli.history...),
 		AgentsLaunched:     a.agentsLaunched,
 		ToolCallsExecd:     a.toolCallsExecd,
@@ -472,7 +474,7 @@ func (a *AgentMode) beginParkResume(snap *park.Snapshot) []string {
 		s.PendingUserDirectives = nil
 		s.LastResumeAt = time.Now().UTC()
 		s.ResumeState = park.ResumeRunning
-		s.ResumerPID, s.ResumerHost, s.ResumerPIDNS = os.Getpid(), parkHostname(), parkPIDNamespace()
+		s.ResumerPID, s.ResumerHost, s.ResumerPIDNS, s.ResumerStart = parkProcessIdentity()
 		return nil
 	})
 	if err != nil {
@@ -486,7 +488,11 @@ func (a *AgentMode) beginParkResume(snap *park.Snapshot) []string {
 // ended. A snapshot already gone (retired, discarded) is nothing to record.
 func (a *AgentMode) endParkResume(token, state string) {
 	err := park.Update(token, func(s *park.Snapshot) error {
-		s.ResumeState = state
+		// A completed resume is never downgraded: "retry" recorded after
+		// the fact by an outer caller must not reopen a finished snapshot.
+		if s.ResumeState != park.ResumeDone {
+			s.ResumeState = state
+		}
 		return nil
 	})
 	if err != nil && !errors.Is(err, park.ErrSnapshotNotFound) {
