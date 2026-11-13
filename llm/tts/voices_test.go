@@ -42,10 +42,10 @@ func TestVoiceInfo_UnknownVoice(t *testing.T) {
 	}
 }
 
-// The catalog must stay a dense 0..52 sid range with unique ids — a gap or a
+// The catalog must stay a dense 0..53 sid range with unique ids — a gap or a
 // duplicate means a typo that would route to the wrong speaker.
 func TestKokoroVoices_DenseUniqueSids(t *testing.T) {
-	const total = 53
+	const total = 54
 	if len(kokoroVoices) != total {
 		t.Fatalf("catalog has %d voices, want %d", len(kokoroVoices), total)
 	}

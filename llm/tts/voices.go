@@ -9,7 +9,8 @@
  * British male, pm_alex a Brazilian Portuguese male. The sid is the voice's
  * position in voices.bin; the table below mirrors the upstream catalog at
  * https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese-English/kokoro-multi-lang-v1_0.html
- * (53 voices, 0-indexed). A wrong sid speaks with the wrong voice silently, so
+ * (54 voices, 0-indexed; em_santa at 53 was added upstream on 2026-10-26
+ * without moving the first 53). A wrong sid speaks with the wrong voice silently, so
  * this table must track the model asset version pinned in provision.go.
  */
 package tts
@@ -98,6 +99,7 @@ var kokoroVoices = map[string]kokoroVoice{
 	"zm_yunxi":      {50, kokoroLangZH},
 	"zm_yunxia":     {51, kokoroLangZH},
 	"zm_yunyang":    {52, kokoroLangZH},
+	"em_santa":      {53, kokoroLangES},
 }
 
 // voiceInfo resolves a kokoro voice name to its speaker id and language.

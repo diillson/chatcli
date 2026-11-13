@@ -23,8 +23,12 @@ import (
 // verification instead of being installed.
 //
 // The engine digests are the ones GitHub publishes for those release
-// assets; the model digests were computed from the downloaded archives
-// (2026-10-11), and the kokoro digest was checked both ways.
+// assets; the whisper digests were computed from the downloaded archives
+// (2026-10-11). The kokoro digest is the one GitHub publishes and was also
+// computed from the download (2026-11-13): upstream replaced that asset on
+// 2026-10-26 to add a 54th voice, which is exactly the in-place replacement
+// the pin exists to catch, and until this entry moved every new install
+// failed to provision the offline voice.
 //
 // Bump SherpaVersion, the engine names below and every digest together.
 var archivePins = map[string]string{
@@ -47,7 +51,7 @@ var archivePins = map[string]string{
 	"sherpa-onnx-whisper-medium.en.tar.bz2": "73d95c169a410b5f23a79f8901374b26e0a16a09ea7f02b5e1db983f4cdfdd67",
 
 	// Kokoro voice model: https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<name>
-	"kokoro-int8-multi-lang-v1_0.tar.bz2": "4c3052abaa60943a341f193888cf6abd68787dae6ab8ae5c925a706caa247e4e",
+	"kokoro-int8-multi-lang-v1_0.tar.bz2": "72c347230107ef8a31098ec4d468a605244beef5f1ed00db97efa13518800653",
 }
 
 // PinnedSHA256 returns the expected SHA-256 of the archive called name. It
