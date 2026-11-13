@@ -23,7 +23,7 @@ func sessionSubcommand(args []string) string {
 // confirmation.
 func (*BuiltinSessionPlugin) IsReadOnly(args []string) bool {
 	switch sessionSubcommand(args) {
-	case "search", "get", "list":
+	case "search", "get", "list", "status":
 		return true
 	default:
 		return false

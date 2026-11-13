@@ -14,6 +14,8 @@
  *   forget   { match | id, dry_run? }        -> removed matching facts (or one by id; dry_run previews)
  *   list     { match?, category?, limit? }    -> facts with their ids
  *   recall   { query? }                       -> current relevant memory
+ *   stats                                     -> store counts and usage patterns
+ *   why                                       -> what the last auto-recall injected, and why
  *
  * Like @scheduler, the top-level ChatCLI owns the memory store but the
  * plugin is instantiated before it, so the plugin reaches the store through
@@ -65,6 +67,14 @@ type FactBrowser interface {
 	ForgetPreview(match string) (string, error)
 	// ForgetByID removes the one fact whose id starts with idPrefix.
 	ForgetByID(idPrefix string) (string, error)
+}
+
+// MemoryInspector is an OPTIONAL capability behind the read-only @memory
+// stats and why: what /memory stats and /memory why show the human.
+type MemoryInspector interface {
+	Stats() (string, error)
+	// WhyLastRecall: what the last automatic recall injected, and why.
+	WhyLastRecall() (string, error)
 }
 
 type GraphAccessor interface {
@@ -157,6 +167,8 @@ Subcommands (cmd + args):
   forget    {id:"<id or id prefix from list>"}     remove exactly one fact
   list      {match?, category?, limit?:50}         facts with their ids (to pick one for forget, or to audit memory)
   recall    {query?:"topic to recall", as_of?}
+  stats                                            read-only: how much is stored (facts, topics, projects) and usage patterns
+  why                                              read-only: the facts the last automatic recall injected this session, and why each ranked
   timeline  {project?, from?, to?, query?, limit?, as_of?}   dated episode history (WHEN);
             as_of (YYYY-MM-DD) counts "3 months ago" from that day, this call only
   neighbors {query:"<subject or node id>"}   local graph: links (→), backlinks (←) + related notes
@@ -195,7 +207,7 @@ examples or generated artifacts.`
 }
 
 // Version is semver; bumped when the surface changes.
-func (*BuiltinMemoryPlugin) Version() string { return "1.5.1" }
+func (*BuiltinMemoryPlugin) Version() string { return "1.6.0" }
 
 // Path is empty for builtin plugins.
 func (*BuiltinMemoryPlugin) Path() string { return "" }
@@ -258,6 +270,18 @@ func (*BuiltinMemoryPlugin) Schema() string {
 					{"name": "as_of", "type": "string", "description": "Date relative expressions in query are counted from, for this call only (2006-01-02 or RFC 3339). Default: the current date."},
 				},
 				"examples": []string{`{"cmd":"recall","args":{"query":"certifications"}}`},
+			},
+			{
+				"name":        "stats",
+				"description": "Read-only: how much memory holds (facts, topics, projects) and the usage patterns recorded (sessions, peak hours, top commands).",
+				"flags":       []map[string]interface{}{},
+				"examples":    []string{`{"cmd":"stats"}`},
+			},
+			{
+				"name":        "why",
+				"description": "Read-only: the facts the last automatic recall injected into this conversation and the signals that ranked each (keywords, semantic, recency). Use it to explain why a memory surfaced.",
+				"flags":       []map[string]interface{}{},
+				"examples":    []string{`{"cmd":"why"}`},
 			},
 			{
 				"name":        "timeline",
@@ -463,10 +487,30 @@ func (p *BuiltinMemoryPlugin) ExecuteWithStream(_ context.Context, args []string
 	case "link", "unlink":
 		return executeMemoryLink(adapter, cmd, inner)
 	default:
+		return executeMemoryInspect(adapter, cmd, inner)
+	}
+}
+
+// executeMemoryInspect runs stats and why; any other cmd reaching it is
+// unknown. An argument is refused, not ignored: "stats --category x"
+// answering with the global numbers would read as the filtered ones.
+func executeMemoryInspect(adapter MemoryAdapter, cmd, inner string) (string, error) {
+	if cmd != "stats" && cmd != "why" {
 		return "", fmt.Errorf(
-			"@memory: unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map|link|unlink)", cmd,
+			"@memory: unknown cmd %q (valid: remember|profile|forget|list|recall|stats|why|timeline|neighbors|map|link|unlink)", cmd,
 		)
 	}
+	mi, ok := adapter.(MemoryInspector)
+	if !ok {
+		return "", fmt.Errorf("@memory %s: not available in this session", cmd)
+	}
+	if extra := unknownArgKeys(inner); len(extra) > 0 {
+		return "", fmt.Errorf("@memory %s: takes no arguments (got %s)", cmd, strings.Join(extra, ", "))
+	}
+	if cmd == "stats" {
+		return mi.Stats()
+	}
+	return mi.WhyLastRecall()
 }
 
 // executeMemoryLink runs @memory link / unlink against the optional
@@ -522,7 +566,7 @@ func parseMemoryInvocation(args []string) (string, string, error) {
 		canon := canonicalMemoryCmd(cmdStr)
 		if canon == "" {
 			return "", "", fmt.Errorf(
-				"missing or unknown cmd %q (valid: remember|profile|forget|list|recall|timeline|neighbors|map|link|unlink)", cmdStr,
+				"missing or unknown cmd %q (valid: remember|profile|forget|list|recall|stats|why|timeline|neighbors|map|link|unlink)", cmdStr,
 			)
 		}
 		var inner string
@@ -569,6 +613,10 @@ func canonicalMemoryCmd(s string) string {
 		return "map"
 	case "timeline", "history", "episodes", "chronology":
 		return "timeline"
+	case "stats", "statistics":
+		return "stats"
+	case "why", "explain", "why_recalled":
+		return "why"
 	case "link", "relate", "connect", "link_notes", "add_link":
 		return "link"
 	case "unlink", "disconnect", "unrelate", "remove_link", "delete_link":

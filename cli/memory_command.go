@@ -31,7 +31,8 @@ import (
 //	/memory topics       — show tracked topics
 //	/memory projects     — show tracked projects
 //	/memory stats        — show usage statistics
-//	/memory facts [cat]  — list facts, optionally filtered by category
+//	/memory facts [cat] [--match <text>] [--limit <n>] — list facts with their ids
+//	/memory forget <text> [--dry-run] | forget --id <id> — remove facts (preview with --dry-run)
 //	/memory timeline [q] — dated episode history; q filters by time ("3 meses atrás", "abril", "2026-04") and/or content
 //	/memory compact      — force memory compaction
 func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
@@ -75,9 +76,6 @@ func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 	case strings.HasPrefix(args, "remember "):
 		cli.rememberMemoryFact(strings.TrimSpace(strings.TrimPrefix(args, "remember ")))
 
-	case strings.HasPrefix(args, "forget "):
-		cli.forgetMemoryFact(strings.TrimSpace(strings.TrimPrefix(args, "forget ")))
-
 	case args == "topics":
 		cli.showMemoryTopics()
 
@@ -86,10 +84,6 @@ func (cli *ChatCLI) handleMemoryCommand(ctx context.Context, input string) {
 
 	case args == "stats":
 		cli.showMemoryStats()
-
-	case strings.HasPrefix(args, "facts"):
-		category := strings.TrimSpace(strings.TrimPrefix(args, "facts"))
-		cli.showMemoryFacts(category)
 
 	case args == "compact":
 		cli.runMemoryCompact(ctx)
@@ -125,6 +119,8 @@ func (cli *ChatCLI) dispatchMemoryPrefixCommand(ctx context.Context, args string
 		{"link", func(rest string) { cli.memoryLinkCommand(rest, false) }},
 		{"unlink", func(rest string) { cli.memoryLinkCommand(rest, true) }},
 		{"vault", cli.memoryVaultCommand},
+		{"forget", cli.forgetMemoryCommand},
+		{"facts", cli.showMemoryFacts},
 	}
 	for _, c := range commands {
 		if args == c.name || strings.HasPrefix(args, c.name+" ") {
@@ -522,7 +518,11 @@ func (cli *ChatCLI) showMemoryStats() {
 	fmt.Println()
 }
 
-func (cli *ChatCLI) showMemoryFacts(category string) {
+func (cli *ChatCLI) showMemoryFacts(rest string) {
+	category, match, limit, ok := parseFactsListing(rest)
+	if !ok {
+		return
+	}
 	mgr := cli.memoryStore.Manager()
 
 	var facts []*struct {
@@ -557,6 +557,20 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 		}
 	}
 
+	// total keeps what matched, so a capped listing says what it left out.
+	total := 0
+	shown := facts[:0]
+	for _, f := range facts {
+		if match != "" && !strings.Contains(strings.ToLower(f.Content), match) {
+			continue
+		}
+		total++
+		if limit == 0 || len(shown) < limit {
+			shown = append(shown, f)
+		}
+	}
+	facts = shown
+
 	fmt.Println()
 	title := i18n.T("mem.cmd.facts.title")
 	if category != "" {
@@ -579,15 +593,21 @@ func (cli *ChatCLI) showMemoryFacts(category string) {
 			scoreColor = ColorYellow
 		}
 
-		fmt.Printf("  %s %s [%s] %s\n",
+		// The id is what /memory forget --id takes.
+		fmt.Printf("  %s %s %s [%s] %s\n",
 			colorize(fmt.Sprintf("%3d.", i+1), ColorGray),
+			colorize(shortFactID(f.ID), ColorGray),
 			f.Content,
 			colorize(f.Category, ColorCyan),
 			i18n.T("mem.cmd.facts.score_access", colorize(fmt.Sprintf("%.2f", f.Score), scoreColor), f.Accessed),
 		)
 	}
 
-	fmt.Printf("\n  %s %s\n", colorize(i18n.T("mem.cmd.facts.total"), ColorGray), i18n.T("mem.cmd.facts.total_count", len(facts)))
+	count := i18n.T("mem.cmd.facts.total_count", total)
+	if len(facts) < total {
+		count = i18n.T("kp.memory.facts.shown", len(facts), total)
+	}
+	fmt.Printf("\n  %s %s\n", colorize(i18n.T("mem.cmd.facts.total"), ColorGray), count)
 	fmt.Println()
 }
 
@@ -836,11 +856,8 @@ func (cli *ChatCLI) getMemoryArgSuggestions(d prompt.Document, args []string, li
 		}
 		return prompt.FilterHasPrefix(suggestions, word, true)
 
-	case "facts":
-		if !atArg(args, line, 2) {
-			return nil
-		}
-		return prompt.FilterHasPrefix(memoryCategorySuggestions(false), word, true)
+	case "facts", "forget":
+		return cli.memoryFactArgSuggestions(args, line, word)
 
 	case "remember":
 		if !atArg(args, line, 2) {

@@ -490,15 +490,22 @@ func (a *sessionPluginAdapter) Fork(_ context.Context, name string) (string, err
 // instead (persistBoundSession / refreshBoundSession, last-writer-wins on the
 // whole file; see cli_session_binding.go). A missing session is created
 // lazily by the first write-through.
-func (a *sessionPluginAdapter) Attach(_ context.Context, name string) (string, error) {
+//
+// Every branch ends in finishToolAttach, which the tool path used to skip.
+func (a *sessionPluginAdapter) Attach(ctx context.Context, name string) (string, error) {
 	if err := a.checkSessionWrite(name); err != nil {
 		return "", err
 	}
 	cli := a.cli
+	// Already bound to it. Falling through took the merge branch and
+	// prepended the session's own history to itself (2, 4, 8… messages).
+	if cli.boundSessionName() == name {
+		return i18n.T("kp.session.attach.same", name), nil
+	}
 	if !cli.sessionManager.SessionExists(name) {
 		cli.currentSessionName = name
 		cli.boundRemoteOnly = false
-		cli.boundRemoteOnly = false
+		a.finishToolAttach(ctx, false, false)
 		return i18n.T("session.tool.attach.new", name), nil
 	}
 	sd, err := cli.sessionManager.LoadSessionV2(name)
@@ -509,8 +516,7 @@ func (a *sessionPluginAdapter) Attach(_ context.Context, name string) (string, e
 		cli.restoreSessionData(sd)
 		cli.currentSessionName = name
 		cli.boundRemoteOnly = false
-		cli.boundRemoteOnly = false
-		cli.stampBoundSession()
+		a.finishToolAttach(ctx, true, true)
 		return i18n.T("session.tool.attach.loaded", name, len(cli.history)), nil
 	}
 	// Non-empty conversation attaching to an existing session: MERGE — the
@@ -522,8 +528,51 @@ func (a *sessionPluginAdapter) Attach(_ context.Context, name string) (string, e
 	cli.checkpoints = nil
 	cli.currentSessionName = name
 	cli.boundRemoteOnly = false
-	cli.stampBoundSession()
+	a.finishToolAttach(ctx, true, false)
 	return i18n.T("session.tool.attach.bound", name), nil
+}
+
+// finishToolAttach applies the side effects of /session attach that make
+// sense mid-turn. The sync watermark is re-stamped for the NEW binding:
+// holding the previous session's stamp, the next write-through read a
+// lazily created session's missing file as "deleted by another surface"
+// and dropped the binding. A changed history marks the next cache write as
+// an expected rebuild.
+//
+// Unlike the command, which rotates the hub thread on every attach, the
+// tool rotates ONLY when the conversation became a different one (a saved
+// history loaded into an empty conversation). Rotating deletes the previous
+// hub thread and its events; when the tool merely names or merges into the
+// running conversation its identity is unchanged and, once bound, hub pulls
+// are discarded anyway (syncHubContext) — a rotation triggered by the model
+// mid-turn would only destroy the backlog the gateway channels still read.
+func (a *sessionPluginAdapter) finishToolAttach(ctx context.Context, historyChanged, identityChanged bool) {
+	cli := a.cli
+	cli.stampBoundSession()
+	if historyChanged {
+		cli.notePrefixChanged("session attach (tool)")
+	}
+	if identityChanged {
+		cli.rotateHubThread(ctx)
+	}
+}
+
+// Status implements plugins.SessionStatusReporter: the binding /session
+// status reports. Read-only.
+func (a *sessionPluginAdapter) Status(_ context.Context) (string, error) {
+	if a.cli == nil {
+		return "", fmt.Errorf("%s", i18n.T("session.tool.unavailable"))
+	}
+	// On captured surfaces currentSessionName holds a surface session id,
+	// not a saved-session name (see checkSessionWrite).
+	if rpcCaptureActive.Load() {
+		return i18n.T("kp.session.tool.status_surface"), nil
+	}
+	name := a.cli.boundSessionName()
+	if name == "" {
+		return i18n.T("kp.session.tool.status_unbound"), nil
+	}
+	return i18n.T("kp.session.tool.status_bound", name, len(a.cli.history)), nil
 }
 
 // Detach implements plugins.SessionWriter: drop the binding. The conversation

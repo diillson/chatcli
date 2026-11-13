@@ -100,6 +100,13 @@ func skillPaths(name string) (skillMD, backup string, err error) {
 	return filepath.Join(dir, name, "SKILL.md"), filepath.Join(dir, name, skillBackupName), nil
 }
 
+// SkillRestoreFiles returns the two files RestoreSkill works on: the
+// authored SKILL.md it overwrites and the backup it restores from. It lets
+// a caller show what a restore would do before doing it.
+func SkillRestoreFiles(name string) (skillMD, backup string, err error) {
+	return skillPaths(name)
+}
+
 // HasBackup reports whether a recoverable backup exists for name.
 func HasBackup(name string) bool {
 	_, backup, err := skillPaths(name)

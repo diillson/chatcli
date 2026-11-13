@@ -214,7 +214,7 @@ func (r *ClawHubRegistry) GetSkillMeta(ctx context.Context, nameOrSlug string) (
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("skill '%s' not found in %s", nameOrSlug, r.name)
+		return nil, skillNotFound(nameOrSlug, r.name)
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))

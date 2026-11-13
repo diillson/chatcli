@@ -139,15 +139,17 @@ func (p *BuiltinMoaPlugin) IsConcurrencySafe(args []string) bool { return p.IsRe
 
 // --- @skill -------------------------------------------------------------
 
-// IsReadOnly reports true for list, show and stats; create, update, remove,
-// restore, export and import change the skill library or write files.
+// IsReadOnly reports true for list, show, stats and the registry lookups
+// (search, info); create, update, remove, restore, export and import change
+// the skill library or write files, and pin/unpin change what every later
+// turn of the session carries.
 func (*BuiltinSkillPlugin) IsReadOnly(args []string) bool {
 	cmd, _, err := parseSkillInvocation(args)
 	if err != nil {
 		return false
 	}
 	switch cmd {
-	case "list", "show", "stats":
+	case "list", "show", "stats", "search", "info":
 		return true
 	}
 	return false

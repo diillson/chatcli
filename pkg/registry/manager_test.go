@@ -2,7 +2,11 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -357,5 +361,54 @@ func TestManagerGetRegistries(t *testing.T) {
 	}
 	if infos[1].Name != "b" || infos[1].Enabled {
 		t.Errorf("unexpected registry[1]: %+v", infos[1])
+	}
+}
+
+// Looking up a skill a registry does not carry is the normal case for every
+// locally authored skill. Counted as a failure, three such lookups put a
+// healthy registry in cooldown and the next search skipped it silently.
+func TestManagerNotFoundIsNotARegistryFailure(t *testing.T) {
+	var searches, metaStatus atomic.Int32
+	metaStatus.Store(http.StatusNotFound)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/skills/search" {
+			searches.Add(1)
+			_, _ = w.Write([]byte(`{"skills":[{"name":"frontend-design"}]}`))
+			return
+		}
+		w.WriteHeader(int(metaStatus.Load()))
+	}))
+	defer srv.Close()
+	newManager := func() *RegistryManager {
+		rm, err := NewRegistryManager(RegistriesConfig{
+			InstallDir: t.TempDir(),
+			Registries: []RegistryEntry{{Name: "fake", URL: srv.URL, IsActive: true, Type: "custom"}},
+		}, zap.NewNop())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rm
+	}
+	ctx := context.Background()
+
+	rm := newManager()
+	for i := 0; i < defaultMaxFailures+1; i++ {
+		rm.GetAllSkillMeta(ctx, "homegrown")
+		if _, err := rm.GetSkillMetaFrom(ctx, "homegrown", "fake"); !errors.Is(err, ErrSkillNotFound) {
+			t.Fatalf("a miss must be detectable as ErrSkillNotFound, got %v", err)
+		}
+	}
+	if merged, _ := rm.SearchAll(ctx, "frontend"); len(merged) != 1 || searches.Load() != 1 {
+		t.Fatalf("after only misses the registry must still be searched: hits=%d requests=%d", len(merged), searches.Load())
+	}
+
+	// A registry that answers with a server error is still a failing one.
+	metaStatus.Store(http.StatusInternalServerError)
+	rm = newManager()
+	for i := 0; i < defaultMaxFailures; i++ {
+		rm.GetAllSkillMeta(ctx, "homegrown")
+	}
+	if merged, _ := rm.SearchAll(ctx, "frontend design"); len(merged) != 0 || searches.Load() != 1 {
+		t.Fatalf("server errors must still put the registry in cooldown: hits=%d requests=%d", len(merged), searches.Load())
 	}
 }

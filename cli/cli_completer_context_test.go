@@ -144,9 +144,9 @@ func TestContextExportSuggestions_AfterNameSuggestsPath(t *testing.T) {
 
 func TestSuggestPreferArgs_OffersResetAndLocal(t *testing.T) {
 	cli := newCompleterTestCLI(t)
-	// 4 tokens with trailing space so FilterHasPrefix sees the empty
-	// word-before-cursor and keeps every suggestion.
-	line := "/skill prefer foo bar "
+	// Right after the name, with a trailing space so FilterHasPrefix sees
+	// the empty word-before-cursor and keeps every source.
+	line := "/skill prefer foo "
 	d := docWithCursor(line, len(line))
 	out := cli.suggestPreferArgs(d)
 	seen := map[string]bool{}

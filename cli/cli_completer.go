@@ -1025,6 +1025,14 @@ func (cli *ChatCLI) getContextNameSuggestions() []prompt.Suggest {
 	return suggestions
 }
 
+// sessionExportFormatSuggestions lists the formats a session exports to.
+func sessionExportFormatSuggestions() []prompt.Suggest {
+	return []prompt.Suggest{
+		{Text: "md", Description: i18n.T("complete.session.export_md")},
+		{Text: "jsonl", Description: i18n.T("complete.session.export_jsonl")},
+	}
+}
+
 // getSessionSuggestions - Sugestões para /session
 func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 	line := d.TextBeforeCursor()
@@ -1057,10 +1065,10 @@ func (cli *ChatCLI) getSessionSuggestions(d prompt.Document) []prompt.Suggest {
 	}
 
 	if args[1] == "export" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
-		return prompt.FilterHasPrefix([]prompt.Suggest{
-			{Text: "md", Description: i18n.T("complete.session.export_md")},
-			{Text: "jsonl", Description: i18n.T("complete.session.export_jsonl")},
-		}, d.GetWordBeforeCursor(), true)
+		return prompt.FilterHasPrefix(sessionExportFormatSuggestions(), d.GetWordBeforeCursor(), true)
+	}
+	if args[1] == "transcript" && len(args) >= 3 && args[2] == "export" && atArg(args, line, 3) {
+		return prompt.FilterHasPrefix(sessionExportFormatSuggestions(), d.GetWordBeforeCursor(), true)
 	}
 	if args[1] == "transcript" && (len(args) == 2 || (len(args) == 3 && !strings.HasSuffix(line, " "))) {
 		return prompt.FilterHasPrefix([]prompt.Suggest{
@@ -1257,6 +1265,8 @@ func skillSubcommandSuggestions() []prompt.Suggest {
 		{Text: "pin", Description: i18n.T("complete.skill.sub_pin")},
 		{Text: "unpin", Description: i18n.T("complete.skill.sub_unpin")},
 		{Text: "pinned", Description: i18n.T("complete.skill.sub_pinned")},
+		{Text: "show", Description: i18n.T("kp.skill.help.show")},
+		{Text: "restore", Description: i18n.T("kp.skill.help.restore")},
 		{Text: "stats", Description: i18n.T("complete.skill.sub_stats")},
 		{Text: "help", Description: i18n.T("complete.skill.sub_help")},
 	}
@@ -1279,6 +1289,18 @@ func (cli *ChatCLI) skillSubcommandHandler(sub string) func(prompt.Document) []p
 		return cli.suggestPinnedNames
 	case "prefer":
 		return cli.suggestPreferArgs
+	case "show":
+		return func(d prompt.Document) []prompt.Suggest { return cli.suggestSkillNames(d, nil) }
+	case "restore":
+		return func(d prompt.Document) []prompt.Suggest {
+			line := d.TextBeforeCursor()
+			if atArg(strings.Fields(line), line, 3) {
+				return prompt.FilterHasPrefix([]prompt.Suggest{
+					{Text: "--yes", Description: i18n.T("kp.complete.skill.restore_yes")},
+				}, d.GetWordBeforeCursor(), true)
+			}
+			return cli.suggestSkillNames(d, plugins.HasBackup)
+		}
 	}
 	return nil
 }
@@ -1455,8 +1477,12 @@ func (cli *ChatCLI) suggestPreferArgs(d prompt.Document) []prompt.Suggest {
 	args := strings.Fields(line)
 	endsWithSpace := strings.HasSuffix(line, " ")
 
-	// Only suggest sources once we are past the skill-name token.
-	if len(args) < 4 && (len(args) != 4 || endsWithSpace) {
+	// The source slot opens right after the name: the old guard only
+	// matched once a source was half typed, so the list never appeared.
+	if len(args) == 2 || (len(args) == 3 && !endsWithSpace) {
+		return cli.suggestInstalledBaseNames(d)
+	}
+	if len(args) > 4 || (len(args) == 4 && endsWithSpace) {
 		return nil
 	}
 	registry := cli.getRegistryNameSuggestions(d)
@@ -1464,6 +1490,45 @@ func (cli *ChatCLI) suggestPreferArgs(d prompt.Document) []prompt.Suggest {
 	suggestions = append(suggestions, prompt.Suggest{Text: "--reset", Description: i18n.T("complete.skill.flag_reset")})
 	suggestions = append(suggestions, registry...)
 	suggestions = append(suggestions, prompt.Suggest{Text: "local", Description: i18n.T("complete.skill.prefer_local")})
+	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+}
+
+// suggestInstalledBaseNames offers installed skills without source prefix.
+func (cli *ChatCLI) suggestInstalledBaseNames(d prompt.Document) []prompt.Suggest {
+	installed, err := cli.skillHandler.registryMgr.ListInstalled()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	suggestions := make([]prompt.Suggest, 0, len(installed))
+	for _, s := range installed {
+		if seen[s.BaseName] {
+			continue
+		}
+		seen[s.BaseName] = true
+		suggestions = append(suggestions, prompt.Suggest{Text: s.BaseName, Description: s.Description})
+	}
+	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
+}
+
+// suggestSkillNames offers skill names for the name slot of /skill show
+// and /skill restore, only those keep accepts when it is set.
+func (cli *ChatCLI) suggestSkillNames(d prompt.Document, keep func(name string) bool) []prompt.Suggest {
+	line := d.TextBeforeCursor()
+	if cli.personaHandler == nil || !atArg(strings.Fields(line), line, 2) {
+		return nil
+	}
+	mgr := cli.personaHandler.GetManager()
+	if mgr == nil {
+		return nil
+	}
+	var suggestions []prompt.Suggest
+	for _, s := range mgr.ListAllSkills() {
+		if keep != nil && !keep(s.Name) {
+			continue
+		}
+		suggestions = append(suggestions, prompt.Suggest{Text: s.Name, Description: s.Description})
+	}
 	return prompt.FilterHasPrefix(suggestions, d.GetWordBeforeCursor(), true)
 }
 

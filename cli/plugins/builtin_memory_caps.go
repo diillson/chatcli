@@ -11,7 +11,7 @@ import "strings"
 // Capability advertisements for BuiltinMemoryPlugin.
 
 // IsReadOnly reports true for the subcommands that only read the user's
-// memory (recall, timeline, map, neighbors). remember, profile and forget
+// memory (recall, timeline, map, neighbors, list, stats, why). remember, profile and forget
 // change it and stay behind the confirmation policy, as does anything that
 // does not parse.
 func (*BuiltinMemoryPlugin) IsReadOnly(args []string) bool {
@@ -20,7 +20,7 @@ func (*BuiltinMemoryPlugin) IsReadOnly(args []string) bool {
 		return false
 	}
 	switch cmd {
-	case "recall", "timeline", "map", "neighbors", "list":
+	case "recall", "timeline", "map", "neighbors", "list", "stats", "why":
 		return true
 	case "forget":
 		// A dry run only previews.
