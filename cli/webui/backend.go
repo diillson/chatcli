@@ -41,6 +41,10 @@ type TurnOptions struct {
 	Model     string
 	Images    []ImageInput
 	Documents []DocumentInput // PDFs
+	// HandoffOut, when non-nil on a chat turn, receives the task the
+	// assistant proposed for coder mode ("" when it proposed none). The
+	// page shows it as a proposal and runs it only if the user accepts.
+	HandoffOut *string
 }
 
 // Status is what the page shows in its header and settings: the active

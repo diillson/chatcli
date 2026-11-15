@@ -380,9 +380,12 @@ func (b *rpcBackend) PromptWith(ctx context.Context, session, text string, opts 
 
 	if b.cli != nil && !opts.Plain {
 		turn, err := b.cli.RunChatTurnRPC(ctx, session, text, hist,
-			cli.RPCChatOpts{Provider: opts.Provider, Model: opts.Model})
+			cli.RPCChatOpts{Provider: opts.Provider, Model: opts.Model, Handoff: opts.HandoffOut != nil})
 		if err != nil {
 			return "", err
+		}
+		if opts.HandoffOut != nil {
+			*opts.HandoffOut = turn.HandoffTask
 		}
 		newHist := capHistory(turn.History, historyCap(true))
 		b.mu.Lock()

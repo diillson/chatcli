@@ -37,6 +37,7 @@ var uiKeys = []string{
 	"session.bound", "session.new", "session.deleted", "session.confirmDelete", "session.forkName", "session.live",
 	"theme", "lang", "offline", "busy",
 	"skin", "skin.terminal", "skin.default", "skin.attach", "skin.image", "skin.mic",
+	"handoff.title", "handoff.accept", "handoff.dismiss", "handoff.dismissed",
 }
 
 // UILanguages are the languages the page can switch between at runtime.

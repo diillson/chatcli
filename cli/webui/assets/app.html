@@ -115,6 +115,10 @@
   .msg.user .who { background:var(--user); color:var(--strong); }
   .msg.assistant .who { background:var(--panel2); color:var(--brand); border:1px solid var(--border); }
   .msg.system .who { background:transparent; color:var(--faint); }
+  .msg.handoff .body { border:1px solid var(--border); border-left:3px solid var(--brand); border-radius:6px; padding:10px 12px; background:var(--panel2); }
+  .msg.handoff .handoff-title { color:var(--faint); font-size:12px; }
+  .msg.handoff .handoff-task { color:var(--strong); font-weight:600; margin:6px 0 10px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .msg.handoff .handoff-actions { display:flex; gap:8px; flex-wrap:wrap; }
   .msg .body { flex:1; min-width:0; }
   .msg .col { flex:1; min-width:0; display:flex; flex-direction:column; }
   .msg .col .body { flex:none; }
@@ -405,6 +409,7 @@ const DEFAULTS = {
   'session.bound':'Bound to {name}','session.new':'New session started','session.deleted':'Session deleted','session.confirmDelete':'Delete saved session {name}?','session.forkName':'Name for the fork','session.live':'live',
   'theme':'theme','lang':'language','offline':'Server unreachable','busy':'A turn is already running',
   'skin':'Theme','skin.terminal':'terminal','skin.default':'default','skin.attach':'attach','skin.image':'image','skin.mic':'mic',
+  'handoff.title':'The assistant proposes running this in coder mode:','handoff.accept':'Run in coder','handoff.dismiss':'Stay in chat','handoff.dismissed':'Staying in chat.',
 };
 // The server ships every switchable language; the page starts in the
 // process language unless the visitor picked another one before.
@@ -636,9 +641,9 @@ function appendChunk(text) {
   setWorking('');
   scrollDown();
 }
-function endAssistant(finalText) {
+function endAssistant(finalText, replace) {
   const s = state.streaming; if (!s) { if (finalText) addMessage('assistant', finalText); return; }
-  if (finalText && finalText.trim() && s.text.trim() === '') s.text = finalText;
+  if (finalText && finalText.trim() && (replace || s.text.trim() === '')) s.text = finalText;
   if (s.work) s.work.remove();
   if (s.text.trim() === '' && !s.thought && !s.el.querySelector('details')) { s.el.remove(); state.streaming = null; return; }
   s.body.innerHTML = md(s.text);
@@ -726,6 +731,7 @@ async function sendTurn(text) {
   if (state.run || state.busy) { toast(t('busy'), 'warn'); return; }
   text = (text || $('#input').value).trim();
   if (!text && !state.images.length) return;
+  clearHandoff();
   const images = state.images.slice();
   const isPDF = i => i.media_type === 'application/pdf' || /\.pdf$/i.test(i.name || '');
   const previews = images.filter(i => !isPDF(i)).map(i => 'data:' + i.media_type + ';base64,' + i.data);
@@ -737,8 +743,8 @@ async function sendTurn(text) {
   try {
     resp = await fetch('/api/turn', { method: 'POST', headers: { 'X-Web-Token': TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ session: state.session, mode: state.mode, text, provider: state.provider, model: state.model, images }) });
-  } catch (e) { endAssistant(''); setBusy(false); refocusComposer(); toast(t('offline'), 'err'); return; }
-  if (!resp.ok) { endAssistant(''); setBusy(false); refocusComposer(); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return; }
+  } catch (e) { endAssistant(''); setBusy(false); refocusComposer(); toast(t('offline'), 'err'); return false; }
+  if (!resp.ok) { endAssistant(''); setBusy(false); refocusComposer(); let msg = resp.statusText; try { msg = (await resp.json()).error || msg; } catch {} toast(msg, 'err'); return false; }
   const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
   try {
     for (;;) {
@@ -754,6 +760,7 @@ async function sendTurn(text) {
     }
   } catch (e) { toast(e.message, 'err'); }
   finally { finishTurn(); }
+  return true;
 }
 function handleEvent(ev) {
   switch (ev.type) {
@@ -767,14 +774,44 @@ function handleEvent(ev) {
     case 'tool_end': addToolEnd(ev.tool); break;
     case 'plan': setPlan(ev.plan); break;
     case 'permission': askPermission(ev); break;
-    case 'done': voice.quiet = !!ev.cancelled; endAssistant(ev.reply); if (ev.cancelled) addMessage('system', t('cancelled')); break;
+    case 'handoff': state.handoff = ev.text; break;
+    case 'done': voice.quiet = !!ev.cancelled; endAssistant(ev.reply, ev.replace); if (ev.cancelled) addMessage('system', t('cancelled')); break;
     case 'error': voice.quiet = true; endAssistant(ev.reply); addMessage('system', t('error') + ': ' + ev.error); toast(ev.error, 'err'); break;
   }
 }
 function finishTurn() {
   if (state.streaming) endAssistant('');
   state.run = null; setBusy(false); $('#modal').classList.remove('on');
+  const task = state.handoff; state.handoff = null;
+  if (task) offerHandoff(task);
   refreshStatus(); refreshSessions(); refocusComposer();
+}
+// ---------- chat → coder handoff ----------
+// The assistant proposed running a task in coder mode. Nothing runs until
+// the reader accepts; sending anything else declines, as in the terminal.
+function clearHandoff() { const c = $('#handoffCard'); if (c) c.remove(); }
+function offerHandoff(task) {
+  clearHandoff(); hideEmpty();
+  const el = document.createElement('div'); el.className = 'msg system handoff'; el.id = 'handoffCard';
+  el.innerHTML = '<div class="who">·</div><div class="body"><div class="handoff-title"></div><div class="handoff-task"></div><div class="handoff-actions"><button class="primary" data-handoff="accept"></button><button class="ghost" data-handoff="dismiss"></button></div></div>';
+  el.querySelector('.handoff-title').textContent = t('handoff.title');
+  el.querySelector('.handoff-task').textContent = task;
+  const accept = el.querySelector('[data-handoff="accept"]'), dismiss = el.querySelector('[data-handoff="dismiss"]');
+  accept.textContent = t('handoff.accept'); dismiss.textContent = t('handoff.dismiss');
+  // The task goes as "/coder <task>", so its text is never read as a
+  // command of its own; the draft and attachments in the composer are not
+  // part of it and stay where they are. A send that fails brings the card back.
+  accept.onclick = async () => {
+    if (state.run || state.busy) { toast(t('busy'), 'warn'); return; }
+    const draft = $('#input').value, atts = state.images;
+    state.images = [];
+    const sent = sendTurn('/coder ' + task);
+    $('#input').value = draft; state.images = atts; autosize(); renderAtts();
+    if (!(await sent)) offerHandoff(task);
+  };
+  dismiss.onclick = () => { clearHandoff(); addMessage('system', t('handoff.dismissed')); refocusComposer(); };
+  transcript.insertBefore(el, $('#plan'));
+  scrollDown();
 }
 $('#btnSend').addEventListener('click', () => sendTurn());
 $('#btnCancel').addEventListener('click', async () => { if (state.run) { try { await api('runs/' + state.run + '/cancel', { method: 'POST' }); } catch {} } });

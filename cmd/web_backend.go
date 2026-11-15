@@ -85,9 +85,12 @@ func (b *rpcBackend) Chat(ctx context.Context, session, text string, o webui.Tur
 	b.mu.Unlock()
 
 	provider, model := b.routeOf(o)
-	turn, err := b.cli.RunChatTurnRPC(ctx, session, text, hist, cli.RPCChatOpts{Provider: provider, Model: model, Attachments: attachmentsOf(o), Stream: sink})
+	turn, err := b.cli.RunChatTurnRPC(ctx, session, text, hist, cli.RPCChatOpts{Provider: provider, Model: model, Attachments: attachmentsOf(o), Stream: sink, Handoff: o.HandoffOut != nil})
 	if err != nil {
 		return "", err
+	}
+	if o.HandoffOut != nil {
+		*o.HandoffOut = turn.HandoffTask
 	}
 	newHist := capHistory(turn.History, historyCap(true))
 	b.mu.Lock()

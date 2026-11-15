@@ -51,6 +51,11 @@ type RunOpts struct {
 	// even without a structured event sink — the MCP elicitation bridge.
 	// Nil keeps the historical unattended contract.
 	Permissions agentevents.PermissionRequester
+	// HandoffOut, when non-nil on a chat call, says the surface can ask
+	// the user to confirm a chat → coder handoff: the model may then
+	// propose one and the proposed task is written here ("" when the reply
+	// proposes none). The surface confirms and starts the coder run.
+	HandoffOut *string
 }
 
 // ToolInfo describes a tool exposed over MCP.
@@ -414,6 +419,16 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 		coderProps[k] = v
 	}
 
+	// ask_chatcli is read-only unless a handoff it proposes can be run in
+	// the same call, which takes a client the user can be asked through.
+	handoffRuns, askHandoffNote := m.handoffRuns(), ""
+	switch {
+	case handoffRuns:
+		askHandoffNote = askHandoffRunsNote
+	case handoffEnabled():
+		askHandoffNote = askHandoffHintNote
+	}
+
 	tools := make([]map[string]interface{}, 0, 8)
 	if m.backend.HasLLM() {
 		tools = append(tools, []map[string]interface{}{
@@ -423,9 +438,9 @@ func (m *MCP) toolDefinitions() []map[string]interface{} {
 					"/context attachments for the session, pinned and trigger-activated skills, knowledge retrieval, " +
 					"and token-aware history compaction — the same enrichment an interactive ChatCLI turn gets. " +
 					"Keeps a server-side conversation per session. Supports per-call provider/model routing; " +
-					"pass plain=true for a raw passthrough without enrichment.",
+					"pass plain=true for a raw passthrough without enrichment." + askHandoffNote,
 				"inputSchema": objSchema(chatProps, "prompt"),
-				"annotations": map[string]interface{}{"readOnlyHint": true},
+				"annotations": map[string]interface{}{"readOnlyHint": !handoffRuns},
 			},
 			{
 				"name": "coder_task",
@@ -626,7 +641,7 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 		if a.Prompt == "" {
 			return nil, errf(CodeInvalidParams, "prompt is required")
 		}
-		return m.result(m.backend.PromptWith(ctx, session, a.Prompt, opts))
+		return m.askChatCLI(ctx, session, a.Prompt, opts)
 	case "agent_task":
 		if a.Task == "" {
 			return nil, errf(CodeInvalidParams, "task is required")
@@ -690,17 +705,27 @@ func (m *MCP) callTool(ctx context.Context, params json.RawMessage) (interface{}
 // capability without actually rendering dialogs: every gated action would
 // otherwise stall for the permission timeout and deny.
 func (m *MCP) permissionsFor(ctx context.Context) agentevents.PermissionRequester {
+	request := m.elicitRequest()
+	if request == nil {
+		return nil
+	}
+	return &mcpElicitRequester{ctx: ctx, request: request, timeout: mcpPermissionTimeout()}
+}
+
+// elicitRequest is the client round-trip elicitation goes through, nil when
+// there is none to use: the kill switch is set, the requester is not wired
+// or the client did not declare the capability.
+func (m *MCP) elicitRequest() func(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CHATCLI_MCP_ELICITATION"))) {
 	case "off", "false", "0", "no", "disabled":
 		return nil
 	}
 	m.rt.mu.Lock()
-	request, elicits := m.rt.request, m.rt.elicits
-	m.rt.mu.Unlock()
-	if request == nil || !elicits {
+	defer m.rt.mu.Unlock()
+	if !m.rt.elicits {
 		return nil
 	}
-	return &mcpElicitRequester{ctx: ctx, request: request, timeout: mcpPermissionTimeout()}
+	return m.rt.request
 }
 
 // mcpPermissionTimeoutDefault bounds how long one permission round-trip may

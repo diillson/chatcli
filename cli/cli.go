@@ -539,6 +539,11 @@ type ChatCLI struct {
 	// mode in its last chat reply; the next REPL input answers it
 	// (coder_handoff.go).
 	pendingCoderHandoff string
+	// rpcChatTurn is set while a headless chat turn runs and rpcTurnHandoff
+	// says whether its surface can confirm a coder handoff; together they
+	// answer coderHandoffActive for that turn (coder_handoff_surfaces.go).
+	rpcChatTurn    bool
+	rpcTurnHandoff bool
 
 	// Session-level reasoning override set by /thinking. When override.set
 	// is true the value of override.effort wins over skill hints and
