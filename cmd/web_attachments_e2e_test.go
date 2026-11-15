@@ -41,6 +41,9 @@ import (
 type e2eModel struct {
 	mu    sync.Mutex
 	calls [][]models.Message
+	// chat, when set, answers a chat turn from its system prompt (the
+	// handoff tests reply the way a model told to propose does).
+	chat func(system string) string
 }
 
 var e2eAttachmentPath = regexp.MustCompile(`((?:[A-Za-z]:\\|/)[^\s"']*attachments[^\s"']*\.png)`)
@@ -58,6 +61,9 @@ func (m *e2eModel) SendPrompt(_ context.Context, prompt string, hist []models.Me
 		}
 	}
 	if !coder {
+		if m.chat != nil {
+			return m.chat(systemPrompt(hist)), nil
+		}
 		return "I looked at it.", nil
 	}
 	if last := lastUserMessage(hist); last != nil && len(last.Images) > 0 {
@@ -67,6 +73,21 @@ func (m *e2eModel) SendPrompt(_ context.Context, prompt string, hist []models.Me
 		return "<plan>\n1. look at the attached image\n</plan>\n<tool_call name=\"@view\" args='{\"cmd\":\"view\",\"args\":{\"file\":\"" + filepath.ToSlash(p) + "\"}}' />", nil
 	}
 	return "There is no image I can open.", nil
+}
+
+// systemPrompt is the system text of one request, structured parts included.
+func systemPrompt(hist []models.Message) string {
+	var b strings.Builder
+	for _, msg := range hist {
+		if msg.Role != "system" {
+			continue
+		}
+		b.WriteString(msg.Content)
+		for _, part := range msg.SystemParts {
+			b.WriteString(part.Text)
+		}
+	}
+	return b.String()
 }
 
 func viewed(hist []models.Message) bool {

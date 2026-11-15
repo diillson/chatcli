@@ -31,6 +31,10 @@ type event struct {
 	Error     string      `json:"error,omitempty"`
 	Cancelled bool        `json:"cancelled,omitempty"`
 	Mode      string      `json:"mode,omitempty"`
+	// Replace is set on the "done" of a chat turn: the reply is the whole
+	// answer and replaces what was streamed, which may be less (a handoff
+	// proposal is held back from the stream) or more (a retried attempt).
+	Replace bool `json:"replace,omitempty"`
 	// Session is set on "session" events: the page's session changed
 	// under it (a new conversation, a rewind, a retry).
 	Session *sessionEvent `json:"session,omitempty"`

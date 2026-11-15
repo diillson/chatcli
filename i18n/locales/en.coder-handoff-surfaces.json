@@ -1,0 +1,11 @@
+{
+  "web.ui.handoff.title": "The assistant proposes running this in coder mode:",
+  "web.ui.handoff.accept": "Run in coder",
+  "web.ui.handoff.dismiss": "Stay in chat",
+  "web.ui.handoff.dismissed": "Staying in chat.",
+  "acp.handoff.title": "Switch to coder mode and run: %s",
+  "acp.handoff.declined": "Staying in chat mode.",
+  "acp.handoff.hint": "To run it, send: /coder %s",
+  "mcp.handoff.title": "Switch to coder mode and run: %s",
+  "mcp.handoff.reason": "ask_chatcli is a chat turn and cannot run it; approving starts a coder run in this same call."
+}

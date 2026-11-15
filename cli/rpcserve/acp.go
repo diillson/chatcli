@@ -554,10 +554,9 @@ func (a *ACP) prompt(ctx context.Context, params json.RawMessage) (interface{}, 
 	var sink *acpSink
 	switch mode {
 	case "chat":
-		reply, err = a.backend.Prompt(runCtx, p.SessionID, text)
-		if err == nil {
-			a.emitMessageChunk(p.SessionID, reply)
-		}
+		// A chat reply may propose a coder handoff; once the user accepts
+		// it the coder run follows in this turn (handoff.go).
+		sink, reply, err = a.chatTurn(runCtx, s, p.SessionID, text)
 	case "coder":
 		sink = newACPSink(a, p.SessionID, runCtx)
 		reply, err = a.backend.CoderStream(runCtx, p.SessionID, text, RunOpts{Events: sink})

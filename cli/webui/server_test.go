@@ -39,6 +39,8 @@ type fakeBackend struct {
 	decision agentevents.PermissionDecision
 	// coderRuns numbers the coder runs, for their tool ids.
 	coderRuns int
+	// handoff is the coder task a chat turn proposes.
+	handoff string
 }
 
 func newFakeBackend() *fakeBackend {
@@ -105,6 +107,9 @@ func (f *fakeBackend) Status() Status {
 func (f *fakeBackend) Chat(_ context.Context, _, text string, o TurnOptions, sink cli.ChunkSink) (string, error) {
 	f.mu.Lock()
 	f.seen = append(f.seen, o)
+	if o.HandoffOut != nil {
+		*o.HandoffOut = f.handoff
+	}
 	f.mu.Unlock()
 	sink.Chunk("hel")
 	sink.Chunk("lo " + text)

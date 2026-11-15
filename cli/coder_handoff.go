@@ -16,8 +16,10 @@
  * the same path a typed /coder takes; anything else stays in chat. Plain text
  * never changes mode on its own — the user always confirms.
  *
- * The instruction only reaches the model on an attended REPL turn; headless
- * surfaces (gateway, MCP/ACP, -p) never see it and strip a stray tag.
+ * The instruction reaches the model on an attended REPL turn and on a
+ * headless chat turn whose surface declares it can confirm (the web page,
+ * ACP, MCP: coder_handoff_surfaces.go). Every other headless turn (gateway,
+ * -p) never sees it and strips a stray tag.
  */
 package cli
 
@@ -71,6 +73,11 @@ func chatModeBanner(handoff bool) string {
 
 var coderHandoffRe = regexp.MustCompile(`(?is)<\s*` + coderHandoffTag + `\s*>(.*?)<\s*/\s*` + coderHandoffTag + `\s*>`)
 
+// coderHandoffCutRe matches a proposal line the reply never closed: the
+// output limit or a cancel ended it mid-task. It opens a line, as the
+// instruction asks, so a mention of the tag inside a sentence is not one.
+var coderHandoffCutRe = regexp.MustCompile(`(?is)(^|\n)[ \t]*<\s*` + coderHandoffTag + `\s*>.*$`)
+
 // coderHandoffEnabled reads CHATCLI_CHAT_CODER_HANDOFF; only an explicit
 // false/0/off/no disables it.
 func coderHandoffEnabled() bool {
@@ -81,11 +88,20 @@ func coderHandoffEnabled() bool {
 	return true
 }
 
-// coderHandoffActive reports whether this process can act on a proposal:
-// an attended interactive REPL with the feature enabled. Headless surfaces
-// have nobody to confirm, so the model is never asked to propose.
+// coderHandoffActive reports whether the turn being built can act on a
+// proposal. A headless chat turn answers for itself: its surface said
+// whether somebody can confirm, whatever the process around it is (a web
+// page served from a REPL is not that REPL's prompt). Otherwise it takes an
+// attended interactive REPL. With nobody to confirm, the model is never
+// asked to propose.
 func (cli *ChatCLI) coderHandoffActive() bool {
-	return cli.replActive && !cli.unattended && coderHandoffEnabled()
+	if !coderHandoffEnabled() {
+		return false
+	}
+	if cli.rpcChatTurn {
+		return cli.rpcTurnHandoff
+	}
+	return cli.replActive && !cli.unattended
 }
 
 // extractCoderHandoff returns the proposed task and the reply with every
@@ -94,6 +110,11 @@ func (cli *ChatCLI) coderHandoffActive() bool {
 func extractCoderHandoff(text string) (task, cleaned string) {
 	matches := coderHandoffRe.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
+		// Half a proposal is no proposal: the markup is dropped and
+		// nothing is offered, since the task is incomplete.
+		if coderHandoffCutRe.MatchString(text) {
+			return "", strings.TrimSpace(coderHandoffCutRe.ReplaceAllString(text, ""))
+		}
 		return "", text
 	}
 	for _, m := range matches {
@@ -104,7 +125,8 @@ func extractCoderHandoff(text string) (task, cleaned string) {
 	if len(task) > coderHandoffMaxTask {
 		task = strings.TrimSpace(textfold.Cut(task, coderHandoffMaxTask))
 	}
-	cleaned = strings.TrimSpace(coderHandoffRe.ReplaceAllString(text, ""))
+	cleaned = coderHandoffRe.ReplaceAllString(text, "")
+	cleaned = strings.TrimSpace(coderHandoffCutRe.ReplaceAllString(cleaned, ""))
 	return task, cleaned
 }
 

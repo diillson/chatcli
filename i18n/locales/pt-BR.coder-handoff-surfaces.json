@@ -1,0 +1,11 @@
+{
+  "web.ui.handoff.title": "O assistente propõe executar isto no modo coder:",
+  "web.ui.handoff.accept": "Executar no coder",
+  "web.ui.handoff.dismiss": "Ficar no chat",
+  "web.ui.handoff.dismissed": "Permanecendo no chat.",
+  "acp.handoff.title": "Mudar para o modo coder e executar: %s",
+  "acp.handoff.declined": "Permanecendo no modo chat.",
+  "acp.handoff.hint": "Para executar, envie: /coder %s",
+  "mcp.handoff.title": "Mudar para o modo coder e executar: %s",
+  "mcp.handoff.reason": "ask_chatcli é um turno de chat e não consegue executá-la; aprovar inicia uma execução do coder nesta mesma chamada."
+}

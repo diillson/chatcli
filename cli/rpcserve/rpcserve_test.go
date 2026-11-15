@@ -33,6 +33,9 @@ type fakeBackend struct {
 	lastCmd     string // last RunCommand line
 	cmdOut      string
 	cmdErr      error
+	// handoffTask is what a chat turn proposes for coder mode when the
+	// caller can confirm (RunOpts.HandoffOut).
+	handoffTask string
 }
 
 func (f *fakeBackend) HasLLM() bool { return !f.noLLM }
@@ -53,6 +56,9 @@ func (f *fakeBackend) Prompt(_ context.Context, session, text string) (string, e
 func (f *fakeBackend) PromptWith(ctx context.Context, session, text string, opts RunOpts) (string, error) {
 	f.mu.Lock()
 	f.lastOpts = opts
+	if opts.HandoffOut != nil {
+		*opts.HandoffOut = f.handoffTask
+	}
 	f.mu.Unlock()
 	return f.Prompt(ctx, session, text)
 }

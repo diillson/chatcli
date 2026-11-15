@@ -48,6 +48,11 @@ type RPCChatOpts struct {
 	// full reply is still returned. An interface keeps the options
 	// comparable.
 	Stream ChunkSink
+	// Handoff says the surface can show a coder handoff proposal and take
+	// the user's answer. The model is then asked to propose and the task
+	// comes back in RPCChatTurn.HandoffTask; without it a stray proposal is
+	// dropped.
+	Handoff bool
 }
 
 // TurnAttachments are the binary inputs of one turn.
@@ -66,6 +71,10 @@ type ChunkSink interface {
 type RPCChatTurn struct {
 	Reply   string
 	History []models.Message
+	// HandoffTask is the task the assistant proposed for coder mode, set
+	// only when the turn ran with RPCChatOpts.Handoff. The reply no longer
+	// carries the proposal line.
+	HandoffTask string
 }
 
 // rpcDefaultSessionID names the live MCP session used when the client did not
@@ -114,9 +123,12 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	prevHistory, prevSession := cli.history, cli.currentSessionName
 	cli.history = append([]models.Message(nil), history...)
 	cli.currentSessionName = sessionID
+	prevRPCTurn, prevHandoff := cli.rpcChatTurn, cli.rpcTurnHandoff
+	cli.rpcChatTurn, cli.rpcTurnHandoff = true, o.Handoff
 	defer func() {
 		cli.history = prevHistory
 		cli.currentSessionName = prevSession
+		cli.rpcChatTurn, cli.rpcTurnHandoff = prevRPCTurn, prevHandoff
 	}()
 
 	cli.fireUserPromptSubmitHook(ctx, userInput)
@@ -170,8 +182,12 @@ func (cli *ChatCLI) runChatTurnSerialized(
 		return RPCChatTurn{}, err
 	}
 
+	// The proposal line never reaches the client as streamed text: each
+	// attempt streams through its own filter (coder_handoff_surfaces.go).
 	send := func() (string, *models.UsageInfo, error) {
-		return cli.rpcSend(ctx, activeClient, input+additionalContext, tempHistory, maxTokens, o.Stream)
+		sink, flush := handoffFilteredSink(o.Stream)
+		defer flush()
+		return cli.rpcSend(ctx, activeClient, input+additionalContext, tempHistory, maxTokens, sink)
 	}
 	reply, usage, err := send()
 	if cli.refreshClientOnAuthError(err) {
@@ -203,11 +219,13 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	if err != nil {
 		return RPCChatTurn{}, err
 	}
-	// Headless: nobody can confirm a coder handoff here, so a stray tag is
-	// dropped from the reply instead of reaching the client.
-	if task, cleaned := extractCoderHandoff(reply); task != "" {
-		cli.logger.Debug("rpc chat: dropping coder handoff proposal", zap.String("task", task))
-		reply = cleaned
+	// The proposal line leaves the reply either way. A surface that can
+	// confirm gets the task back; anywhere else nobody can answer it, so
+	// it is dropped instead of reaching the client.
+	handoffTask, reply := takeCoderHandoff(reply)
+	if handoffTask != "" && !cli.coderHandoffActive() {
+		cli.logger.Debug("rpc chat: dropping coder handoff proposal", zap.String("task", handoffTask))
+		handoffTask = ""
 	}
 
 	userMessage := models.Message{Role: "user", Content: input + additionalContext, Images: images, Documents: docs}
@@ -238,8 +256,9 @@ func (cli *ChatCLI) runChatTurnSerialized(
 	}
 
 	return RPCChatTurn{
-		Reply:   reply,
-		History: append([]models.Message(nil), cli.history...),
+		Reply:       reply,
+		History:     append([]models.Message(nil), cli.history...),
+		HandoffTask: handoffTask,
 	}, nil
 }
 

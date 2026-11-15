@@ -343,8 +343,22 @@ func (s *Server) dispatchTurn(ctx context.Context, rn *run, session, mode, text 
 	case "agent":
 		return b.RunAgent(ctx, session, text, o, rn.sink)
 	default:
-		return b.Chat(ctx, session, text, o, rn.sink)
+		return s.chatTurn(ctx, rn, session, text, o)
 	}
+}
+
+// chatTurn runs a chat turn. The page can ask the user, so the assistant
+// may propose handing the request to coder mode: the proposal goes out as
+// a "handoff" event ahead of the final one, and the page runs the task in
+// coder mode only when the user accepts it.
+func (s *Server) chatTurn(ctx context.Context, rn *run, session, text string, o TurnOptions) (string, error) {
+	var task string
+	o.HandoffOut = &task
+	reply, err := s.opts.Backend.Chat(ctx, session, text, o, rn.sink)
+	if err == nil && task != "" {
+		rn.sink.push(event{Type: "handoff", Text: task})
+	}
+	return reply, err
 }
 
 // finishTurn sends the final event of a turn.
@@ -356,6 +370,6 @@ func (s *Server) finishTurn(ctx context.Context, rn *run, mode, reply string, er
 		s.log.Warn("web: turn failed", zap.String("mode", mode), zap.Error(err))
 		rn.sink.push(event{Type: "error", Error: err.Error(), Reply: reply})
 	default:
-		rn.sink.push(event{Type: "done", Reply: reply})
+		rn.sink.push(event{Type: "done", Reply: reply, Replace: normalizeMode(mode) == "chat"})
 	}
 }
