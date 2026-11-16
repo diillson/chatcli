@@ -38,8 +38,8 @@ github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.3 h1:ENjUto22h2MiHmv8WehZ2874
 github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.3/go.mod h1:jmVZvJzjoaStVpr4Nd11mMYCnyrq+sWT6UiDXVnHyco=
 github.com/aws/aws-sdk-go-v2/service/sts v1.51.8 h1:lervRo8V4a9tticNT+nPjqDq9olQPDmgqYczjvJbNio=
 github.com/aws/aws-sdk-go-v2/service/sts v1.51.8/go.mod h1:NBCcbmgAjvOsYwA6CPgMmipPUxsEep1JxKb3RWBr9rA=
-github.com/aws/smithy-go v1.28.8 h1:aEmdAq7gVCoGCnvf1NnELlu3I6D/nhqrC321FyFiQkQ=
-github.com/aws/smithy-go v1.28.8/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
+github.com/aws/smithy-go v1.28.9 h1:zkZ058OpNX0iGTK24b+ZUEQSMc11CBA6oO7xtKZfzkY=
+github.com/aws/smithy-go v1.28.9/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/aymanbagabas/go-udiff v0.2.0 h1:TK0fH4MteXUDspT88n8CKzvK0X9O2xu9yQjWpi6yML8=
