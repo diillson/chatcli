@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.231.1](https://github.com/diillson/chatcli/compare/v1.231.0...v1.231.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **update:** name the GitHub rate limit on the release check and stop retrying into it ([#1977](https://github.com/diillson/chatcli/issues/1977)) ([3cac6e9](https://github.com/diillson/chatcli/commit/3cac6e9089bcc7dc3bc180dabaa150fcf03d261d))
+
 ## [1.231.0](https://github.com/diillson/chatcli/compare/v1.230.0...v1.231.0) (2026-11-15)
 
 
