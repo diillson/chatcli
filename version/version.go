@@ -47,9 +47,23 @@ func versionCheckDisabled() bool {
 // the one the check always printed.
 type ReleaseStatusError struct {
 	StatusCode int
+	// RateLimited says the refusal is GitHub's API rate limit, which no
+	// retry gets past before ResetAt (zero when GitHub did not say).
+	// Authenticated says the request carried a token, so the limit hit is
+	// the account's and not the anonymous one of the IP address.
+	RateLimited   bool
+	ResetAt       time.Time
+	Authenticated bool
 }
 
 func (e *ReleaseStatusError) Error() string {
+	if e.RateLimited {
+		if e.ResetAt.IsZero() {
+			return fmt.Sprintf("erro ao verificar versão: status %d (limite de requisições da API do GitHub)", e.StatusCode)
+		}
+		return fmt.Sprintf("erro ao verificar versão: status %d (limite de requisições da API do GitHub, liberado às %s)",
+			e.StatusCode, e.ResetAt.Local().Format("15:04"))
+	}
 	return fmt.Sprintf("erro ao verificar versão: status %d", e.StatusCode)
 }
 
@@ -63,20 +77,33 @@ var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 	}
 
 	url := os.Getenv("CHATCLI_LATEST_VERSION_URL")
+
+	// GitHub itself is asked with the environment's token when there is
+	// one; a configured endpoint never is (release_request.go).
+	var (
+		resp          *http.Response
+		authenticated bool
+	)
 	if url == "" {
 		url = LatestVersionURL
+		var err error
+		if resp, authenticated, err = authenticatedRelease(ctx, client); err != nil {
+			return ReleaseInfo{}, err
+		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return ReleaseInfo{}, err
-	}
+	if !authenticated {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return ReleaseInfo{}, err
+		}
 
-	req.Header.Set("User-Agent", "ChatCLI-Version-Checker")
+		req.Header.Set("User-Agent", releaseUserAgent)
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return ReleaseInfo{}, err
+		resp, err = client.Do(req)
+		if err != nil {
+			return ReleaseInfo{}, err
+		}
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
@@ -85,7 +112,7 @@ var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return ReleaseInfo{}, &ReleaseStatusError{StatusCode: resp.StatusCode}
+		return ReleaseInfo{}, statusErrorFrom(resp, authenticated)
 	}
 
 	return decodeReleaseInfo(resp.Body)

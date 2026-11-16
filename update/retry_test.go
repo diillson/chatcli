@@ -333,6 +333,8 @@ func TestRetryable(t *testing.T) {
 		{statusFailure("x", 401), false},
 		{&version.ReleaseStatusError{StatusCode: 403}, true},
 		{&version.ReleaseStatusError{StatusCode: 404}, false},
+		{&version.ReleaseStatusError{StatusCode: 403, RateLimited: true}, false},
+		{&version.ReleaseStatusError{StatusCode: 429, RateLimited: true}, false},
 		{&ChecksumsUnavailableError{Tag: "v1"}, false},
 		{&SignatureInvalidError{Tag: "v1"}, false},
 		{&MissingToolError{Tool: "brew"}, false},

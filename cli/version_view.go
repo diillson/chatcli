@@ -68,7 +68,7 @@ func FormatVersionReport(rep version.Report) string {
 	}
 	switch {
 	case rep.CheckErr != nil:
-		wrapped("⚠ " + i18n.T("update.err.check", rep.CheckErr.Error()))
+		wrapped("⚠ " + releaseCheckFailure(rep.CheckErr))
 	case rep.Latest == "":
 		wrapped(i18n.T("update.check_disabled"))
 	default:
