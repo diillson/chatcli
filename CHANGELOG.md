@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.231.0](https://github.com/diillson/chatcli/compare/v1.230.0...v1.231.0) (2026-11-15)
+
+
+### Features
+
+* **cli:** offer the chat to coder handoff on the web UI, ACP and MCP ([#1975](https://github.com/diillson/chatcli/issues/1975)) ([a017a96](https://github.com/diillson/chatcli/commit/a017a9625ab253e62a10bb04a1c790d56ab4a929))
+
 ## [1.230.0](https://github.com/diillson/chatcli/compare/v1.229.0...v1.230.0) (2026-11-13)
 
 
