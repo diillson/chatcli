@@ -14,32 +14,24 @@
  *   - the answer says it is the rate limit and when it lifts, so the check
  *     reports that instead of a bare 403 and nobody retries into the limit;
  *   - a GitHub token already in the environment (GH_TOKEN, GITHUB_TOKEN)
- *     raises the allowance to the account's, so it is sent, to the GitHub
- *     API only. A token GitHub rejects never breaks the check: the request
- *     is made again without it.
+ *     raises the allowance to the account's, so the check to GitHub is
+ *     made with it. A token GitHub rejects never breaks the check: the
+ *     request is made again without it.
  */
 package version
 
 import (
+	"context"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// githubAPIHost is the only host the environment's token is ever sent to.
-const githubAPIHost = "api.github.com"
-
-// releaseToken is the GitHub token to authenticate the check with, "" when
-// there is none or the check goes somewhere else (CHATCLI_LATEST_VERSION_URL
-// pointing at a mirror or a test server). GH_TOKEN wins, as it does for gh.
-func releaseToken(target string) string {
-	u, err := url.Parse(target)
-	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), githubAPIHost) {
-		return ""
-	}
+// releaseToken is the GitHub token in the environment, "" when there is
+// none. GH_TOKEN wins, as it does for gh.
+func releaseToken() string {
 	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
 		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 			return v
@@ -47,6 +39,9 @@ func releaseToken(target string) string {
 	}
 	return ""
 }
+
+// releaseUserAgent identifies the check to the server that answers it.
+const releaseUserAgent = "ChatCLI-Version-Checker"
 
 // rateLimitReset reads when a rate-limited answer says requests are accepted
 // again: Retry-After (seconds) for the secondary limits, X-RateLimit-Reset
@@ -82,23 +77,32 @@ func statusErrorFrom(resp *http.Response, authenticated bool) *ReleaseStatusErro
 	return e
 }
 
-// doReleaseRequest sends the check, with the environment's token when there
-// is one for this target. A 401 means GitHub does not accept that token
-// (expired, revoked, issued by another GitHub): the check does not need
-// one, so it is made again without it.
-func doReleaseRequest(client *http.Client, req *http.Request) (*http.Response, bool, error) {
-	token := releaseToken(req.URL.String())
+// authenticatedRelease asks the GitHub API for the latest release with the
+// environment's token. It only ever addresses LatestVersionURL: the token
+// has one destination, fixed in the binary, and a release check endpoint
+// set through CHATCLI_LATEST_VERSION_URL is never offered it.
+//
+// ok is false when the caller should ask without a token: there is none,
+// or GitHub answered 401 for it (expired, revoked, issued by another
+// GitHub). The check needs no token, so a bad one must not break it.
+func authenticatedRelease(ctx context.Context, client *http.Client) (resp *http.Response, ok bool, err error) {
+	token := releaseToken()
 	if token == "" {
-		resp, err := client.Do(req)
-		return resp, false, err
+		return nil, false, nil
 	}
-	authed := req.Clone(req.Context())
-	authed.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(authed)
-	if err != nil || resp.StatusCode != http.StatusUnauthorized {
-		return resp, true, err
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, LatestVersionURL, nil)
+	if err != nil {
+		return nil, false, err
 	}
-	_ = resp.Body.Close()
+	req.Header.Set("User-Agent", releaseUserAgent)
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
-	return resp, false, err
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		_ = resp.Body.Close()
+		return nil, false, nil
+	}
+	return resp, true, nil
 }

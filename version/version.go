@@ -77,20 +77,33 @@ var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 	}
 
 	url := os.Getenv("CHATCLI_LATEST_VERSION_URL")
+
+	// GitHub itself is asked with the environment's token when there is
+	// one; a configured endpoint never is (release_request.go).
+	var (
+		resp          *http.Response
+		authenticated bool
+	)
 	if url == "" {
 		url = LatestVersionURL
+		var err error
+		if resp, authenticated, err = authenticatedRelease(ctx, client); err != nil {
+			return ReleaseInfo{}, err
+		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return ReleaseInfo{}, err
-	}
+	if !authenticated {
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return ReleaseInfo{}, err
+		}
 
-	req.Header.Set("User-Agent", "ChatCLI-Version-Checker")
+		req.Header.Set("User-Agent", releaseUserAgent)
 
-	resp, authenticated, err := doReleaseRequest(client, req)
-	if err != nil {
-		return ReleaseInfo{}, err
+		resp, err = client.Do(req)
+		if err != nil {
+			return ReleaseInfo{}, err
+		}
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
