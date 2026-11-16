@@ -146,6 +146,11 @@ func isPermanent(err error) bool {
 	if code, ok := HTTPStatus(err); ok && !retryableStatus(code) {
 		return true
 	}
+	// GitHub's rate limit lifts at a known time, minutes away at best: a
+	// new attempt in seconds only spends another request against it.
+	if RateLimited(err) {
+		return true
+	}
 	return errors.As(err, &p) || errors.As(err, &missing) || errors.As(err, &platform) ||
 		errors.As(err, &notWritable) || errors.As(err, &noChecksums) || errors.As(err, &mismatch) ||
 		errors.As(err, &badTag) || errors.As(err, &noSig) || errors.As(err, &badSig) ||
@@ -199,6 +204,13 @@ func Retry(ctx context.Context, notify Notifier, step string, fn func() error) e
 // caller can tell "gave up after every attempt" from "stopped at once".
 func Retryable(err error) bool {
 	return err != nil && !isPermanent(err)
+}
+
+// RateLimited reports whether err is the release check refused by GitHub's
+// API rate limit.
+func RateLimited(err error) bool {
+	var check *version.ReleaseStatusError
+	return errors.As(err, &check) && check.RateLimited
 }
 
 // HTTPStatus returns the HTTP status behind err when the update failed on

@@ -47,9 +47,23 @@ func versionCheckDisabled() bool {
 // the one the check always printed.
 type ReleaseStatusError struct {
 	StatusCode int
+	// RateLimited says the refusal is GitHub's API rate limit, which no
+	// retry gets past before ResetAt (zero when GitHub did not say).
+	// Authenticated says the request carried a token, so the limit hit is
+	// the account's and not the anonymous one of the IP address.
+	RateLimited   bool
+	ResetAt       time.Time
+	Authenticated bool
 }
 
 func (e *ReleaseStatusError) Error() string {
+	if e.RateLimited {
+		if e.ResetAt.IsZero() {
+			return fmt.Sprintf("erro ao verificar versão: status %d (limite de requisições da API do GitHub)", e.StatusCode)
+		}
+		return fmt.Sprintf("erro ao verificar versão: status %d (limite de requisições da API do GitHub, liberado às %s)",
+			e.StatusCode, e.ResetAt.Local().Format("15:04"))
+	}
 	return fmt.Sprintf("erro ao verificar versão: status %d", e.StatusCode)
 }
 
@@ -74,7 +88,7 @@ var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 
 	req.Header.Set("User-Agent", "ChatCLI-Version-Checker")
 
-	resp, err := client.Do(req)
+	resp, authenticated, err := doReleaseRequest(client, req)
 	if err != nil {
 		return ReleaseInfo{}, err
 	}
@@ -85,7 +99,7 @@ var FetchLatestReleaseImpl = func(ctx context.Context) (ReleaseInfo, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return ReleaseInfo{}, &ReleaseStatusError{StatusCode: resp.StatusCode}
+		return ReleaseInfo{}, statusErrorFrom(resp, authenticated)
 	}
 
 	return decodeReleaseInfo(resp.Body)

@@ -1,0 +1,6 @@
+{
+  "update.rate_limit.hit": "Não foi possível verificar atualizações: o limite de requisições da API do GitHub foi atingido (status %d).",
+  "update.rate_limit.reset": "Ele é liberado às %s.",
+  "update.rate_limit.anonymous": "Sem token o GitHub aceita 60 requisições por hora por endereço IP, somadas entre tudo o que sai dele. Com GH_TOKEN ou GITHUB_TOKEN no ambiente a consulta usa o limite da sua conta.",
+  "update.rate_limit.account": "O limite atingido é o da conta do GH_TOKEN/GITHUB_TOKEN."
+}

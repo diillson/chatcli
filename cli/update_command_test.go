@@ -521,6 +521,32 @@ func TestHandleUpdateCommandCheckStatuses(t *testing.T) {
 			t.Fatalf("calls=%d applied=%d out=%q", calls, applied.Load(), out)
 		}
 	})
+	t.Run("the GitHub rate limit is named and not retried", func(t *testing.T) {
+		cli := minimalCLI(t)
+		withUpdateSeams(t, update.MethodHomebrew, "1.5.0", "1.6.0", nil)
+		reset := time.Now().Add(20 * time.Minute)
+		calls := 0
+		version.FetchLatestReleaseImpl = func(_ context.Context) (version.ReleaseInfo, error) {
+			calls++
+			return version.ReleaseInfo{}, &version.ReleaseStatusError{StatusCode: 403, RateLimited: true, ResetAt: reset}
+		}
+		out := captureStdout(t, func() { cli.handleUpdateCommand(context.Background(), "/update check") })
+		if calls != 1 {
+			t.Fatalf("a rate-limited check was repeated: calls=%d", calls)
+		}
+		for _, want := range []string{
+			i18n.T("update.rate_limit.hit", 403),
+			i18n.T("update.rate_limit.reset", reset.Local().Format("15:04")),
+			"GH_TOKEN",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output lacks %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "HTTPS_PROXY") {
+			t.Errorf("the proxy hint does not apply to a rate limit:\n%s", out)
+		}
+	})
 	t.Run("CHATCLI_UPDATE_RETRIES=0 tries once", func(t *testing.T) {
 		cli := minimalCLI(t)
 		withUpdateSeams(t, update.MethodHomebrew, "1.5.0", "1.6.0", nil)

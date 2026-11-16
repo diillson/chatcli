@@ -143,7 +143,7 @@ func runUpdateFlow(ctx context.Context, logger *zap.Logger, checkOnly bool, onAp
 		return rep.CheckErr
 	})
 	if rep.CheckErr != nil {
-		fmt.Println(colorize("  ❌ "+i18n.T("update.err.check", rep.CheckErr.Error()), ColorYellow))
+		fmt.Println(colorize("  ❌ "+releaseCheckFailure(rep.CheckErr), ColorYellow))
 		printRetryHint(rep.CheckErr)
 		return rep.CheckErr
 	}
