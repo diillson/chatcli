@@ -52,7 +52,8 @@ func TestResolve(t *testing.T) {
 		{"Gemini 2.0 shut down", ProviderGoogleAI, "gemini-2.0-flash", "", false},
 		{"Gemini 3 Pro preview shut down", ProviderGoogleAI, "gemini-3-pro-preview", "", false},
 		{"Grok 3 retired", ProviderXAI, "grok-3", "", false},
-		{"Grok code fast rides build", ProviderXAI, "grok-code-fast-1", "grok-build-0.1", true},
+		{"Grok code fast retired", ProviderXAI, "grok-code-fast-1", "", false},
+		{"Grok build 0.1 gone", ProviderXAI, "grok-build-0.1", "", false},
 		{"Kimi K2.5 retired", ProviderMoonshot, "kimi-k2.5", "", false},
 		{"moonshot-v1 retired", ProviderMoonshot, "moonshot-v1-128k", "", false},
 		// gpt-5.5 family — released Apr 23 2026. Pin both the base and
@@ -818,7 +819,6 @@ func TestGrok2026Entries(t *testing.T) {
 		"grok-4.20-0309-reasoning":     1000000,
 		"grok-4.20-0309-non-reasoning": 1000000,
 		"grok-4.20-multi-agent-0309":   1000000,
-		"grok-build-0.1":               256000,
 	}
 	for id, wantCtx := range cases {
 		meta, ok := Resolve(ProviderXAI, id)
@@ -1052,8 +1052,9 @@ func TestSep2026Refresh(t *testing.T) {
 		assert.Equal(t, "MiniMax-M3", m.ID)
 		assert.Equal(t, 1048576, m.ContextWindow)
 	}
-	m27, _ := Resolve(ProviderMiniMax, "MiniMax-M2.7")
-	assert.Equal(t, "MiniMax-M2.7", m27.ID)
+	// M2.7 was retired by MiniMax on Nov 18 2026 and left the catalog.
+	_, m27 := Resolve(ProviderMiniMax, "MiniMax-M2.7")
+	assert.False(t, m27)
 }
 
 // TestClaude55Entries pins the Sonnet 5.5 (Sep 28 2026) and Haiku 5.5

@@ -100,9 +100,15 @@ func allModels() []ModelInfo {
 		// OpenAI Images API. gpt-image-2.5 (2026-09) is the current
 		// generation; the gpt-image-1 family is deprecated; DALL-E 2/3 were
 		// shut down on 2026-05-12.
+		// gpt-image-2.6 (Nov 4 2026, developers.openai.com/api/docs/models/
+		// gpt-image-2.6-sunburst and -flare): same endpoints and token
+		// prices as 2.5, which stays current — and stays the default
+		// until 2.6 is exercised against a live account.
+		{Name: "gpt-image-2.6-flare", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "active", Note: "Fastest gpt-image-2.6; adds SVG and animated GIF output."},
+		{Name: "gpt-image-2.6-sunburst", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "active", Note: "Most capable gpt-image-2.6; markup-guided edits."},
 		{Name: "gpt-image-2.5-flare", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "active", Default: true, Note: "Fastest gpt-image-2.5, for everyday images."},
 		{Name: "gpt-image-2.5-sunburst", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "active", Note: "Most capable gpt-image-2.5; best editing precision; quality up to max."},
-		{Name: "gpt-image-2", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "active", Note: "Previous generation."},
+		{Name: "gpt-image-2", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "deprecated", Retires: "2027-02-10", Note: "Replaced by gpt-image-2.6."},
 		{Name: "gpt-image-1.5", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "deprecated", Retires: "2026-12-01", Note: "Replaced by gpt-image-2.5."},
 		{Name: "gpt-image-1-mini", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "deprecated", Retires: "2026-12-01", Note: "Replaced by gpt-image-2.5-flare."},
 		{Name: "chatgpt-image-latest", Provider: "openai", API: "images", Generate: true, Edit: true, Status: "deprecated", Retires: "2026-12-01", Note: "Replaced by gpt-image-2.5."},

@@ -378,8 +378,14 @@ func TestMiniMaxClient_ListModels_Success(t *testing.T) {
 }
 
 func TestKeepModel_OfficialEndpointFiltersFamilies(t *testing.T) {
-	assert.True(t, keepModel("MiniMax-M2.7", false))
+	assert.True(t, keepModel("MiniMax-M3.1-Flash", false))
+	assert.True(t, keepModel("MiniMax-M3", false))
 	assert.True(t, keepModel("abab6.5s-chat", false))
+	// Retired ids the endpoint still returns.
+	for _, id := range []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2", "MiniMax-Text-01"} {
+		assert.False(t, keepModel(id, false), id)
+		assert.True(t, keepModel(id, true), id)
+	}
 	assert.False(t, keepModel("speech-2.8-hd", false))
 
 	// custom endpoint keeps everything

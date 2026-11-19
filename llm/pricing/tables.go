@@ -112,6 +112,15 @@ func claudePricing(model string) (float64, float64, bool) {
 	case strings.Contains(model, "fable"):
 		// Fable 5 and 5.1: $10/$50 per MTok (tier above Opus).
 		return 10.0, 50.0, true
+	case strings.Contains(model, "mythos-5-2"), strings.Contains(model, "mythos-5.2"):
+		// Mythos 5.2: Fable 5.2's price, $8/$40 (platform.claude.com/docs/
+		// en/about-claude/pricing, Nov 2026). Before the generic Mythos
+		// case.
+		return 8.0, 40.0, true
+	case strings.Contains(model, "mythos"):
+		// Mythos 5 and 5.1: $10/$50, as their Fable siblings. Without the
+		// case the id fell through to the family default.
+		return 10.0, 50.0, true
 	case strings.Contains(model, "opus-5-5"), strings.Contains(model, "opus-5.5"):
 		// Opus 5.5 (Sep 22 2026): $4/$20 per MTok — the first Opus cheaper
 		// than its predecessor (platform.claude.com/docs/en/about-claude/
@@ -176,6 +185,18 @@ func openAIFrontierPricing(model string) (float64, float64, bool) {
 	// (openai/gpt-6-astra), que repassam a mesma tarifa.
 	case strings.Contains(model, "gpt-6-astra"):
 		return 10.0, 50.0, true
+	// gpt-6.2-astra / gpt-6.2-sol (Nov 17 2026, developers.openai.com/api/
+	// docs/pricing): $8/$40 and $2/$10 on the short-context tier — Astra
+	// below GPT-6 Astra's $10/$50. Above 272K input, 2x input and 1.5x
+	// output (LongContextMultipliers). Cached input at 5% and cache
+	// writes at 1.25x: own case in getCachePricing. Cover the Bedrock
+	// ids (openai.gpt-6.2-*, same rates on the global profile) and the
+	// OpenRouter and Copilot slugs. The Fast, Ultrafast and Batch tiers
+	// and the 12-hour cache write (2.5x) are not modeled.
+	case strings.Contains(model, "gpt-6.2-astra"):
+		return 8.0, 40.0, true
+	case strings.Contains(model, "gpt-6.2-sol"):
+		return 2.0, 10.0, true
 	// gpt-6.1-sol (GA 29/Set/2026): $2/$10 como o 6-Sol, mas cached input
 	// a $0,10 (5%) — caso próprio no getCachePricing. Cobre o id do
 	// Bedrock (openai.gpt-6.1-sol) e o slug do OpenRouter.
@@ -288,6 +309,14 @@ func openAIPricing(model string) (float64, float64, bool) {
 // 3.8/3.7/3.6-flash: preço com data de virada (geminiFlashRates).
 func googlePricing(model string) (float64, float64, bool) {
 	switch {
+	case strings.Contains(model, "gemini-4-neon"):
+		// Gemini 4 Neon (GA Nov 18 2026): $3/$15, output including
+		// thinking; no dated step and no >200K tier (aistudio.google.com/
+		// docs/pricing, Nov 2026).
+		return 3.0, 15.0, true
+	case strings.Contains(model, "gemini-4-hydrogen"):
+		// Gemini 4 Hydrogen (GA Nov 12 2026): $1.50/$7.50, same page.
+		return 1.50, 7.50, true
 	case strings.Contains(model, "gemini-4-argon"), strings.Contains(model, "gemini-4-carbon"):
 		// Carbon (GA Nov 10 2026) is listed at Argon's price in every
 		// tier, with the same Dec 1 2026 step (aistudio.google.com/docs/
@@ -583,7 +612,11 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 
 	switch {
 	case strings.Contains(model, "fable-5-1"), strings.Contains(model, "fable-5.1"),
-		strings.Contains(model, "fable-5-2"), strings.Contains(model, "fable-5.2"):
+		strings.Contains(model, "fable-5-2"), strings.Contains(model, "fable-5.2"),
+		strings.Contains(model, "mythos-5-1"), strings.Contains(model, "mythos-5.1"),
+		strings.Contains(model, "mythos-5-2"), strings.Contains(model, "mythos-5.2"):
+		// Mythos 5.1 and 5.2 share the 2.5% read rate of their Fable
+		// siblings; Mythos 5, like Fable 5, stays on the generic 10%.
 		// Fable 5.1 and 5.2: cache reads at 2.5% of input — $0.25 on the
 		// $10 of 5.1, $0.20 on the $8 of 5.2 (platform.claude.com/docs/en/
 		// about-claude/pricing); writes keep the 1.25x rule ($12.50 / $10). Must precede the generic
@@ -611,7 +644,10 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 			return 0, inputCost * 0.15
 		}
 		return 0, inputCost * 0.16
-	case strings.Contains(model, "gemini-4-argon"), strings.Contains(model, "gemini-4-carbon"):
+	case strings.Contains(model, "gemini-4-argon"), strings.Contains(model, "gemini-4-carbon"),
+		strings.Contains(model, "gemini-4-hydrogen"), strings.Contains(model, "gemini-4-neon"):
+		// Hydrogen and Neon bill cached input at the same 5% — $0.075 on
+		// $1.50, $0.15 on $3.
 		// Gemini 4 Argon and Carbon: implicit caching only, cached input at 5% of
 		// input — $0.10 on the $2 introductory price, $0.20 on $4 from
 		// Dec 1 2026 (ai.google.dev/gemini-api/docs/pricing, Oct 2026).
@@ -624,7 +660,11 @@ func getCachePricing(provider, model string) (cacheWriteCost, cacheReadCost floa
 		// resources add storage per token-hour, priced separately from
 		// lifecycle events (cli/cost_cache_resources.go).
 		return 0, inputCost * 0.10
-	case strings.Contains(model, "gpt-6.1-sol"), strings.Contains(model, "gpt-6.1-terra"):
+	case strings.Contains(model, "gpt-6.1-sol"), strings.Contains(model, "gpt-6.1-terra"),
+		strings.Contains(model, "gpt-6.2-astra"), strings.Contains(model, "gpt-6.2-sol"):
+		// gpt-6.2-astra and gpt-6.2-sol keep the 6.1 ratios: cached input
+		// $0.40 on $8 and $0.10 on $2 (5%), 30-minute cache write $10 and
+		// $2.50 (1.25x).
 		// gpt-6.1-sol e gpt-6.1-terra: cached input a 5% do input ($0,10 /
 		// $0,05 — metade da razão do 6-Sol) e cache write a 1,25x ($2,50 /
 		// $1,25) (developers.openai.com/api/

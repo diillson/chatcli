@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -166,11 +167,10 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 		instructions, conversationInput := buildOAuthPayload(history, prompt, c.model)
 		reqBody = map[string]interface{}{
 			"model":             c.model,
-			"instructions":      instructions,
-			"input":             conversationInput,
 			"max_output_tokens": effectiveMaxTokens,
 			"store":             false,
 		}
+		placeInstructions(reqBody, c.model, instructions, conversationInput)
 	} else {
 		input := buildTextFromHistory(history, "")
 		// Fallback: se o history não tem o último turno do user (edge-case),
@@ -492,6 +492,39 @@ func historyHasDocuments(history []models.Message) bool {
 		}
 	}
 	return false
+}
+
+// gptVersionRe reads the generation off a GPT id ("gpt-6.2-sol" → 6, 2).
+var gptVersionRe = regexp.MustCompile(`^gpt-(\d+)(?:\.(\d+))?`)
+
+// instructionsTrailInput reports whether the model appends a top-level
+// `instructions` AFTER `input`, which is what the Responses API does from
+// GPT-6.2 on (developers.openai.com/api/docs/guides/latest-model). There
+// the field stops being a system prompt in the leading position: it lands
+// behind the whole conversation and falls out of the cacheable prefix.
+func instructionsTrailInput(model string) bool {
+	m := gptVersionRe.FindStringSubmatch(strings.ToLower(strings.TrimSpace(model)))
+	if m == nil {
+		return false
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor, _ := strconv.Atoi(m[2])
+	return major > 6 || (major == 6 && minor >= 2)
+}
+
+// placeInstructions puts the system prompt where the model reads it first.
+// Up to GPT-6.1 that is the top-level `instructions` field. From GPT-6.2 on
+// it is a `developer` message as the first input item — the placement
+// OpenAI documents for reusable instructions, and the only one that keeps
+// them ahead of the conversation and eligible for prompt caching.
+func placeInstructions(reqBody map[string]interface{}, model, instructions string, input []map[string]interface{}) {
+	if !instructionsTrailInput(model) {
+		reqBody["instructions"] = instructions
+		reqBody["input"] = input
+		return
+	}
+	lead := map[string]interface{}{"role": "developer", "content": instructions}
+	reqBody["input"] = append([]map[string]interface{}{lead}, input...)
 }
 
 // buildOAuthPayload extracts system messages as instructions and builds

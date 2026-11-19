@@ -74,7 +74,7 @@ func TestNov2026_NewModels(t *testing.T) {
 		provider, id, want string
 		ctx, out           int
 	}{
-		{ProviderGoogleAI, "gemini-4-carbon", "gemini-4-carbon", 1048576, 65536},
+		{ProviderGoogleAI, "gemini-4-carbon", "gemini-4-carbon", 1048576, 32768},
 		{ProviderGoogleAI, "gemini-4-argon", "gemini-4-argon", 1048576, 65536},
 		{ProviderOpenRouter, "google/gemini-4-carbon", "google/gemini-4-carbon", 1048576, 65536},
 		{ProviderOpenRouter, "google/gemini-4-argon", "google/gemini-4-argon", 1048576, 65536},
@@ -146,7 +146,7 @@ func TestGetDisplayName_ExactMatchOnly(t *testing.T) {
 
 	for provider, id := range map[string]string{
 		ProviderClaudeAI: "claude-fable-5-3",
-		ProviderOpenAI:   "gpt-6.2-sol",
+		ProviderOpenAI:   "gpt-6.3-sol",
 		ProviderGoogleAI: "gemini-4-carbon-preview",
 		ProviderMoonshot: "kimi-k3.2-pro",
 	} {
