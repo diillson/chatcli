@@ -8,7 +8,7 @@ chatcli eval list evals/ --filter tag:coder
 
 # Use a judge that is a different model from the candidate: self-grading is biased.
 chatcli eval run evals/ --provider CLAUDEAI --model claude-sonnet-5-5 \
-  --judge-provider OPENAI --judge-model gpt-6.1-sol \
+  --judge-provider OPENAI --judge-model gpt-6.2-sol \
   --trials 3 --max-cost 2 --out runs/sonnet.json --markdown runs/sonnet.md
 
 # CI gate: fail if anything that passed in the baseline fails now.
@@ -30,7 +30,7 @@ Exit codes: `0` ok, `1` pass rate below `--min-pass-rate` (default 1.0), `2` usa
 
 ```yaml
 name: my-suite
-judge: {provider: OPENAI, model: gpt-6.1-sol}   # default judge (flags override)
+judge: {provider: OPENAI, model: gpt-6.2-sol}   # default judge (flags override)
 defaults:                                        # inherited by every case
   mode: chat            # chat | coder
   timeout: 4m
