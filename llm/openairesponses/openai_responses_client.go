@@ -124,17 +124,6 @@ func (c *OpenAIResponsesClient) getMaxTokens() int {
 	return catalog.GetMaxTokens(catalog.ProviderOpenAI, c.model, 0)
 }
 
-// supportsReasoningEffort reports whether the given OpenAI model id accepts
-// the `reasoning.effort` request field. The OpenAI /v1/responses API only
-// honors this field on the o-series reasoning models (o1, o3, o4, GPT-5).
-// Non-reasoning chat models (gpt-4o, gpt-4.1, etc.) reject unknown fields.
-func supportsReasoningEffort(model string) bool {
-	// One list for the whole OpenAI-compatible family (see
-	// client.SupportsOpenAIReasoningEffort): this used to be duplicated
-	// per client and drifted.
-	return client.SupportsOpenAIReasoningEffort(model)
-}
-
 func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, history []models.Message, maxTokens int) (string, error) {
 	// A response without a usage block must not re-book the previous
 	// call's tokens as this call's: reset before the request.
@@ -210,7 +199,7 @@ func (c *OpenAIResponsesClient) SendPrompt(ctx context.Context, prompt string, h
 	// Skill effort hint → reasoning.effort.
 	// Applies to both OAuth and API key paths; the ChatGPT backend quietly
 	// ignores the field for non-reasoning models, so this is safe.
-	if eff := client.ReasoningEffortForOpenAI(client.EffortFromContext(ctx)); eff != "" && supportsReasoningEffort(c.model) {
+	if eff := client.OpenAIModelReasoningEffort(c.model, client.EffortFromContext(ctx)); eff != "" {
 		reqBody["reasoning"] = map[string]interface{}{
 			"effort": eff,
 		}

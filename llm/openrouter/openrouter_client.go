@@ -264,7 +264,7 @@ func (c *OpenRouterClient) buildPayload(ctx context.Context, messages []map[stri
 	// accounting field below: a strict OpenAI-compatible backend rejects
 	// request fields it does not know.
 	if !utils.IsCustomEndpoint(c.getAPIURL(), config.OpenRouterAPIURL) {
-		if eff := client.ReasoningEffortForOpenAI(client.EffortFromContext(ctx)); eff != "" {
+		if eff := openRouterEffort(c.model, client.EffortFromContext(ctx)); eff != "" {
 			payload["reasoning"] = map[string]interface{}{"effort": eff}
 		}
 	}
@@ -691,4 +691,17 @@ func normalizeWireContent(content interface{}) (interface{}, bool) {
 		return asParts, true
 	}
 	return nil, false
+}
+
+// openRouterEffort is the reasoning.effort to send for a model. OpenRouter
+// takes low/medium/high for every upstream; the OpenAI slugs also take the
+// levels above high that the model itself accepts (openrouter.ai lists
+// low..max for the GPT-6 line), so those follow OpenAI's own ceiling.
+func openRouterEffort(model string, e client.SkillEffort) string {
+	if id, ok := strings.CutPrefix(strings.ToLower(model), "openai/"); ok {
+		if eff := client.OpenAIModelReasoningEffort(id, e); eff != "" {
+			return eff
+		}
+	}
+	return client.ReasoningEffortForOpenAI(e)
 }
