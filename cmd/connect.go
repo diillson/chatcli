@@ -72,7 +72,7 @@ func RunConnect(ctx context.Context, args []string, llmMgr manager.LLMManager, l
 	fs.StringVar(&opts.ClientAPIKey, "llm-key", os.Getenv("CHATCLI_CLIENT_API_KEY"), "Your own LLM API key/OAuth token (forwarded to server)")
 	fs.BoolVar(&opts.UseLocalAuth, "use-local-auth", false, "Use OAuth/API key from local auth store (~/.chatcli/auth-profiles.json)")
 	fs.StringVar(&opts.Provider, "provider", "", "Override server's default LLM provider ("+strings.Join(catalog.ProviderNames(), ", ")+")")
-	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-6.1-sol, gemini-3.8-flash)")
+	fs.StringVar(&opts.Model, "model", "", "Override server's default LLM model (e.g., gpt-6.2-sol, gemini-3.8-flash)")
 	fs.StringVar(&opts.ClientID, "client-id", "", "StackSpot: Client ID for authentication")
 	fs.StringVar(&opts.ClientKey, "client-key", "", "StackSpot: Client Key for authentication")
 	fs.StringVar(&opts.Realm, "realm", "", "StackSpot: Realm/Tenant")

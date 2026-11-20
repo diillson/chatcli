@@ -254,7 +254,7 @@ fallback:
   enabled: true
   providers:            # effective chain: CLAUDEAI -> OPENAI -> GOOGLEAI
     - name: OPENAI
-      model: gpt-6.1-sol
+      model: gpt-6.2-sol
     - name: GOOGLEAI
       model: gemini-3.8-flash
 ```
