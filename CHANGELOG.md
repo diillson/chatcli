@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.232.0](https://github.com/diillson/chatcli/compare/v1.231.1...v1.232.0) (2026-11-20)
+
+
+### Features
+
+* **catalog:** GPT-6.2 Astra and Sol, Gemini 4 Neon and Hydrogen and the Mythos line across providers ([#1992](https://github.com/diillson/chatcli/issues/1992)) ([ed88a68](https://github.com/diillson/chatcli/commit/ed88a682463f0b4408115de7937aa8a83a011ea3))
+* **llm:** default to GPT-6.2 Sol, effort above high on OpenAI, MiniMax H3 Image and no task budget on Bedrock ([#1994](https://github.com/diillson/chatcli/issues/1994)) ([fbd55d4](https://github.com/diillson/chatcli/commit/fbd55d437174bcfd35c248f53a99b878ceb12ead))
+
 ## [1.231.1](https://github.com/diillson/chatcli/compare/v1.231.0...v1.231.1) (2026-11-16)
 
 
