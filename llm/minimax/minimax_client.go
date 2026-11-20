@@ -386,11 +386,18 @@ func (c *MiniMaxClient) processAnthropicResponse(resp *http.Response) (string, e
 // keepModel reports whether a model id from /models should be listed.
 // The official endpoint is filtered to known chat-capable families; a custom
 // endpoint exposes whatever the gateway serves, so everything is kept.
+//
+// The M2 family and MiniMax-Text-01 are dropped as well: MiniMax retired
+// them (M2.5/M2.7 on Nov 18 2026) and /models still returns the ids, while
+// a request for one answers code 2069 "no longer available".
 func keepModel(id string, custom bool) bool {
 	if custom {
 		return true
 	}
 	id = strings.ToLower(id)
+	if strings.HasPrefix(id, "minimax-m2") || id == "minimax-text-01" {
+		return false
+	}
 	return strings.HasPrefix(id, "minimax") || strings.HasPrefix(id, "abab")
 }
 

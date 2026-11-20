@@ -9,6 +9,7 @@ package pricing
 import (
 	"sort"
 	"strings"
+	"time"
 )
 
 // devinRate is the per-account price Cognition charges for a model family
@@ -66,7 +67,9 @@ var devinStaticRates = map[string]devinRate{
 	"claude-haiku-4.5":  {1, 5, 0, 0},
 	// OpenAI family ("-priority" is the listing's spelling of fast).
 	// GPT-6 rows and gpt-5.6-sol's $4/$20 are the Nov 9 2026 public
-	// table; Cognition announces $5/$30 for 5.6 Sol from Nov 21 2026.
+	// table; from Nov 21 2026 07:00 UTC Cognition bills 5.6 Sol at $5/$30
+	// (devinDatedRate applies the step). GPT-6.2 Astra and Sol are not in
+	// Cognition's table as of Nov 19 2026, so they stay unpriced here.
 	"gpt-6.1-terra": {1, 5, 2, 10},
 	"gpt-6.1-sol":   {2, 10, 4, 20},
 	"gpt-6-astra":   {10, 50, 20, 100},
@@ -82,22 +85,26 @@ var devinStaticRates = map[string]devinRate{
 	"gpt-5.2":       {1.75, 14, 0, 0},
 	"gpt-5.1":       {1.25, 10, 0, 0},
 	"gpt-4.1":       {2, 8, 0, 0},
-	// Google family.
+	// Google family. Gemini 4 Neon entered the table on Nov 18 2026
+	// (gemini-4-neon-low .. -xhigh) with no dated step; Argon, Carbon and
+	// 3.8 Flash carry dated promotions and stay unpriced.
+	"gemini-4-neon":    {3, 15, 0, 0},
 	"gemini-3.7-flash": {1.5, 7.5, 0, 0},
 	"gemini-3.6-flash": {1.5, 7.5, 0, 0},
 	"gemini-3.5-flash": {1.5, 9, 0, 0},
 	"gemini-3.1-pro":   {2, 12, 0, 0},
 	"gemini-3-flash":   {0.5, 3, 0, 0},
 	// Z.AI, Moonshot, DeepSeek.
-	"glm-5.3-flash":     {0.15, 0.5, 0, 0},
-	"glm-5.3":           {1.4, 4.4, 0, 0},
-	"glm-5.2":           {1.4, 4.4, 0, 0},
-	"kimi-k3.1-pro":     {2, 10, 0, 0},
-	"kimi-k3":           {3, 15, 0, 0},
-	"kimi-k2.7":         {0.95, 4, 0, 0},
-	"kimi-k2.6":         {0.8, 2, 0, 0},
-	"deepseek-v4-pro":   {1.32, 3.96, 0, 0},
-	"deepseek-v4-flash": {0.14, 0.28, 0, 0},
+	"glm-5.3-flash":       {0.15, 0.5, 0, 0},
+	"glm-5.3":             {1.4, 4.4, 0, 0},
+	"glm-5.2":             {1.4, 4.4, 0, 0},
+	"kimi-k3.1-pro":       {2, 10, 0, 0},
+	"kimi-k3":             {3, 15, 0, 0},
+	"kimi-k2.7":           {0.95, 4, 0, 0},
+	"kimi-k2.6":           {0.8, 2, 0, 0},
+	"deepseek-v4.1-flash": {0.22, 0.66, 0, 0},
+	"deepseek-v4-pro":     {1.32, 3.96, 0, 0},
+	"deepseek-v4-flash":   {0.14, 0.28, 0, 0},
 	// xAI (Nov 9 2026 public table).
 	"grok-4.7": {2, 6, 0, 0},
 	"grok-4.6": {2, 6, 0, 0},
@@ -107,6 +114,20 @@ var devinStaticRates = map[string]devinRate{
 	"swe-1.7":           {0.5, 2.5, 0, 0},
 	"swe-1.6-fast":      {0.5, 2.5, 0, 0},
 	"swe-1.6":           {0.5, 2.5, 0, 0},
+}
+
+// devinGPT56SolStep is when Cognition's standard-context rate for GPT-5.6
+// Sol goes from $4/$20 to $5/$30 (docs.devin.ai/desktop/models, read Nov
+// 19 2026: "November 21, 2026 07:00 UTC").
+var devinGPT56SolStep = time.Date(2026, time.November, 21, 7, 0, 0, 0, time.UTC)
+
+// devinDatedRate applies the price steps Cognition has announced with a
+// date to a static row. The priority rate keeps the listing's 2x.
+func devinDatedRate(key string, r devinRate, t time.Time) devinRate {
+	if key == "gpt-5.6-sol" && !t.Before(devinGPT56SolStep) {
+		return devinRate{5, 30, 10, 60}
+	}
+	return r
 }
 
 // devinStaticKeys is devinStaticRates' keys, normalized and longest first,
@@ -153,7 +174,7 @@ func devinStaticPricing(model string) (inputCost, outputCost float64, ok bool) {
 		if rest != "" && rest[0] != '-' {
 			continue
 		}
-		r := devinStaticRates[key]
+		r := devinDatedRate(key, devinStaticRates[key], now())
 		if r.fastIn > 0 && (strings.Contains(rest, "-fast") || strings.Contains(rest, "-priority")) {
 			return r.fastIn, r.fastOut, true
 		}

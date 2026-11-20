@@ -88,6 +88,42 @@ const CapabilityNoExplicitCache = "no_explicit_cache"
 // block for the same reason.
 var registry = []ModelMeta{
 	// ── OpenAI GPT-6 ─────────────────────────────────────────────────
+	// gpt-6.2-astra and gpt-6.2-sol (Nov 17 2026, developers.openai.com/
+	// api/docs/models/gpt-6.2-astra and /gpt-6.2-sol): the 6.2 refresh of
+	// the top and mid tiers — no 6.2 Terra or Luna, no dated snapshots.
+	// Both: 1,050,000 context (922K addressable as input), 128,000 max
+	// output, text and image in. Astra lists at $8/$40 — below GPT-6
+	// Astra's $10/$50 — and Sol at $2/$10; cached input is 5% of input and
+	// a 30-minute cache write 1.25x; above 272K input the request bills 2x
+	// input/cache and 1.5x output (llm/pricing models all three).
+	// reasoning.effort takes low|medium|high|xhigh|max: the API answers
+	// "none" and "minimal" with a 400 naming exactly those five (probed
+	// Nov 19 2026). Chat Completions serves them without tools, so tool
+	// calling needs the Responses API. From 6.2 on Responses appends a
+	// top-level `instructions` AFTER `input`; the client sends the system
+	// prompt as a leading developer message instead, which keeps it first
+	// and cacheable (llm/openairesponses). Listed ahead of the 6.1 pair
+	// and of Astra, whose loose "gpt-6" alias is a prefix of these ids.
+	{
+		ID:              "gpt-6.2-astra",
+		Aliases:         []string{"gpt-6.2-astra", "gpt-6-2-astra"},
+		DisplayName:     "GPT-6.2 Astra",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-6.2-sol",
+		Aliases:         []string{"gpt-6.2-sol", "gpt-6-2-sol", "gpt-6.2"},
+		DisplayName:     "GPT-6.2 Sol",
+		Provider:        ProviderOpenAI,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIResponses,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	// gpt-6.1-terra (Oct 26 2026, developers.openai.com/api/docs/models/
 	// gpt-6.1-terra): the mid tier of the 6.1 refresh, at half of Sol's
 	// price — $1/$5 with cached input at $0.05 (5%) and cache writes at
@@ -539,6 +575,53 @@ var registry = []ModelMeta{
 		},
 	},
 	{
+		// Mythos 5.2 / 5.1 / 5 (platform.claude.com/docs/en/models/overview,
+		// checked Nov 19 2026): the Mythos line is the same underlying model
+		// as the Fable of the same version, served to organizations in
+		// Anthropic's verification program (any other key gets a 403/404).
+		// Each mirrors its Fable sibling's surface and price: 1M context,
+		// 128K max output, adaptive thinking always on (disabled and
+		// budget_tokens return 400), effort low..max with API default high,
+		// 30-day data retention. Mythos 5.2 (Nov 9 2026): $8/$40, cache read
+		// 2.5% of input, fast mode $16/$80, the thinking prefix check on every
+		// account (client.StaleThinking.Heal). Mythos 5.1 (Sep 1 2026):
+		// $10/$50, cache read 2.5%. Mythos 5 (Jun 9 2026): $10/$50, cache read
+		// 10%. claude-mythos-preview is deprecated and has no entry. Newest
+		// first: "mythos-5" is a prefix of the other two ids; the bare
+		// "mythos" shortcut tracks the newest.
+		ID:              "claude-mythos-5-2",
+		Aliases:         []string{"claude-mythos-5-2", "mythos-5-2", "claude-mythos-5.2", "mythos-5.2", "mythos"},
+		DisplayName:     "Claude Mythos 5.2 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget", "fast_mode", "mid_conversation_system"},
+	},
+	{
+		ID:              "claude-mythos-5-1",
+		Aliases:         []string{"claude-mythos-5-1", "mythos-5-1", "claude-mythos-5.1", "mythos-5.1"},
+		DisplayName:     "Claude Mythos 5.1 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system"},
+	},
+	{
+		ID:              "claude-mythos-5",
+		Aliases:         []string{"claude-mythos-5", "mythos-5"},
+		DisplayName:     "Claude Mythos 5 (1M context)",
+		Provider:        ProviderClaudeAI,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		APIVersion:      config.ClaudeAIAPIVersionDefault,
+		Capabilities:    []string{"vision", "json_mode", "tools", "adaptive_thinking", "output_effort", "task_budget", "mid_conversation_system"},
+	},
+	{
 		// Fable 5.2 (claude-fable-5-2, Nov 9 2026; platform.claude.com/docs/
 		// en/models/fable-5-2/overview + whats-new-fable-5-2 + migration-
 		// guide): successor to Fable 5.1 and the first Fable cheaper than
@@ -811,21 +894,58 @@ var registry = []ModelMeta{
 	// 1,048,576 / 65,536 profile. Newest first so generic alias prefixes
 	// don't shadow the more specific ids.
 	{
+		// gemini-4-neon (Stable, Nov 18 2026, aistudio.google.com/docs/
+		// models/gemini-4-neon): the top Gemini 4 tier — $3/$15 per MTok,
+		// cached input $0.15 (5%), no dated step and no >200K tier. Text,
+		// image, video, audio and PDF in; text out. The models API reports
+		// inputTokenLimit 1,048,576 and outputTokenLimit 65,536 (Nov 19
+		// 2026). Thinking levels low|medium|high|xhigh, default high — there
+		// is no "minimal", so thinking cannot be turned near-off. Implicit
+		// caching only.
+		ID:              "gemini-4-neon",
+		Aliases:         []string{"gemini-4-neon"},
+		DisplayName:     "Gemini 4 Neon",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution", CapabilityNoExplicitCache},
+	},
+	{
+		// gemini-4-hydrogen (Stable, Nov 12 2026, aistudio.google.com/docs/
+		// models/gemini-4-hydrogen): the lower-priced Gemini 4 tier and the
+		// replacement GitHub names for Gemini 3.8 Flash — $1.50/$7.50 per
+		// MTok, cached input $0.075 (5%), free tier available. Same profile
+		// as Neon: 1,048,576 in / 65,536 out per the models API, thinking
+		// levels low|medium|high|xhigh (default high), implicit caching only.
+		ID:              "gemini-4-hydrogen",
+		Aliases:         []string{"gemini-4-hydrogen"},
+		DisplayName:     "Gemini 4 Hydrogen",
+		Provider:        ProviderGoogleAI,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    "gemini_api",
+		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution", CapabilityNoExplicitCache},
+	},
+	{
 		// gemini-4-carbon (Stable, Nov 10 2026, aistudio.google.com/docs/
 		// models/gemini-4-carbon): the Gemini 4 model Google positions for
 		// complex software engineering, multimodal and scientific work —
 		// Argon is the faster, lower-spend sibling. Same profile as Argon:
 		// text, image, video, audio and PDF in; text out; 1,048,576-token
-		// window shared by input and output, 65,536 output tokens on a
-		// synchronous call; thinking levels low|medium|high (default
-		// medium); implicit caching only. Same dated price as Argon:
-		// llm/pricing geminiArgonRates.
+		// window shared by input and output; thinking levels low|medium|
+		// high (default medium); implicit caching only. Output cap: the
+		// model page says 65,536 on a synchronous call, but the models API
+		// reports outputTokenLimit 32,768 for this id (Nov 19 2026, against
+		// 65,536 for Argon's siblings Hydrogen and Neon) — the API's own
+		// figure is used, since a request above the cap is refused. Same
+		// dated price as Argon: llm/pricing geminiArgonRates.
 		ID:              "gemini-4-carbon",
 		Aliases:         []string{"gemini-4-carbon"},
 		DisplayName:     "Gemini 4 Carbon",
 		Provider:        ProviderGoogleAI,
 		ContextWindow:   1048576,
-		MaxOutputTokens: 65536,
+		MaxOutputTokens: 32768,
 		PreferredAPI:    "gemini_api",
 		Capabilities:    []string{"vision", "tools", "json_mode", "code_execution", CapabilityNoExplicitCache},
 	},
@@ -1015,6 +1135,65 @@ var registry = []ModelMeta{
 		Provider:        ProviderCopilot,
 		ContextWindow:   1050000,
 		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	// GA in Copilot since the Nov 10 refresh (docs.github.com supported-
+	// models + models-and-pricing and github.blog/changelog, checked Nov
+	// 19 2026): GPT-6.2 Astra and Sol (Nov 17), Gemini 4 Neon (Nov 18),
+	// Gemini 4 Hydrogen (Nov 13) and Gemini 4 Carbon (Nov 10) — Pro+,
+	// Max, Business and Enterprise, gradual rollout, billed at the
+	// provider's list price. GitHub still publishes display names only,
+	// so the slugs follow the vendor-slug convention of the rows below.
+	// On Dec 14 2026 GitHub retires Gemini 4 Argon (→ Carbon), Gemini 3.8
+	// Flash (→ Hydrogen), Fable 5, Haiku 4.5, Grok 4.6 and Kimi K3.
+	{
+		ID:              "gpt-6.2-astra",
+		Aliases:         []string{"copilot-gpt-6.2-astra", "copilot-gpt-6-2-astra", "gpt-6-2-astra"},
+		DisplayName:     "GPT-6.2 Astra (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gpt-6.2-sol",
+		Aliases:         []string{"copilot-gpt-6.2-sol", "copilot-gpt-6-2-sol", "gpt-6-2-sol"},
+		DisplayName:     "GPT-6.2 Sol (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-4-neon",
+		Aliases:         []string{"copilot-gemini-4-neon"},
+		DisplayName:     "Gemini 4 Neon (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-4-hydrogen",
+		Aliases:         []string{"copilot-gemini-4-hydrogen"},
+		DisplayName:     "Gemini 4 Hydrogen (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "gemini-4-carbon",
+		Aliases:         []string{"copilot-gemini-4-carbon"},
+		DisplayName:     "Gemini 4 Carbon (Copilot)",
+		Provider:        ProviderCopilot,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 32768,
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
@@ -1228,22 +1407,15 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"vision", "tools", "json_mode"},
 	},
-	{
-		ID:              "grok-build-0.1",
-		Aliases:         []string{"grok-build-0.1", "grok-build-0", "grok-code-fast-1", "grok-code-fast"},
-		DisplayName:     "Grok Build 0.1",
-		Provider:        ProviderXAI,
-		ContextWindow:   256000,
-		MaxOutputTokens: 16384,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"vision", "tools", "json_mode"},
-	},
 	// Retired by xAI on May 15 2026 (docs.x.ai/developers/migration/
 	// may-15-retirement) and removed from ProviderXAI: grok-3, grok-3-mini,
 	// grok-4-0709, grok-4-fast-* and grok-4-1-fast-* (the API now redirects
 	// those slugs to grok-4.3 and bills grok-4.3 rates) and grok-code-fast-1
-	// (now an alias of grok-build-0.1 — kept on that entry above so pinned
-	// configs still size correctly). None of them has a model page or a
+	// (redirected to grok-build-0.1). grok-build-0.1 itself was an early-
+	// access id that never reached the models or pricing page; the API
+	// answers it 404 "does not exist or your team does not have access"
+	// (probed Nov 19 2026), so its entry is gone too — grok-build-latest
+	// is the served build alias and resolves to grok-4.5 above. None of them has a model page or a
 	// pricing row anymore.
 
 	// ZAI (Zhipu AI / z.ai) Models
@@ -1465,56 +1637,14 @@ var registry = []ModelMeta{
 		PreferredAPI:    APIChatCompletions,
 		Capabilities:    []string{"tools", "vision"},
 	},
-	{
-		ID:              "MiniMax-M2.7",
-		Aliases:         []string{"minimax-m2.7", "m2.7"},
-		DisplayName:     "MiniMax M2.7",
-		Provider:        ProviderMiniMax,
-		ContextWindow:   204800,
-		MaxOutputTokens: 131072,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "vision"},
-	},
-	{
-		ID:              "MiniMax-M2.7-highspeed",
-		Aliases:         []string{"minimax-m2.7-highspeed", "m2.7-highspeed"},
-		DisplayName:     "MiniMax M2.7 Highspeed",
-		Provider:        ProviderMiniMax,
-		ContextWindow:   204800,
-		MaxOutputTokens: 131072,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "vision"},
-	},
-	{
-		ID:              "MiniMax-M2.5",
-		Aliases:         []string{"minimax-m2.5", "m2.5"},
-		DisplayName:     "MiniMax M2.5",
-		Provider:        ProviderMiniMax,
-		ContextWindow:   196608,
-		MaxOutputTokens: 65536,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "vision"},
-	},
-	{
-		ID:              "MiniMax-M2.5-highspeed",
-		Aliases:         []string{"minimax-m2.5-highspeed", "m2.5-highspeed"},
-		DisplayName:     "MiniMax M2.5 Highspeed",
-		Provider:        ProviderMiniMax,
-		ContextWindow:   196608,
-		MaxOutputTokens: 65536,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"tools", "vision"},
-	},
-	{
-		ID:              "MiniMax-Text-01",
-		Aliases:         []string{"minimax-text-01", "text-01"},
-		DisplayName:     "MiniMax Text-01",
-		Provider:        ProviderMiniMax,
-		ContextWindow:   128000,
-		MaxOutputTokens: 2048,
-		PreferredAPI:    APIChatCompletions,
-		Capabilities:    []string{"json_mode"},
-	},
+	// Retired by MiniMax and removed from ProviderMiniMax: MiniMax-M2.7,
+	// M2.7-highspeed, M2.5 and M2.5-highspeed on Nov 18 2026 (platform.
+	// minimax.io/docs/faq/models) and MiniMax-Text-01, which left the
+	// model tables without a notice. A pay-as-you-go request for any of
+	// them now answers code 2069 "The model ... is no longer available"
+	// (probed Nov 19 2026), although /v1/models still lists the M2 ids;
+	// plan keys are routed to M3.1 Flash by MiniMax. Pricing rows stay in
+	// llm/pricing so old session logs still price.
 
 	// Moonshot (Kimi) Models.
 	// Native multimodal MoE family from Moonshot AI. K3 is the flagship
@@ -1622,6 +1752,53 @@ var registry = []ModelMeta{
 	// models, Nov 10 2026). Prices are OpenRouter's (it bills usage.cost
 	// itself); the ":batch" and "-pro" siblings stay out. Listing max
 	// outputs of 0.9x the context are an artifact — the vendor cap is used.
+	{
+		// openai/gpt-6.2-astra and openai/gpt-6.2-sol (listed Nov 17 2026,
+		// openrouter.ai/api/v1/models): 1.05M ctx, 128K out; Astra $8/$40
+		// with cache read $0.40 and write $10, Sol $2/$10 with $0.10 / $2.50.
+		// Efforts low..max. The "-pro" and ":batch" siblings stay out.
+		ID:              "openai/gpt-6.2-astra",
+		Aliases:         []string{"openrouter-gpt-6.2-astra", "openrouter-gpt-6-2-astra", "openai/gpt-6-2-astra"},
+		DisplayName:     "GPT-6.2 Astra (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "openai/gpt-6.2-sol",
+		Aliases:         []string{"openrouter-gpt-6.2-sol", "openrouter-gpt-6-2-sol", "openai/gpt-6-2-sol"},
+		DisplayName:     "GPT-6.2 Sol (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		// google/gemini-4-neon (Nov 18 2026) and google/gemini-4-hydrogen
+		// (Nov 12 2026): 1,048,576 ctx; Neon $3/$15 with cache read $0.15,
+		// Hydrogen $1.50/$7.50 with $0.075. Reasoning is mandatory on both.
+		ID:              "google/gemini-4-neon",
+		Aliases:         []string{"openrouter-gemini-4-neon"},
+		DisplayName:     "Gemini 4 Neon (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
+	{
+		ID:              "google/gemini-4-hydrogen",
+		Aliases:         []string{"openrouter-gemini-4-hydrogen"},
+		DisplayName:     "Gemini 4 Hydrogen (OpenRouter)",
+		Provider:        ProviderOpenRouter,
+		ContextWindow:   1048576,
+		MaxOutputTokens: 65536,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"vision", "tools", "json_mode"},
+	},
 	{
 		// anthropic/claude-fable-5.2 (Nov 9 2026): 1M ctx, 128K out, $8/$40,
 		// cache read $0.20. Ahead of the Fable 5.1 and Fable 5 slugs, both
@@ -1913,6 +2090,45 @@ var registry = []ModelMeta{
 	// supported for Claude on Bedrock; only the top-level automatic cache
 	// parameter is first-party-only, and this client never emits it.
 
+	// Mythos 5.2 / 5.1 / 5 on Bedrock (model ids per platform.claude.com/
+	// docs/en/models/mythos-5-2/overview and the 5.1 / 5 pages, Nov 19
+	// 2026; gated behind Anthropic's verification program). Each takes
+	// the routing of its Fable sibling below: 5.2 is bedrock-runtime only
+	// on the global. profile, 5.1 and 5 are Mantle-routed dateless ids.
+	// Only the Bedrock-prefixed spellings are aliases — a bare
+	// "claude-mythos-5-2" on Bedrock is normalized through them. Not
+	// verified against a live AWS account. Newest first: "mythos-5" is a
+	// prefix of the other two.
+	{
+		ID:              "global.anthropic.claude-mythos-5-2",
+		Aliases:         []string{"bedrock-mythos-5-2", "bedrock-mythos-5.2", "anthropic.claude-mythos-5-2", "us.anthropic.claude-mythos-5-2", "claude-mythos-5-2", "mythos-5-2", "claude-mythos-5.2", "mythos-5.2"},
+		DisplayName:     "Claude Mythos 5.2 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "mid_conversation_system"},
+	},
+	{
+		ID:              "anthropic.claude-mythos-5-1",
+		Aliases:         []string{"bedrock-mythos-5-1", "global.anthropic.claude-mythos-5-1", "us.anthropic.claude-mythos-5-1", "claude-mythos-5-1", "mythos-5-1", "claude-mythos-5.1", "mythos-5.1"},
+		DisplayName:     "Claude Mythos 5.1 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "mid_conversation_system", "bedrock_mantle_only"},
+	},
+	{
+		ID:              "anthropic.claude-mythos-5",
+		Aliases:         []string{"bedrock-mythos-5", "global.anthropic.claude-mythos-5", "us.anthropic.claude-mythos-5", "claude-mythos-5", "mythos-5"},
+		DisplayName:     "Claude Mythos 5 (Bedrock, 1M ctx)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1000000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIAnthropicMessages,
+		Capabilities:    []string{"tools", "vision", "json_mode", "adaptive_thinking", "output_effort", "mid_conversation_system", "bedrock_mantle_only"},
+	},
 	// Fable 5.2 (Nov 9 2026, Bedrock model card anthropic-claude-fable-5-2
 	// + AWS ML blog "Introducing Claude Fable 5.2 on AWS"). Unlike Fable 5
 	// and 5.1, the card lists bedrock-runtime only (Messages via Invoke,
@@ -2258,6 +2474,37 @@ var registry = []ModelMeta{
 	// than the platform API's 1.05M. That is its own client-side choice
 	// (it matches OpenAI's short-context pricing tier, not an AWS limit),
 	// so this entry keeps the family convention the 5.6 rows established.
+	{
+		// GPT-6.2 Astra and Sol (GA on Bedrock Nov 17 2026, model-card-openai-
+		// gpt-6-2-astra / -sol + aws.amazon.com/about-aws/whats-new/2026/11/
+		// openai-gpt-6-2-astra-sol-amazon-bedrock): same shape as the 6.1
+		// pair — bedrock-runtime only through the us./global. profiles, the
+		// bare openai.gpt-6.2-* id being the Mantle in-region form in
+		// us-east-1. 1,050,000 context, 128,000 max output. Global profile:
+		// Astra $8/$40 with cache write $10 and read $0.40, Sol $2/$10 with
+		// $2.50 / $0.10 (US profile +10%), 2x/1.5x above 272K input. Converse
+		// takes text and image blocks only (document blocks and images in a
+		// toolResult are a ValidationException). Not verified against a live
+		// AWS account.
+		ID:              "global.openai.gpt-6.2-astra",
+		Aliases:         []string{"bedrock-gpt-6.2-astra", "bedrock-gpt-6-2-astra", "openai.gpt-6.2-astra", "us.openai.gpt-6.2-astra"},
+		DisplayName:     "GPT-6.2 Astra (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
+	{
+		ID:              "global.openai.gpt-6.2-sol",
+		Aliases:         []string{"bedrock-gpt-6.2-sol", "bedrock-gpt-6-2-sol", "openai.gpt-6.2-sol", "us.openai.gpt-6.2-sol"},
+		DisplayName:     "GPT-6.2 Sol (Bedrock, global)",
+		Provider:        ProviderBedrock,
+		ContextWindow:   1050000,
+		MaxOutputTokens: 128000,
+		PreferredAPI:    APIChatCompletions,
+		Capabilities:    []string{"tools", "vision", "json_mode", "bedrock_converse_only"},
+	},
 	{
 		// GPT-6.1 Terra (Oct 26 2026, model-card-openai-gpt-6-1-terra):
 		// same shape as 6.1 Sol — runtime through the us./global. profiles

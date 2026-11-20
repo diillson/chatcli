@@ -537,6 +537,31 @@ func (c *GeminiClient) getMaxTokens() int {
 }
 
 // ListModels fetches available models from the Google AI /v1beta/models endpoint.
+// nonChatModelMarkers are the id fragments of Gemini API models that
+// answer generateContent with something other than text: image, speech
+// and music generators and the transcription model.
+var nonChatModelMarkers = []string{"-image", "nano-banana", "-tts", "lyria", "-transcribe", "imagen", "veo-"}
+
+// keepModel reports whether a model id from /models belongs in the chat
+// listing. The official endpoint advertises generateContent on its image,
+// speech and music models too, and a loose catalog match then dressed them
+// as their text sibling — gemini-3.8-flash-tts was listed with the tools
+// and vision of gemini-3.8-flash, the image models at a chat price. They
+// have listings of their own (@image models, the TTS voices). A custom
+// endpoint exposes whatever the gateway serves, so everything is kept.
+func keepModel(id string, custom bool) bool {
+	if custom {
+		return true
+	}
+	id = strings.ToLower(id)
+	for _, marker := range nonChatModelMarkers {
+		if strings.Contains(id, marker) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, error) {
 	modelsURL := fmt.Sprintf("%s/models", c.baseURL)
 
@@ -593,6 +618,9 @@ func (c *GeminiClient) ListModels(ctx context.Context) ([]client.ModelInfo, erro
 
 		// Name is like "models/gemini-2.0-flash", extract the model ID
 		modelID := strings.TrimPrefix(m.Name, "models/")
+		if !keepModel(modelID, c.baseURL != config.GoogleAIAPIURL) {
+			continue
+		}
 		displayName := m.DisplayName
 		if displayName == "" {
 			displayName = modelID

@@ -32,8 +32,8 @@ func TestDevinStaticPricing(t *testing.T) {
 		{"claude-opus-5-xhigh", 5, 25, true},
 		{"claude-opus-5-max-fast", 10, 50, true},
 		{"claude-sonnet-5-fast", 2, 10, true}, // no fast variant listed: base rate
-		{"gpt-5.6-sol", 4, 20, true},
-		{"gpt-5-6-sol-high-priority", 8, 40, true},
+		{"gpt-5.6-terra", 2, 12, true},
+		{"gpt-5-6-terra-high-priority", 4, 24, true},
 		{"gpt-5.6-luna-none-priority", 0.4, 2.4, true},
 		{"gpt-5.4", 2.5, 15, true},
 		{"gpt-5.4-mini", 0.75, 4.5, true}, // longest family wins over gpt-5.4

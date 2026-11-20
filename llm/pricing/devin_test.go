@@ -8,11 +8,14 @@ package pricing
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestDevinStaticRate(t *testing.T) {
+	// Before the dated GPT-5.6 Sol step (Nov 21 2026 07:00 UTC).
+	withClock(t, time.Date(2026, time.November, 19, 12, 0, 0, 0, time.UTC))
 	type dc struct {
 		model   string
 		in, out float64

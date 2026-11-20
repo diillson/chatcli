@@ -81,6 +81,9 @@ func init() {
 		{"gpt-4.1", 1047576, 32768},
 		// Google family (Gemini 3.x: 1M window / 65K output).
 		// Gemini 4 Argon and 3.8 Flash (Nov 9 2026 table).
+		// Gemini 4 Neon (in the table since Nov 18 2026: gemini-4-neon-
+		// low .. -xhigh).
+		{"gemini-4-neon", 1048576, 65536},
 		{"gemini-4-argon", 1048576, 65536},
 		{"gemini-3.8-flash", 1048576, 65536},
 		{"gemini-3.7-flash", 1048576, 65536},
@@ -99,6 +102,8 @@ func init() {
 		{"kimi-k3", 1048576, 131072},
 		{"kimi-k2.7", 262144, 131072},
 		{"kimi-k2.6", 262144, 131072},
+		// DeepSeek V4.1 Flash (uid deepseek-v4-1-flash-1017-*).
+		{"deepseek-v4.1-flash", 1000000, 32000},
 		{"deepseek-v4-pro", 1000000, 32000},
 		{"deepseek-v4-flash", 1000000, 32000},
 		// xAI (docs.devin.ai/desktop/models: grok-4-6-* / grok-4-5-*):
