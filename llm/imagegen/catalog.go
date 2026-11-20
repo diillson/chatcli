@@ -137,6 +137,13 @@ func allModels() []ModelInfo {
 		{Name: "glm-image", Provider: "zai", API: "images", Generate: true, Status: "active", Default: true, Note: "GLM-Image; bilingual text in images."},
 		{Name: "cogview-4-250304", Provider: "zai", API: "images", Generate: true, Status: "active", Note: "CogView-4; no longer in the API reference's model list."},
 		// MiniMax: text-to-image.
+		// MiniMax-H3-Image (Nov 10 2026, platform.minimax.io/docs/api-
+		// reference/image-generation-h3-generations): its own endpoint
+		// (/v1/images/generations), token-priced, explicit pixel sizes up
+		// to 20M pixels, 1 to 10 images per call. Image-01 stays the
+		// default until H3 is exercised on a funded account.
+		{Name: "MiniMax-H3-Image", Provider: "minimax", API: "native", Generate: true, Status: "active", Note: "H3 Image; explicit sizes up to 20M pixels, up to 10 images per call."},
+		{Name: "MiniMax-H3-Image-Highspeed", Provider: "minimax", API: "native", Generate: true, Status: "active", Note: "Faster H3 Image at a higher output price."},
 		{Name: "image-01", Provider: "minimax", API: "native", Generate: true, Status: "active", Default: true, Note: "Image-01; up to 9 images per call."},
 		// AWS Bedrock: Stability only (Nova Canvas reached EOL on
 		// 2026-09-30; Titan Image is gone). Core/Ultra/SD3.5 run In-Region
