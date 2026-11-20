@@ -750,10 +750,11 @@ func supportsExtendedThinking(model string) bool {
 // applyBedrockTaskBudget attaches the task budget to output_config on the
 // native Anthropic body both Bedrock transports send.
 //
-// The catalog advertises task_budget on the Bedrock mirrors of every model
-// that reads it, and this package never sent the field — the capability
-// was announced and unimplemented, so a run under a spending ceiling got
-// paced on the first-party API and not here.
+// Keyed on the catalog capability, which no Bedrock entry carries today:
+// Anthropic does not list Amazon Bedrock among the platforms that serve
+// task budgets, so a run under a spending ceiling sends nothing here and
+// relies on max_tokens alone. The path stays so that enabling the feature
+// is a catalog change once AWS serves it.
 //
 // Called after the effort routing and outside it: a spending ceiling is
 // not a reasoning setting, and the effort path returns early when no
