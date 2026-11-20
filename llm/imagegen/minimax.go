@@ -6,6 +6,7 @@
  * MiniMax Image-01 is NOT OpenAI-shaped: it POSTs to a dedicated
  * /v1/image_generation endpoint with an aspect_ratio (not a WxH size) and
  * returns base64 strings under data.image_base64. Errors arrive in base_resp.
+ * The H3 image models use another endpoint and body: minimax_h3.go.
  * Credentials reuse the same MINIMAX_API_KEY as the MiniMax chat provider.
  */
 package imagegen
@@ -36,6 +37,8 @@ type MiniMax struct {
 	apiKey  string
 	model   string
 	client  *http.Client
+	// h3Client carries the longer deadline the H3 endpoint needs.
+	h3Client *http.Client
 }
 
 // NewMiniMax builds the provider. apiKey is required (MiniMax is not keyless);
@@ -55,24 +58,29 @@ func NewMiniMax(baseURL, apiKey, model string, logger *zap.Logger) (*MiniMax, er
 		model = defaultMiniMaxImageModel
 	}
 	return &MiniMax{
-		baseURL: baseURL,
-		apiKey:  strings.TrimSpace(apiKey),
-		model:   model,
-		client:  utils.NewHTTPClientH1(logger, imageGenTimeout),
+		baseURL:  baseURL,
+		apiKey:   strings.TrimSpace(apiKey),
+		model:    model,
+		client:   utils.NewHTTPClientH1(logger, imageGenTimeout),
+		h3Client: utils.NewHTTPClientH1(logger, minimaxH3Timeout),
 	}, nil
 }
 
 // Name returns "minimax".
 func (*MiniMax) Name() string { return "minimax" }
 
-// Model returns the MiniMax image model. MiniMax has no edit endpoint, so it
-// implements no Edit and AsEditor reports it generate-only.
+// Model returns the MiniMax image model. MiniMax has no edit endpoint (the
+// H3 reference documents no image input either), so it implements no Edit
+// and AsEditor reports it generate-only.
 func (m *MiniMax) Model() string { return m.model }
 
 // Generate posts the prompt and decodes the base64 images MiniMax returns.
 func (m *MiniMax) Generate(ctx context.Context, prompt string, opts Options) ([]Image, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("imagegen: empty prompt")
+	}
+	if isMiniMaxH3Image(m.model) {
+		return m.generateH3(ctx, prompt, opts)
 	}
 	n := opts.N
 	if n <= 0 {

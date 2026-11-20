@@ -13,12 +13,13 @@ const (
 	DefaultStackSpotAgentID  = "default"
 
 	// Valores padrão para OpenAI
-	// gpt-6.1-sol: the current mid-tier general model, served both on the
-	// API and on the Codex backend that ChatGPT-plan logins use. gpt-5.4,
-	// the previous default, is refused there ("not supported when using
-	// Codex with a ChatGPT account"), so an OAuth user with no OPENAI_MODEL
-	// got a 400 on the first turn (probed Oct 9 2026).
-	DefaultOpenAIModel       = "gpt-6.1-sol"
+	// gpt-6.2-sol (Nov 17 2026): the current mid-tier general model, at
+	// the same $2/$10 as gpt-6.1-sol, the previous default. Served both on
+	// the API and on the Codex backend that ChatGPT-plan logins use — chat
+	// and a coder task answered there on Nov 19 2026. Older generations
+	// are refused on that backend ("not supported when using Codex with a
+	// ChatGPT account"), which is why the default tracks the newest Sol.
+	DefaultOpenAIModel       = "gpt-6.2-sol"
 	DefaultOpenAiAssistModel = "gpt-4o"
 	OpenAIAPIURL             = "https://api.openai.com/v1/chat/completions"
 	OpenAIResponsesAPIURL    = "https://api.openai.com/v1/responses"
@@ -82,10 +83,11 @@ const (
 	MoonshotAPIURL       = "https://api.moonshot.ai/v1/chat/completions"
 
 	// Valores padrão para GitHub Copilot
-	// gpt-6.1-sol, the same default as OpenAI: GitHub's supported-models
-	// table no longer lists gpt-4o, the previous default (checked Oct 9
-	// 2026), and lists GPT-6.1 Sol as GA.
-	DefaultCopilotModel = "gpt-6.1-sol"
+	// gpt-6.2-sol, the same default as OpenAI: GitHub's supported-models
+	// table lists GPT-6.2 Sol as GA since Nov 17 2026 (Pro+, Max, Business
+	// and Enterprise, gradual rollout). A seat that does not have it yet
+	// sets COPILOT_MODEL=gpt-6.1-sol.
+	DefaultCopilotModel = "gpt-6.2-sol"
 	CopilotAPIURL       = "https://api.githubcopilot.com/chat/completions"
 
 	// Valores padrão para o provider DEVIN (wrapper do Devin CLI local).
@@ -106,9 +108,10 @@ const (
 	DevinCLIDefaultTimeout = 10 * time.Minute
 
 	// Valores padrão para OpenRouter
-	// openai/gpt-6.1-sol, the same model as the OpenAI default (listed by
-	// openrouter.ai/api/v1/models, Oct 9 2026).
-	DefaultOpenRouterModel = "openai/gpt-6.1-sol"
+	// openai/gpt-6.2-sol, the same model as the OpenAI default (listed by
+	// openrouter.ai/api/v1/models since Nov 17 2026; answered live on Nov
+	// 19 2026).
+	DefaultOpenRouterModel = "openai/gpt-6.2-sol"
 	OpenRouterAPIURL       = "https://openrouter.ai/api/v1/chat/completions"
 
 	// Valores padrão para AWS Bedrock (modelos Anthropic Claude)

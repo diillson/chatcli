@@ -51,6 +51,75 @@ func OpenAIReasoningEffort(model string, e SkillEffort) string {
 	return ReasoningEffortForOpenAI(e)
 }
 
+// openAIEffortCeiling is the highest reasoning effort a first-party OpenAI
+// model accepts, as the API itself answers (probed Nov 19 2026 by sending
+// each level to /v1/responses: an unsupported one is a 400 that names the
+// accepted set). The GPT-6 family and the GPT-5.6 tiers take xhigh and max;
+// GPT-5.2 through 5.5, their pro/mini siblings and 5.3-codex stop at xhigh;
+// GPT-5, GPT-5.1 and the o-series stop at high. An id this table does not
+// know keeps the conservative high.
+func openAIEffortCeiling(model string) SkillEffort {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(m, "gpt-5.6"):
+		return EffortMax
+	case strings.HasPrefix(m, "gpt-5.2"), strings.HasPrefix(m, "gpt-5.3"),
+		strings.HasPrefix(m, "gpt-5.4"), strings.HasPrefix(m, "gpt-5.5"):
+		return EffortXHigh
+	case strings.HasPrefix(m, "gpt-5"):
+		return EffortHigh
+	}
+	if g := gptGeneration(m); g >= 6 {
+		return EffortMax
+	}
+	return EffortHigh
+}
+
+// gptGeneration reads the major version off a "gpt-<n>..." id; 0 when the
+// id is not one.
+func gptGeneration(m string) int {
+	rest, ok := strings.CutPrefix(m, "gpt-")
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// OpenAIModelReasoningEffort is the reasoning effort to send to OpenAI's
+// own API for a model: the requested level, lowered to the highest one the
+// model accepts. Unlike OpenAIReasoningEffort, which stops at high for
+// every model, it lets xhigh and max through where the API takes them —
+// before, both were sent as high and a turn asking for the top level ran
+// two levels below it on GPT-6. Empty when the model does not take the
+// field or the hint is unset.
+func OpenAIModelReasoningEffort(model string, e SkillEffort) string {
+	if !SupportsOpenAIReasoningEffort(model) {
+		return ""
+	}
+	switch e {
+	case EffortXHigh, EffortMax:
+	default:
+		return ReasoningEffortForOpenAI(e)
+	}
+	switch openAIEffortCeiling(model) {
+	case EffortMax:
+		if e == EffortMax {
+			return "max"
+		}
+		return "xhigh"
+	case EffortXHigh:
+		return "xhigh"
+	}
+	return "high"
+}
+
 // XAIReasoningEffort is the value for grok's reasoning_effort, which
 // accepts only the two ends of the scale. Anything at or above high maps
 // to high; low and medium map to low, so a cheap turn stays cheap.
