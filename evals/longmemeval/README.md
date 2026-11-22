@@ -104,7 +104,7 @@ On 2026-11-22 the same 500 questions were also run through **Claude Code 2.1.330
 
 Read it with these in mind:
 
-- **chatcli was tuned on this benchmark and Claude Code was not.** The development half guided chatcli's changes, so the validation half is the fairer comparison: 246 against 238, 13 questions to 5 (p = 0.10), the same direction but not significant on its own.
+- **chatcli had already been fixed with this benchmark in hand; Claude Code had not.** Nothing was changed for this run. But in October the failures of the development half (240 questions) were read and their causes fixed in the product: a compressor that cut sessions, date arithmetic done in the model's head, a search that carried one wording. No fix targets a question, and the validation half was never read. That half is the fairer comparison: 246 against 238, 13 questions to 5 (p = 0.10), the same direction but not significant on its own.
 - **Claude Code is not a conversation-memory product.** It has no store of past conversations to search, so each question's history was written as plain transcript files in `sessions/` of an empty working directory, and the prompt says where they are. chatcli read its own saved sessions.
 - **The question date** comes from `CHATCLI_NOW` in chatcli; for Claude Code it is stated in the prompt.
 - **Claude Code ran clean:** `--safe-mode`, no user settings, no CLAUDE.md, plugins or MCP servers of the machine, no web tools, no saved session.
