@@ -1,0 +1,485 @@
+{
+  "manifest": {
+    "started": "2026-11-22T19:56:08",
+    "agent": "Claude Code 2.1.330",
+    "judge_binary_sha256": "77588b46fef17f65f9f28952193104c491d21c2c4265778ddbee40ee643f01fc",
+    "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "harness_sha256": "798ed9540726e8b86b7a542a86755a223d1f37e9e0111754f481357382e1e457",
+    "judge_prompts_sha256": "b5c88d0a0de08cc7ec3c68471bb4e39a1fb204fd399024d464707b48acf8adcc",
+    "answer_model": "claude-sonnet-5-5",
+    "judge_model": "claude-sonnet-5-5",
+    "question_frame": "Answer my question using what you know about me from our previous conversations (they are saved as chat session files in the sessions/ directory, one file per conversation). If those conversations do not contain the answer, say so. End with a short, direct final answer.\n\nToday is {today}; take that as the current date, whatever the system clock says.\n\nQuestion: {q}",
+    "tools_denied": "WebSearch,WebFetch",
+    "tools_pre_approved": "Read,Grep,Glob,Bash",
+    "flags": "--safe-mode --setting-sources project,local --strict-mcp-config --no-session-persistence --permission-prompts none",
+    "workers": 4,
+    "timeout_s": 600,
+    "picked": 500,
+    "mode_note": "headless, claude -p",
+    "dataset": "longmemeval_s_cleaned.json (huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)",
+    "split": "Same fixed split as the chatcli packs (sha1 of the question id). Claude Code was never tuned on either half; chatcli was tuned on the development half only.",
+    "finished": "2026-11-22T20:22:18",
+    "compared_with": "results/2026-11-22 (chatcli v1.232.0, same day, same dataset, model and judge)",
+    "note": "Comparison run, not a chatcli run. Claude Code has no store of past conversations, so each question's history is plain transcript files in sessions/ of an empty working directory and the prompt says where they are and states the question date. The judge is the one of the chatcli packs: official prompts, claude-sonnet-5-5, run through the chatcli v1.232.0 binary (judge_binary_sha256). One run; its transcripts were not read."
+  },
+  "overall": {
+    "n": 500,
+    "pass": 463,
+    "acc": 0.926,
+    "ci95": [
+      0.8996646988891736,
+      0.9458391261224969
+    ],
+    "task_averaged_acc": 0.93948332369385
+  },
+  "by_type": {
+    "knowledge-update": {
+      "n": 78,
+      "pass": 73,
+      "acc": 0.9358974358974359,
+      "ci95": [
+        0.8585622037936654,
+        0.9723110929160763
+      ]
+    },
+    "multi-session": {
+      "n": 133,
+      "pass": 117,
+      "acc": 0.8796992481203008,
+      "ci95": [
+        0.8135008139149994,
+        0.9245788343790866
+      ]
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "pass": 56,
+      "acc": 1.0,
+      "ci95": [
+        0.9358038555118847,
+        1.0
+      ]
+    },
+    "single-session-preference": {
+      "n": 30,
+      "pass": 28,
+      "acc": 0.9333333333333333,
+      "ci95": [
+        0.7867618227892791,
+        0.9815233646723066
+      ]
+    },
+    "single-session-user": {
+      "n": 70,
+      "pass": 69,
+      "acc": 0.9857142857142858,
+      "ci95": [
+        0.9234163029607309,
+        0.9974738185967649
+      ]
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "pass": 120,
+      "acc": 0.9022556390977443,
+      "ci95": [
+        0.839940215343511,
+        0.9419857486908175
+      ]
+    }
+  },
+  "abstention": {
+    "n": 30,
+    "pass": 29
+  },
+  "non_abstention": {
+    "n": 470,
+    "pass": 434
+  },
+  "cost_usd": {
+    "answer_total": 21.3274938,
+    "judge_total": 1.710445,
+    "answer_mean": 0.0426549876,
+    "answer_p95": 0.07459769999999999
+  },
+  "latency_s": {
+    "median": 8.05,
+    "p90": 14.9,
+    "p99": 21.3,
+    "max": 36.3
+  },
+  "tokens": {
+    "input_mean": 60348.656,
+    "input_p95": 118031,
+    "output_mean": 616.188
+  },
+  "tools": {
+    "calls_mean": 2.044,
+    "calls_p95": 5,
+    "zero_tool_questions": 0,
+    "by_kind": [
+      [
+        "Grep",
+        885
+      ],
+      [
+        "Bash",
+        78
+      ],
+      [
+        "Read",
+        59
+      ]
+    ],
+    "date_flag_calls": 0,
+    "date_flag_questions": 0,
+    "web_questions": 0
+  },
+  "exits": {
+    "0": 500
+  },
+  "retrieval": {
+    "all": {
+      "n": 470,
+      "any_seen": 469,
+      "any_opened": 135,
+      "all_seen": 452
+    },
+    "passed": {
+      "n": 434,
+      "any_seen": 434,
+      "any_opened": 121,
+      "all_seen": 423
+    },
+    "failed": {
+      "n": 36,
+      "any_seen": 35,
+      "any_opened": 14,
+      "all_seen": 29
+    }
+  },
+  "failure_taxonomy": [
+    [
+      "evidence surfaced, wrong answer (reasoning)",
+      25
+    ],
+    [
+      "evidence surfaced but model said it is not there",
+      5
+    ],
+    [
+      "partial evidence (multi-session aggregation)",
+      5
+    ],
+    [
+      "answered an unanswerable question",
+      1
+    ],
+    [
+      "retrieval miss (evidence never surfaced)",
+      1
+    ]
+  ],
+  "accuracy_by_haystack_size": {
+    "400k-500k chars": "413/449",
+    "500k-600k chars": "50/51"
+  },
+  "failures": [
+    {
+      "id": "852ce960",
+      "type": "knowledge-update",
+      "cat": "evidence surfaced but model said it is not there",
+      "question": "What was the amount I was pre-approved for when I got my mortgage from Wells Fargo?",
+      "answer": "$400,000",
+      "hypothesis_tail": " nothing else in your conversations supports it. I can't tell whether the later number is a slip or an updated pre-approval.\n\n**Final answer: $350,000**, based on your earlier and more detailed account. You later mentioned $400,000 once, so check your pre-approval letter if the exact figure matters."
+    },
+    {
+      "id": "7401057b",
+      "type": "knowledge-update",
+      "cat": "partial evidence (multi-session aggregation)",
+      "question": "How many free night's stays can I redeem at any Hilton property with my accumulated points?",
+      "answer": "Two",
+      "hypothesis_tail": "In your earlier conversation (May 29, 2023) about a Las Vegas getaway, you said you had \"accumulated enough points for a single free night's stay at any Hilton property.\"\n\n**You can redeem 1 free night's stay.**"
+    },
+    {
+      "id": "2133c1b5",
+      "type": "knowledge-update",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How long have I been living in my current apartment in Harajuku?",
+      "answer": "3 months",
+      "hypothesis_tail": "d mid-March 2023, and about 7 months have passed since then.\n- A session file dated October 15, 2023 at 20:50 has you saying you'd lived there \"3 months.\" That's later today than the current time of 08:39, and it doesn't fit the April statement, so I didn't use it.\n\n**Final answer: about 7 months.**"
+    },
+    {
+      "id": "0f05491a",
+      "type": "knowledge-update",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many stars do I need to reach the gold level on my Starbucks Rewards app?",
+      "answer": "120",
+      "hypothesis_tail": "nything else. 125 is the number you stated yourself, and my earlier answers were inconsistent. In Starbucks' actual program, Gold status has required 300 stars in a membership year. Check the app for the current number.\n\n**Final answer: 125 stars, going by your own correction in that conversation.**"
+    },
+    {
+      "id": "cc5ded98",
+      "type": "knowledge-update",
+      "cat": "partial evidence (multi-session aggregation)",
+      "question": "How much time do I dedicate to coding exercises each day?",
+      "answer": "about two hours",
+      "hypothesis_tail": "You spend about an hour each day on coding exercises. You said this in a chat on May 20, 2023: \"I've been dedicating about an hour each day to coding exercises.\" I found no later mention of a different amount.\n\n**Final answer: about 1 hour per day.**"
+    },
+    {
+      "id": "d851d5ba",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How much money did I raise for charity in total?",
+      "answer": "$3,750",
+      "hypothesis_tail": "American Cancer Society: $500\n- Local animal shelter event on January 20th: $2,000\n- Music benefit concert for a local music education program: $5,000\n\nYou described the bake sale and the concert as raising \"over\" a figure, so the real total could be slightly higher.\n\n**Final answer: about $8,750.**"
+    },
+    {
+      "id": "gpt4_15e38248",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many pieces of furniture did I buy, assemble, sell, or fix in the past few months?",
+      "answer": "4",
+      "hypothesis_tail": "t for your home office about two months before May 29.\n\nI found no mention of you selling or fixing any furniture. You also bought IKEA scratch guards to protect furniture from your cat, but those aren't furniture.\n\n**Final answer: 3 pieces of furniture (2 bought, 1 assembled, none sold or fixed).**"
+    },
+    {
+      "id": "edced276",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many days did I spend in total traveling in Hawaii and in New York City?",
+      "answer": "15 days",
+      "hypothesis_tail": "May 24, 2023). You never said how many days it lasted.\n\nI can't work out a total without the Hawaii length. The New York City trip accounts for 5 days.\n\n**Final answer:** I can't give a total. Your conversations only say the New York City trip was 5 days and never give the length of the Hawaii trip."
+    },
+    {
+      "id": "a11281a2",
+      "type": "multi-session",
+      "cat": "partial evidence (multi-session aggregation)",
+      "question": "What was the approximate increase in Instagram followers I experienced in two weeks?",
+      "answer": "100",
+      "hypothesis_tail": "(May 23, 2023), you said you had around 350 followers on Instagram after two weeks of posting regularly. You didn't say what number you started from. I'm reading that as growth of about 350 followers, which assumes you began with roughly none.\n\n**Final answer: about 350 new followers in two weeks.**"
+    },
+    {
+      "id": "gpt4_31ff4165",
+      "type": "multi-session",
+      "cat": "partial evidence (multi-session aggregation)",
+      "question": "How many health-related devices do I use in a day?",
+      "answer": "4",
+      "hypothesis_tail": " them roughly 12–16 hours a day.\n3. **Accu-Chek Aviva Nano blood glucose meter.** You test with it three times a day.\n\nI searched the sessions for other devices, such as a CPAP machine, inhaler or blood pressure monitor, and found no mention of any.\n\n**Final answer: 3 health-related devices a day.**"
+    },
+    {
+      "id": "gpt4_ab202e7f",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many kitchen items did I replace or fix?",
+      "answer": "I replaced or fixed five items: the kitchen faucet, the kitchen mat, the toaster, the coffee maker, and the kitchen shelves.",
+      "hypothesis_tail": " faucet.\n4. **Toaster:** you replaced the old one with a toaster oven. You mentioned this in two separate chats, and I counted it once.\n\nI left out the espresso machine, which your sister gave you. I also left out your cat's food and water bowls, since they aren't kitchen items.\n\n**Final answer: 4**"
+    },
+    {
+      "id": "129d1232",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How much money did I raise in total through all the charity events I participated in?",
+      "answer": "$5,850",
+      "hypothesis_tail": "ed $600 for a local animal shelter. You described that one as organizing rather than participating, so I left it out. If you count it, the total is $5,850.\n\nThe Bike-a-Thon figure was your team's total, not necessarily your own share.\n\n**Final answer: $5,250 ($5,850 if you include the yoga event).**"
+    },
+    {
+      "id": "9ee3ecd6",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many points do I need to earn to redeem a free skincare product at Sephora?",
+      "answer": "100",
+      "hypothesis_tail": "You said you need a total of **300 points** to redeem a free skincare product at Sephora. That came up in our May 29, 2023 conversation about buying a moisturizer. In an earlier chat on May 21, you had 200 points.\n\n**300 points.**"
+    },
+    {
+      "id": "bf659f65",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many music albums or EPs have I purchased or downloaded?",
+      "answer": "3",
+      "hypothesis_tail": "oth. You mentioned it in three sessions (05-20, 05-26 and 05-29).\n\nIn those sessions I said I couldn't verify that the band or the EP exists. You still described buying it, so I've counted it once. I found no other purchases or downloads of albums or EPs.\n\n**Final answer: 2 (one album and one EP).**"
+    },
+    {
+      "id": "09ba9854_abs",
+      "type": "multi-session",
+      "cat": "answered an unanswerable question",
+      "question": "How much will I save by taking the bus from the airport to my hotel instead of a taxi?",
+      "answer": "The information provided is not enough. You did not mention how much will the bus take.",
+      "hypothesis_tail": " a general estimate. You never gave a bus price for your hotel.\n\nTaking those two figures together, you'd save about $40–50 by taking the bus.\n\n**Final answer: about $40–50, based on the $60 taxi quote and the rough $10–20 bus estimate. The exact bus fare for your hotel isn't in our conversations.**"
+    },
+    {
+      "id": "7405e8b1",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Did I receive a higher percentage discount on my first order from HelloFresh, compared to my first UberEats order?",
+      "answer": "Yes.",
+      "hypothesis_tail": "ode (EATS5) the assistant suggested, and you never said you used it.\n\n**Final answer:** I can't confirm it. Your HelloFresh first order was 40% off, which is more than the 20% you got on a recent UberEats order. But that UberEats order isn't identified as your first, so the comparison isn't certain."
+    },
+    {
+      "id": "efc3f7c2",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How much earlier do I wake up on Fridays compared to other weekdays?",
+      "answer": "30 minutes",
+      "hypothesis_tail": "earlier.\n- **Other weekdays, earlier statement:** On May 24 you said you wake up at 6:30 AM on weekdays. By that figure Fridays would be only 30 minutes earlier.\n\nI went with the more recent 7:30 AM figure.\n\n**Final answer: about 1.5 hours earlier (6:00 AM on Fridays versus 7:30 AM on other days).**"
+    },
+    {
+      "id": "gpt4_2ba83207",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Which grocery store did I spend the most money at in the past month?",
+      "answer": "Thrive Market",
+      "hypothesis_tail": "s the order you placed around May 23.\n\nYou also spent about $150 on a Thrive Market online order. You described it on May 26 as \"last month\", so it was probably in April and falls outside the window. It's also an online retailer rather than a grocery store.\n\n**Final answer: Walmart, at about $120.**"
+    },
+    {
+      "id": "7024f17c",
+      "type": "multi-session",
+      "cat": "evidence surfaced but model said it is not there",
+      "question": "How many hours of jogging and yoga did I do last week?",
+      "answer": "0.5 hours",
+      "hypothesis_tail": "ybe one or two sessions. You also planned a Monday, Wednesday and Friday 7:00 am schedule. You never said you actually did any sessions.\n\n**Final answer:** I can't tell from our conversations. They show no completed jogging or yoga last week, only a 30-minute jog on May 20 and plans to restart yoga."
+    },
+    {
+      "id": "gpt4_e05b82a6",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many times did I ride rollercoasters across all the events I attended from July to October?",
+      "answer": "10 times",
+      "hypothesis_tail": "g that event. I counted it as one ride.\n- **October 15, Universal Studios Hollywood:** You rode Revenge of the Mummy 3 times in a row.\n\nTotal: 3 + 3 + 1 + 3 = 12. If you leave out the Knott's ride because it wasn't clearly part of an event, the total is 11.\n\n**Final answer: 12 rollercoaster rides.**"
+    },
+    {
+      "id": "gpt4_372c3eed",
+      "type": "multi-session",
+      "cat": "partial evidence (multi-session aggregation)",
+      "question": "How many years in total did I spend in formal education from high school to the completion of my Bachelor's degree?",
+      "answer": "10 years",
+      "hypothesis_tail": " years.\n\nTogether that is 4 + 4 = 8 years. The calendar span from 2010 to 2020 is 10 years. The 2 years between 2014 and 2016 would be a gap in your schooling, assuming you started at UCLA in 2016. You didn't mention what you did in those years, so I haven't counted them.\n\n**Final answer: 8 years.**"
+    },
+    {
+      "id": "195a1a1b",
+      "type": "single-session-preference",
+      "cat": "retrieval miss (evidence never surfaced)",
+      "question": "Can you suggest some activities that I can do in the evening?",
+      "answer": "The user would prefer suggestions that involve relaxing activities that can be done in the evening, preferably before 9:30 pm. They would not prefer suggestions that involve using their phone or watching TV, as these activities have been affecting their sleep quality.",
+      "hypothesis_tail": "warm, relaxing atmosphere at home.\n\n**Final answer:** I can't tell what you usually do in the evening because your past chats don't say. Based on your interests, I'd suggest journaling or poetry, watching an indie film, an evening yoga flow, or a craft project like fabric stamping or knitting a hat."
+    },
+    {
+      "id": "75f70248",
+      "type": "single-session-preference",
+      "cat": "evidence surfaced but model said it is not there",
+      "question": "I've been sneezing quite a bit lately. Do you think it might be my living room?",
+      "answer": "The user would prefer responses that consider the potential impact of their cat, Luna, and her shedding on their sneezing, as well as the recent deep clean of the living room and its possible effect on stirring up dust. They might not prefer responses that fail to take into account these specific details previously mentioned, such as generic suggestions or unrelated factors.",
+      "hypothesis_tail": "y. If the sneezing continues, it's worth seeing a doctor, since pollen and colds can cause it too.\n\n**Final answer:** Possibly. You have a shedding cat and have asked about dust in your living room, so dust and dander there are plausible triggers. Your chats don't confirm that the room is the cause."
+    },
+    {
+      "id": "4100d0a0",
+      "type": "single-session-user",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "What is my ethnicity?",
+      "answer": "A mix of Irish and Italian",
+      "hypothesis_tail": "an male. In chat-20230523-1542-017 you wrote, \"I'm a 32-year-old Asian American male working as a Senior Data Analyst.\"\n\nThe last result mentions Italian citizenship, but it's about heritage and citizenship, not your ethnicity. I didn't look into it further.\n\n**Final answer: You're Asian American.**"
+    },
+    {
+      "id": "gpt4_f420262c",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "What is the order of airlines I flew with from earliest to latest before today?",
+      "answer": "JetBlue, Delta, United, American Airlines",
+      "hypothesis_tail": "cent\", and a 15 Jan chat refers to it as being on 10 Feb. That would put an American flight before the United one. I ordered by the dates when you said each flight happened (10 and 14 Feb), but that is the one uncertain point.\n\n**Final answer: JetBlue, then United Airlines, then American Airlines.**"
+    },
+    {
+      "id": "gpt4_fe651585",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Who became a parent first, Rachel or Alex?",
+      "answer": "Alex",
+      "hypothesis_tail": "d a baby girl from China in January. Going by when you said it (March 2023), that is January 2023.\n\nRachel's twins arrived about a year before Alex's adoption. You didn't give the year for either event, so I inferred both from the surrounding context.\n\n**Final answer: Rachel became a parent first.**"
+    },
+    {
+      "id": "9a707b81",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many days ago did I attend a baking class at a local culinary school when I made my friend's birthday cake?",
+      "answer": "21 days. 22 days (including the last day) is also acceptable.",
+      "hypothesis_tail": "ake you baked for a friend's birthday party, in the 2022-04-10 chat, and that one doesn't mention a class. I'm treating the class as the 03-20 one, which is an assumption.\n\nFrom March 20 to April 15, 2022 is 11 days left in March plus 15 in April, which makes 26 days.\n\n**Final answer: 26 days ago.**"
+    },
+    {
+      "id": "gpt4_85da3956",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many weeks ago did I attend the 'Summer Nights' festival at Universal Studios Hollywood?",
+      "answer": "3 weeks ago",
+      "hypothesis_tail": "that chat put the visit at three weeks before July 15, which is around June 24, 2023. That \"three weeks\" comes from the reply and not from your own words, so it is the one shaky part.\n\nFrom July 15 to today, August 5, is 3 more weeks. That makes 3 + 3 = 6 weeks.\n\n**Final answer: about 6 weeks ago.**"
+    },
+    {
+      "id": "71017277",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I received a piece of jewelry last Saturday from whom?",
+      "answer": "my aunt",
+      "hypothesis_tail": "mentioned receiving that day was a crystal chandelier from your aunt. It had belonged to your great-grandmother. That isn't jewelry, and none of your conversations mention you receiving a piece of jewelry.\n\n**Final answer:** Your conversations don't say who gave you a piece of jewelry last Saturday."
+    },
+    {
+      "id": "gpt4_d6585ce8",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "What is the order of the concerts and musical events I attended in the past two months, starting from the earliest?",
+      "answer": "The order of the concerts I attended is: 1. Billie Eilish concert at the Wells Fargo Center in Philly, 2. Free outdoor concert series in the park, 3. Music festival in Brooklyn, 4. Jazz night at a local bar, 5. Queen + Adam Lambert concert at the Prudential Center in Newark, NJ.",
+      "hypothesis_tail": "t as that day's or very recent, so I've used the chat dates for the order. You mentioned the Brooklyn festival again on April 15, but as something you'd already attended.\n\n**Final answer: Billie Eilish concert → free outdoor park concert → Brooklyn indie music festival → jazz night at a local bar.**"
+    },
+    {
+      "id": "370a8ff4",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many weeks had passed since I recovered from the flu when I went on my 10th jog outdoors?",
+      "answer": "15",
+      "hypothesis_tail": "Recovered Jan 19, 2023; 10th jog Apr 10, 2023. That's 81 days, which is 11.6 weeks.\n\nYou recovered from the flu on January 19, 2023, and went on your 10th outdoor jog on April 10, 2023. That's 81 days apart, or about 11.6 weeks.\n\n**Final answer: about 11 weeks (11 full weeks plus 4 days).**"
+    },
+    {
+      "id": "gpt4_7abb270c",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "What is the order of the six museums I visited from earliest to latest?",
+      "answer": "Science Museum, Museum of Contemporary Art, Metropolitan Museum of Art, Museum of History, Modern Art Museum, Natural History Museum",
+      "hypothesis_tail": "nd both describe an Abstract Expressionism tour. I counted them as two visits because that gives six museums. If they were one visit, you'd have five.\n\n**Final answer:** Science Museum → Metropolitan Museum of Art → Museum of History → Modern Art Gallery → Modern Art Museum → Natural History Museum."
+    },
+    {
+      "id": "0bc8ad93",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced but model said it is not there",
+      "question": "I mentioned visiting a museum two months ago. Did I visit with a friend or not?",
+      "answer": "No, you did not visit with a friend.",
+      "hypothesis_tail": "ou described a behind-the-scenes tour of the Science Museum with a friend who's a chemistry professor.\n\n**Final answer:** I can't tell. Your January 2023 History Museum lecture doesn't mention a companion. The only museum visit you described with a friend was the Science Museum tour in October 2022."
+    },
+    {
+      "id": "gpt4_93159ced",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced but model said it is not there",
+      "question": "How long have I been working before I started my current job at NovaTech?",
+      "answer": "4 years and 9 months",
+      "hypothesis_tail": " never gave a total length of your career.\n\nIf NovaTech was your first job after graduating, you had no working time before it. That is an inference. You didn't say it.\n\n**Final answer: I can't tell. Your conversations only give about 4 years and 3 months at NovaTech, with nothing on earlier work.**"
+    },
+    {
+      "id": "eac54adc",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many days ago did I launch my website when I signed a contract with my first client?",
+      "answer": "19 days ago. 20 days (including the last day) is also acceptable.",
+      "hypothesis_tail": "ou said you had signed a contract with your first client that day. The two events were about three weeks apart, not the same day.\n- **Count:** From February 10 to March 25, 2023 is 43 days.\n\nIf you meant the day you signed the contract (March 1), that was 24 days ago.\n\n**Final answer: 43 days ago.**"
+    },
+    {
+      "id": "gpt4_59149c78",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I mentioned that I participated in an art-related event two weeks ago. Where was that event held at?",
+      "answer": "The Metropolitan Museum of Art.",
+      "hypothesis_tail": "er than participating.\n\nNone of your saved chats are dated after Jan 15. Two weeks before today (Feb 1) would be around Jan 18, so I couldn't pin the event to that date.\n\n**Final answer: the Museum of Modern Art (MoMA). The City Art Museum is the alternative if you meant the Impressionist exhibit.**"
+    },
+    {
+      "id": "eac54add",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "What was the significant buisiness milestone I mentioned four weeks ago?",
+      "answer": "I signed a contract with my first client.",
+      "hypothesis_tail": "\"launched\", \"first sale\" and \"my business\" in the late-February chats returned nothing else. The other chats from those days were about a short-film script, a book club and Ibadan industries.\n\n**Final answer: a successful influencer collaboration that promoted your product to her 10,000 followers.**"
+    }
+  ]
+}

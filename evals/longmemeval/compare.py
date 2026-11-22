@@ -2,14 +2,15 @@
 """Compare a LongMemEval run with an earlier published pack: the regression
 check of the monthly run.
 
-usage: compare.py NEW BASE [--write]
+usage: compare.py NEW BASE [--write] [--title TEXT]
 
 NEW and BASE are directories holding results.jsonl (a run directory or a
 pack under results/). Prints Markdown: totals with confidence intervals for
 all 500 and for each half of the fixed split, questions gained and lost with
 an exact two-sided sign test, accuracy by type, per-question cost and tool
 use, run health, and the ids that flipped. --write also saves it as
-NEW/comparison.md.
+NEW/comparison.md. --title replaces the heading, for a comparison that is
+not a regression check (two agents on the same questions).
 
 A single run moves by about four questions with the same binary, so a
 difference counts only when it is larger than that and the sign test agrees.
@@ -23,6 +24,11 @@ from pathlib import Path
 
 here = Path(__file__).resolve().parent
 args = [a for a in sys.argv[1:] if a != "--write"]
+title = ""
+if "--title" in args:
+    i = args.index("--title")
+    title = args[i + 1]
+    del args[i:i + 2]
 if len(args) != 2:
     sys.exit(__doc__)
 new_dir, base_dir = Path(args[0]), Path(args[1])
@@ -49,6 +55,10 @@ def sign_test(gained, lost):
     return min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n)
 
 
+def fmt_p(p):
+    return f"{p:.3f}" if p < 0.01 else f"{p:.2f}"
+
+
 new, base = load(new_dir), load(base_dir)
 if set(new) != set(base):
     sys.exit(f"the two runs do not hold the same questions ({len(new)} and {len(base)})")
@@ -68,14 +78,14 @@ def flips(sel):
     return gained, lost
 
 
-out.append(f"# LongMemEval regression check: `{new_dir.name}` against `{base_dir.name}`\n")
+out.append(f"# {title or f'LongMemEval regression check: `{new_dir.name}` against `{base_dir.name}`'}\n")
 out.append("| | Base | New | Gained | Lost | Sign test p |")
 out.append("|---|---|---|---|---|---|")
 for name, sel in (("All questions", ids),
                   ("Development half", [i for i in ids if split[i] == "development"]),
                   ("Validation half", [i for i in ids if split[i] == "validation"])):
     g, l = flips(sel)
-    out.append(f"| {name} | {score(base, sel)} | {score(new, sel)} | {len(g)} | {len(l)} | {sign_test(len(g), len(l)):.2f} |")
+    out.append(f"| {name} | {score(base, sel)} | {score(new, sel)} | {len(g)} | {len(l)} | {fmt_p(sign_test(len(g), len(l)))} |")
 
 out.append("\n| Type | Base | New | of |")
 out.append("|---|---|---|---|")

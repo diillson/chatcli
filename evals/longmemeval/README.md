@@ -72,6 +72,46 @@ Against the base run the 2026-10-22 changes gained 27 questions and lost 8 (p = 
 
 All packs are in [`results/`](results/): `2026-10-20/`, `2026-10-22/`, `2026-10-22-merged/`, `2026-10-24/`, `2026-10-24-session-search/` and `2026-11-22/` (latest). In each 2026-10-22 and later pack, `split.json` says which half each question belongs to and `summary-validation.md` scores the validation half alone.
 
+## Same model, another harness: Claude Code
+
+On 2026-11-22 the same 500 questions were also run through **Claude Code 2.1.330**, with the same answering model (`claude-sonnet-5-5`), the same judge and the same dataset, on the same day as the v1.232.0 run. The model is identical on both sides; what differs is the agent around it and what it puts in front of the model.
+
+| | Claude Code 2.1.330 | chatcli v1.232.0 |
+|---|---|---|
+| Accuracy, 500 questions | 463 = 92.6% (90.0–94.6%) | **481 = 96.2%** (94.1–97.6%) |
+| Validation half, 260 | 238 = 91.5% (87.5–94.3%) | **246 = 94.6%** (91.2–96.8%) |
+| Task-averaged accuracy | 93.9% | 96.5% |
+| Every evidence session surfaced | 452 of 470 | 462 of 470 |
+| Abstention (unanswerable, 30) | 29 | 29 |
+| Cost per question (answer + judge) | **US$0.046** | US$0.102 |
+| Median time per question | **8.1 s** | 19.1 s |
+| Input tokens per question | 60.3k | 78.6k |
+| Tool calls per question | 2.0 | 3.5 |
+
+| Type | Claude Code | chatcli |
+|---|---|---|
+| single-session-user | 69/70 | 70/70 |
+| single-session-assistant | 56/56 | 55/56 |
+| single-session-preference | 28/30 | 28/30 |
+| knowledge-update | 73/78 | 77/78 |
+| temporal-reasoning | 120/133 | 127/133 |
+| multi-session | 117/133 | 124/133 |
+
+- **Question by question:** chatcli answered 25 questions that Claude Code missed, and Claude Code answered 7 that chatcli missed (sign test p = 0.002). Both were right on 456 and both wrong on 12.
+- **Where the gap is:** the three single-session types are level (153 of 156 each). The difference is in knowledge updates, temporal reasoning and multi-session questions, the ones that need every mention found and read.
+- **How Claude Code searched:** 885 `Grep` calls, 78 `Bash`, 59 `Read`. It opened a session file with `Read` in 57 of the 500 questions and answered the rest from the matching lines. Of its 37 misses, 25 are reasoning with the evidence surfaced, 5 said the evidence was not there, 5 found only part of it, 1 never found it and 1 answered an unanswerable question.
+- **Claude Code is cheaper and faster:** less than half the cost and the time per question.
+
+Read it with these in mind:
+
+- **chatcli was tuned on this benchmark and Claude Code was not.** The development half guided chatcli's changes, so the validation half is the fairer comparison: 246 against 238, 13 questions to 5 (p = 0.10), the same direction but not significant on its own.
+- **Claude Code is not a conversation-memory product.** It has no store of past conversations to search, so each question's history was written as plain transcript files in `sessions/` of an empty working directory, and the prompt says where they are. chatcli read its own saved sessions.
+- **The question date** comes from `CHATCLI_NOW` in chatcli; for Claude Code it is stated in the prompt.
+- **Claude Code ran clean:** `--safe-mode`, no user settings, no CLAUDE.md, plugins or MCP servers of the machine, no web tools, no saved session.
+- **One run each.** A run moves by about ±4 questions.
+
+The pack is in [`results/2026-11-22-claude-code/`](results/2026-11-22-claude-code/), with `comparison.md` (question by question against the chatcli run) and the driver is [`lme_claude.py`](lme_claude.py).
+
 ## Setup
 
 - **Answering:** chatcli `-p "/coder …"` one-shot, model `claude-sonnet-5-5`, built from the commit in `manifest.json`.
@@ -100,6 +140,7 @@ All packs are in [`results/`](results/): `2026-10-20/`, `2026-10-22/`, `2026-10-
 | `results/<run>/comparison.md` | the regression check against the previous pack, written by `compare.py --write` (2026-11-22 and later) |
 | `results/<run>/rerun-regressed.jsonl` | the rerun of the questions that passed in the previous pack and failed in this one, same binary (2026-11-22 and later) |
 | `lme.py` | the driver |
+| `lme_claude.py` | the same run through Claude Code: history as transcript files, same frame, same judge |
 | `analyze.py` | builds the summary from a run directory |
 | `compare.py` | compares a run with an earlier pack: gained, lost, sign test, cost and tools per question |
 | `package.py` | turns a finished run into a published pack (manifest, results, failure transcripts, split, both summaries, local paths replaced) |
@@ -117,10 +158,13 @@ go build -o chatcli-bench .            # from the commit in manifest.json
 python3 -I evals/longmemeval/lme.py --data "$PWD/longmemeval_s_cleaned.json" --out "$PWD/run" \
   --bin "$PWD/chatcli-bench" --dotenv "$PWD/empty.env" --per-type 1000 --workers 4 < /dev/null
 python3 -I evals/longmemeval/analyze.py run
+# the same questions through Claude Code (needs a Claude Code login; the chatcli binary only runs the judge):
+python3 -I evals/longmemeval/lme_claude.py --data "$PWD/longmemeval_s_cleaned.json" --out "$PWD/claude-run" \
+  --bin "$PWD/chatcli-bench" --dotenv "$PWD/empty.env" --per-type 1000 --workers 4 < /dev/null
 # regression check against the previous pack:
 python3 -I evals/longmemeval/compare.py "$PWD/run" evals/longmemeval/results/2026-11-22
 # or, for a publishable pack:
 python3 -I evals/longmemeval/package.py "$PWD/run" "$PWD/evals/longmemeval/results/<date>" <commit> "chatcli built from <commit>"
 ```
 
-Requirements: a Claude login in `~/.chatcli` (OAuth or API key). Concurrent runs are safe since [#1836](https://github.com/diillson/chatcli/pull/1836) serializes OAuth refresh across processes. Use absolute paths: the driver changes directory per question. The full 2026-10-20 run took about 1 hour with 4 workers and cost $41.39 answering plus $1.89 judging; 2026-10-22 on merged main cost $48.47 plus $1.94, 2026-10-24 with the session search $48.37 plus $1.83 (about 55 minutes), and 2026-11-22 on v1.232.0 $48.92 plus $1.84 (48 minutes). To run only some questions pass `--only id1,id2,...` (the 2026-10-22 run was two `--only` passes, one per half). `LME_HOME` can point the child's HOME elsewhere, but chatcli then cannot reach the login keychain that holds the credential key and refuses to start, so a real run keeps the real HOME and isolates everything else through `CHATCLI_STATE_DIR`.
+Requirements: a Claude login in `~/.chatcli` (OAuth or API key). Concurrent runs are safe since [#1836](https://github.com/diillson/chatcli/pull/1836) serializes OAuth refresh across processes. Use absolute paths: the driver changes directory per question. The full 2026-10-20 run took about 1 hour with 4 workers and cost $41.39 answering plus $1.89 judging; 2026-10-22 on merged main cost $48.47 plus $1.94, 2026-10-24 with the session search $48.37 plus $1.83 (about 55 minutes), and 2026-11-22 on v1.232.0 $48.92 plus $1.84 (48 minutes). The Claude Code comparison of 2026-11-22 cost $21.33 plus $1.71 and took 26 minutes. To run only some questions pass `--only id1,id2,...` (the 2026-10-22 run was two `--only` passes, one per half). `LME_HOME` can point the child's HOME elsewhere, but chatcli then cannot reach the login keychain that holds the credential key and refuses to start, so a real run keeps the real HOME and isolates everything else through `CHATCLI_STATE_DIR`.

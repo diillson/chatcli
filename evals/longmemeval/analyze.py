@@ -131,9 +131,13 @@ summary = {
 }
 (run / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
 
-md = [f"# chatcli on LongMemEval-S ({n} questions)", "",
-      f"- Answer model: `{manifest['answer_model']}` (coder one-shot) · judge: `{manifest['judge_model']}` with the official LongMemEval prompts",
-      f"- Binary sha256 `{manifest['binary_sha256'][:16]}…` · dataset sha256 `{manifest['dataset_sha256'][:16]}…` · started {manifest['started']}",
+# A pack of another agent (lme_claude.py) names it in the manifest and has
+# no chatcli binary of its own.
+agent = manifest.get("agent", "chatcli")
+identity = f"Binary sha256 `{manifest['binary_sha256'][:16]}…`" if "binary_sha256" in manifest else f"Agent `{agent}`"
+md = [f"# {agent.split(' ')[0] if agent == 'chatcli' else agent} on LongMemEval-S ({n} questions)", "",
+      f"- Answer model: `{manifest['answer_model']}` ({manifest.get('mode_note', 'coder one-shot')}) · judge: `{manifest['judge_model']}` with the official LongMemEval prompts",
+      f"- {identity} · dataset sha256 `{manifest['dataset_sha256'][:16]}…` · started {manifest['started']}",
       "", f"**Accuracy: {k}/{n} = {pct(k/n)}** (95% CI {pct(lo)}–{pct(hi)}) · task-averaged {pct(task_avg)}", "",
       "| Type | Pass | Accuracy | 95% CI |", "|---|---|---|---|"]
 for t, x in types.items():

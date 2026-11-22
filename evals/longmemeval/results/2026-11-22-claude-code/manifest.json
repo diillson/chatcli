@@ -1,0 +1,23 @@
+{
+  "started": "2026-11-22T19:56:08",
+  "agent": "Claude Code 2.1.330",
+  "judge_binary_sha256": "77588b46fef17f65f9f28952193104c491d21c2c4265778ddbee40ee643f01fc",
+  "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "harness_sha256": "798ed9540726e8b86b7a542a86755a223d1f37e9e0111754f481357382e1e457",
+  "judge_prompts_sha256": "b5c88d0a0de08cc7ec3c68471bb4e39a1fb204fd399024d464707b48acf8adcc",
+  "answer_model": "claude-sonnet-5-5",
+  "judge_model": "claude-sonnet-5-5",
+  "question_frame": "Answer my question using what you know about me from our previous conversations (they are saved as chat session files in the sessions/ directory, one file per conversation). If those conversations do not contain the answer, say so. End with a short, direct final answer.\n\nToday is {today}; take that as the current date, whatever the system clock says.\n\nQuestion: {q}",
+  "tools_denied": "WebSearch,WebFetch",
+  "tools_pre_approved": "Read,Grep,Glob,Bash",
+  "flags": "--safe-mode --setting-sources project,local --strict-mcp-config --no-session-persistence --permission-prompts none",
+  "workers": 4,
+  "timeout_s": 600,
+  "picked": 500,
+  "mode_note": "headless, claude -p",
+  "dataset": "longmemeval_s_cleaned.json (huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)",
+  "split": "Same fixed split as the chatcli packs (sha1 of the question id). Claude Code was never tuned on either half; chatcli was tuned on the development half only.",
+  "finished": "2026-11-22T20:22:18",
+  "compared_with": "results/2026-11-22 (chatcli v1.232.0, same day, same dataset, model and judge)",
+  "note": "Comparison run, not a chatcli run. Claude Code has no store of past conversations, so each question's history is plain transcript files in sessions/ of an empty working directory and the prompt says where they are and states the question date. The judge is the one of the chatcli packs: official prompts, claude-sonnet-5-5, run through the chatcli v1.232.0 binary (judge_binary_sha256). One run; its transcripts were not read."
+}
