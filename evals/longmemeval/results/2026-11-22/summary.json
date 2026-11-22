@@ -1,0 +1,356 @@
+{
+  "manifest": {
+    "started": "2026-11-22T15:19:22",
+    "binary": "chatcli v1.232.0 built from 7f53b9ae (release tag)",
+    "binary_sha256": "77588b46fef17f65f9f28952193104c491d21c2c4265778ddbee40ee643f01fc",
+    "binary_version": "\n── ChatCLI · Versão ───────────────────────────────────────────────────────────────────\n\n  Instalada            v1.232.0\n  Build                7f53b9ae1926 · 2026-11-20 00:56:03\n  Canal de instalação  go install\n  Última release       v1.232.0\n\n  ✓ Você já está na versão mais recente.\n\n",
+    "dataset": "longmemeval_s_cleaned.json (huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)",
+    "dataset_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+    "harness_sha256": "1d4ef86c340bedc77dee98119bb40c03f7893ab48ac598828751112ac19525cc",
+    "judge_prompts_sha256": "b5c88d0a0de08cc7ec3c68471bb4e39a1fb204fd399024d464707b48acf8adcc",
+    "answer_model": "claude-sonnet-5-5",
+    "judge_model": "claude-sonnet-5-5",
+    "mode": "coder",
+    "question_frame": "Answer my question using what you know about me from our previous conversations (they are saved as chat sessions). If those conversations do not contain the answer, say so. End with a short, direct final answer.\n\nQuestion: {q}",
+    "reference_clock": true,
+    "workers": 4,
+    "timeout_s": 600,
+    "picked": 500,
+    "split": "development = sha1(question_id) even (240 questions, the only ones whose failures were read while designing the changes); validation = odd (260, never read). One run over all 500 on the merged code.",
+    "finished": "2026-11-22T16:07:31",
+    "commit": "7f53b9ae",
+    "note": "Monthly regression check, no change designed from this run. The 8 questions that passed on 2026-10-24-session-search and failed here were rerun once with the same binary (rerun-regressed.jsonl): 5 passed. Their transcripts were not read."
+  },
+  "overall": {
+    "n": 500,
+    "pass": 481,
+    "acc": 0.962,
+    "ci95": [
+      0.9414147746007344,
+      0.9755400778767108
+    ],
+    "task_averaged_acc": 0.9649789537947433
+  },
+  "by_type": {
+    "knowledge-update": {
+      "n": 78,
+      "pass": 77,
+      "acc": 0.9871794871794872,
+      "ci95": [
+        0.9308897697115065,
+        0.9977333266111463
+      ]
+    },
+    "multi-session": {
+      "n": 133,
+      "pass": 124,
+      "acc": 0.9323308270676691,
+      "ci95": [
+        0.8763936967392673,
+        0.9639940216153849
+      ]
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "pass": 55,
+      "acc": 0.9821428571428571,
+      "ci95": [
+        0.9055414182080671,
+        0.9968408710355361
+      ]
+    },
+    "single-session-preference": {
+      "n": 30,
+      "pass": 28,
+      "acc": 0.9333333333333333,
+      "ci95": [
+        0.7867618227892791,
+        0.9815233646723066
+      ]
+    },
+    "single-session-user": {
+      "n": 70,
+      "pass": 70,
+      "acc": 1.0,
+      "ci95": [
+        0.9479751251327164,
+        0.9999999999999998
+      ]
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "pass": 127,
+      "acc": 0.9548872180451128,
+      "ci95": [
+        0.9050709587689915,
+        0.9791630753259036
+      ]
+    }
+  },
+  "abstention": {
+    "n": 30,
+    "pass": 29
+  },
+  "non_abstention": {
+    "n": 470,
+    "pass": 452
+  },
+  "cost_usd": {
+    "answer_total": 48.9157608,
+    "judge_total": 1.83527,
+    "answer_mean": 0.0978315216,
+    "answer_p95": 0.1367674
+  },
+  "latency_s": {
+    "median": 19.1,
+    "p90": 26.2,
+    "p99": 38.8,
+    "max": 51.9
+  },
+  "tokens": {
+    "input_mean": 78619.312,
+    "input_p95": 123779,
+    "output_mean": 807.21
+  },
+  "tools": {
+    "calls_mean": 3.492,
+    "calls_p95": 7,
+    "zero_tool_questions": 0,
+    "by_kind": [
+      [
+        "@session get",
+        888
+      ],
+      [
+        "@session search",
+        644
+      ],
+      [
+        "@memory recall",
+        138
+      ],
+      [
+        "@date diff",
+        39
+      ],
+      [
+        "@date resolve",
+        24
+      ],
+      [
+        "@memory timeline",
+        7
+      ],
+      [
+        "@session list",
+        3
+      ],
+      [
+        "@tools describe",
+        1
+      ],
+      [
+        "@recall",
+        1
+      ],
+      [
+        "@date add",
+        1
+      ]
+    ],
+    "date_flag_calls": 63,
+    "date_flag_questions": 56,
+    "web_questions": 0
+  },
+  "exits": {
+    "0": 500
+  },
+  "retrieval": {
+    "all": {
+      "n": 470,
+      "any_seen": 470,
+      "any_opened": 445,
+      "all_seen": 462
+    },
+    "passed": {
+      "n": 452,
+      "any_seen": 452,
+      "any_opened": 428,
+      "all_seen": 444
+    },
+    "failed": {
+      "n": 18,
+      "any_seen": 18,
+      "any_opened": 17,
+      "all_seen": 18
+    }
+  },
+  "failure_taxonomy": [
+    [
+      "evidence surfaced, wrong answer (reasoning)",
+      18
+    ],
+    [
+      "answered an unanswerable question",
+      1
+    ]
+  ],
+  "accuracy_by_haystack_size": {
+    "400k-500k chars": "431/449",
+    "500k-600k chars": "50/51"
+  },
+  "failures": [
+    {
+      "id": "830ce83f",
+      "type": "knowledge-update",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Where did Rachel move to after her recent relocation?",
+      "answer": "the suburbs",
+      "hypothesis_tail": "where she lives.\n\nThe May 27 comment is the most recent and may mean she moved again. It doesn't say where, so Chicago is the only location on record.\n\n**Final answer:** Chicago, per your May 24 conversation. A later chat says she moved back to the suburbs, but no location is recorded for that move."
+    },
+    {
+      "id": "d851d5ba",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How much money did I raise for charity in total?",
+      "answer": "$3,750",
+      "hypothesis_tail": ",000 was a benefit concert you helped organize rather than a run or ride, and I included it as charity fundraising. I searched with several phrasings and found no other amounts, but a fundraiser described in different words could have been missed.\n\n**Final answer: about $8,750 in total (at least).**"
+    },
+    {
+      "id": "6d550036",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many projects have I led or am currently leading?",
+      "answer": "2",
+      "hypothesis_tail": "éxico community event (chat-20230527-0254-028) is described only as \"we, the Ethereum México Community Team\".\n- The Nigeria rural water project (chat-20230521-0903-005) is something you are \"planning\". If you count it, the total would be 4.\n\n**Final answer: 3 projects (2 led, 1 currently leading).**"
+    },
+    {
+      "id": "gpt4_ab202e7f",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many kitchen items did I replace or fix?",
+      "answer": "I replaced or fixed five items: the kitchen faucet, the kitchen mat, the toaster, the coffee maker, and the kitchen shelves.",
+      "hypothesis_tail": "-05-26 and 2023-05-30).\n4. **Kitchen shelves:** you fixed them (2023-05-20).\n\nI didn't count the coffee maker. You donated it to Goodwill after your sister gave you an espresso machine, which is an upgrade rather than a stated replacement or fix. If you count it, the total is 5.\n\n**Final answer: 4**"
+    },
+    {
+      "id": "9ee3ecd6",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many points do I need to earn to redeem a free skincare product at Sephora?",
+      "answer": "100",
+      "hypothesis_tail": "lose to a free skincare product and \"just need a total of 300 points.\" In an earlier chat (2023-05-21) you said you had 200 points after earning 50 from an eyeshadow palette. The 300-point target comes from your own statement, not from Sephora's official program rules.\n\n**Final answer: 300 points.**"
+    },
+    {
+      "id": "bf659f65",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many music albums or EPs have I purchased or downloaded?",
+      "answer": "3",
+      "hypothesis_tail": "s the same EP, so I counted it once.\n\nYou also mentioned a Tame Impala vinyl that you got signed at Red Rocks (2023-05-26). You never said you bought it or which album it was, so I left it out. If you did buy it, the count would be 3.\n\n**Final answer: 2 (3 if the Tame Impala vinyl was a purchase).**"
+    },
+    {
+      "id": "09ba9854_abs",
+      "type": "multi-session",
+      "cat": "answered an unanswerable question",
+      "question": "How much will I save by taking the bus from the airport to my hotel instead of a taxi?",
+      "answer": "The information provided is not enough. You did not mention how much will the bus take.",
+      "hypothesis_tail": "y $29, to Shinjuku (2023-05-26). At those prices you'd save about $40-50, or about $31, compared with a $60 taxi.\n\n**Final answer:** Your saved conversations don't contain a bus fare from you. If the $60 taxi figure holds and the bus costs the assistant's estimated $10-29, you'd save roughly $31-50."
+    },
+    {
+      "id": "gpt4_2ba83207",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Which grocery store did I spend the most money at in the past month?",
+      "answer": "Thrive Market",
+      "hypothesis_tail": "nd your sister combined, around May 16-20.\n- **Thrive Market:** about $150 online, but you described it as \"last month\" on May 26, so it was probably in April and falls outside the past month. If it was actually in the last 30 days, it would be the top spend.\n\n**Final answer: Walmart (about $120).**"
+    },
+    {
+      "id": "7024f17c",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many hours of jogging and yoga did I do last week?",
+      "answer": "0.5 hours",
+      "hypothesis_tail": " hoped to get back into yoga \"this week\" with one or two sessions. You then planned Mon/Wed/Fri at 7:00 am, but you never said how many sessions you actually did or how long they were.\n\n**Final answer:** I can't give a number, because nothing you told me records jogging or yoga hours done last week."
+    },
+    {
+      "id": "gpt4_7fce9456",
+      "type": "multi-session",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many properties did I view before making an offer on the townhouse in the Brookside neighborhood?",
+      "answer": "I viewed four properties before making an offer on the townhouse in the Brookside neighborhood. The reasons I didn't make an offer on them were: the kitchen of the bungalow needed serious renovation, the property in Cedar Creek was out of my budget, the noise from the highway was a deal-breaker for the 1-bedroom condo, and my offer on the 2-bedroom condo was rejected due to a higher bid.",
+      "hypothesis_tail": "cted on Feb 17 because of a higher bid.\n5. **3-bedroom townhouse, Brookside**: viewed Feb 22, then you made the offer on Feb 25.\n\nI only found these five in memory, so there could be viewings you never mentioned.\n\n**Final answer: 5 properties, which is 4 others plus the Brookside townhouse itself.**"
+    },
+    {
+      "id": "778164c6",
+      "type": "single-session-assistant",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I was looking back at our previous conversation about Caribbean dishes and I was wondering, what was the name of that Jamaican dish you recommended I try with snapper that has fruit in it?",
+      "answer": "Grilled Snapper with Mango Salsa",
+      "hypothesis_tail": "Ackee and Saltfish** is Jamaican and made with a fruit (ackee), but it uses salted codfish, not snapper.\n\n**Final answer:** The Jamaican snapper dish I recommended was Escovitch Fish. If you remember fruit, you're probably thinking of Grilled Snapper with Mango Salsa, or possibly Ackee and Saltfish."
+    },
+    {
+      "id": "75832dbd",
+      "type": "single-session-preference",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Can you recommend some recent publications or conferences that I might find interesting?",
+      "answer": "The user would prefer suggestions related to recent research papers, articles, or conferences that focus on artificial intelligence in healthcare, particularly those that involve deep learning for medical image analysis. They would not be interested in general AI topics or those unrelated to healthcare.",
+      "hypothesis_tail": "tributed to \"Rajpurkar et al. (2020)\", so verify any of them before citing.\n\n**Final answer:** Your chats don't contain any publication or conference recommendations, only your interests. Based on those, look at NeurIPS, ICML, ICLR, AAMAS, ICRA/CoRL and CVPR, and MICCAI for the medical imaging side."
+    },
+    {
+      "id": "75f70248",
+      "type": "single-session-preference",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I've been sneezing quite a bit lately. Do you think it might be my living room?",
+      "answer": "The user would prefer responses that consider the potential impact of their cat, Luna, and her shedding on their sneezing, as well as the recent deep clean of the living room and its possible effect on stirring up dust. They might not prefer responses that fail to take into account these specific details previously mentioned, such as generic suggestions or unrelated factors.",
+      "hypothesis_tail": "s mostly in the living room.\n\n**Short answer:** It could be, since you have a shedding cat and have already worried about living room dust. Nothing in our past chats confirms that's the cause. To check, see whether the sneezing eases when you're away from that room, and if it persists, see a doctor."
+    },
+    {
+      "id": "9a707b81",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many days ago did I attend a baking class at a local culinary school when I made my friend's birthday cake?",
+      "answer": "21 days. 22 days (including the last day) is also acceptable.",
+      "hypothesis_tail": "e cake for my friend's birthday party today\", a new online recipe with espresso powder. That reads as a separate bake, not part of the class.\n\n**Final answer:** 26 days ago (2022-03-20) for the baking class. If you meant the day you made your friend's birthday cake, that was 5 days ago (2022-04-10)."
+    },
+    {
+      "id": "370a8ff4",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many weeks had passed since I recovered from the flu when I went on my 10th jog outdoors?",
+      "answer": "15",
+      "hypothesis_tail": "\" (chat-20230410-2058-039).\n\nThat is 81 days apart, or 11 weeks and 4 days. This assumes each session's save date is the day you said \"today\". The 10th-jog session was saved at 20:58 and the date is the session's, not a fetched one.\n\n**Final answer: about 11 weeks (11 weeks and 4 days) had passed.**"
+    },
+    {
+      "id": "0bc8ad93",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I mentioned visiting a museum two months ago. Did I visit with a friend or not?",
+      "answer": "No, you did not visit with a friend.",
+      "hypothesis_tail": "about 3 weeks ago, so it doesn't fit either.\n\n**Final answer:** The museum visit you described with a friend was the Science Museum tour with your chemistry professor friend. If you meant the History Museum lecture from about two months ago, your conversations don't say whether you went with anyone."
+    },
+    {
+      "id": "gpt4_468eb063",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "How many days ago did I meet Emma?",
+      "answer": "9 days ago. 10 days (including the last day) is also acceptable.",
+      "hypothesis_tail": " 2023-04-11, which is 2023-04-04. From there to today (2023-04-20) is 16 days.\n\nBecause \"last week\" is vague, the real figure could be a few days either side, and the link between Emma and the coffee-shop writer is my inference.\n\n**Final answer: about 16 days ago (roughly 2023-04-04), approximate.**"
+    },
+    {
+      "id": "gpt4_59149c78",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "I mentioned that I participated in an art-related event two weeks ago. Where was that event held at?",
+      "answer": "The Metropolitan Museum of Art.",
+      "hypothesis_tail": " described as a specific art exhibition, but that is an inference. If you meant a different event, it isn't in these conversations.\n\n**Final answer:** Most likely the City Art Museum (\"Impressionist Masterpieces\" exhibition), but your saved chats don't explicitly say which event was \"two weeks ago\"."
+    },
+    {
+      "id": "gpt4_e414231f",
+      "type": "temporal-reasoning",
+      "cat": "evidence surfaced, wrong answer (reasoning)",
+      "question": "Which bike did I fixed or serviced the past weekend?",
+      "answer": "road bike",
+      "hypothesis_tail": "ervice. You were still only planning a maintenance check at the shop for its spongy brakes and shifting skips.\n\n**Final answer:** The only bike you fixed was your mountain bike (flat tire and chain clean). The record puts it on Wed Mar 15, not the weekend, and the road bike hadn't been serviced yet."
+    }
+  ]
+}
