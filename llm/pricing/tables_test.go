@@ -8,6 +8,7 @@ package pricing
 
 import (
 	"testing"
+	"time"
 
 	"github.com/diillson/chatcli/llm/catalog"
 	"github.com/stretchr/testify/assert"
@@ -248,6 +249,13 @@ func TestListPrice_DevinPrecedence(t *testing.T) {
 	t.Setenv(OverrideEnv, "")
 	t.Cleanup(func() { ResetProvider(catalog.ProviderDevin) })
 	ResetProvider(catalog.ProviderDevin)
+
+	// Cognition raises GPT-5.6 Sol on a fixed date. The clock is pinned on
+	// each side of it, so the day passing does not change what this test
+	// reads from the table.
+	withClock(t, devinGPT56SolStep)
+	assertPrices(t, []priceCase{{"DEVIN", "gpt-5.6-sol", 5, 30, true}})
+	withClock(t, devinGPT56SolStep.Add(-time.Second))
 
 	// Static table when the account listing never ran.
 	assertPrices(t, []priceCase{
