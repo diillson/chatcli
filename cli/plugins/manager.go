@@ -27,6 +27,16 @@ type Manager struct {
 	watcher    *fsnotify.Watcher
 	closeOnce  sync.Once
 	quarantine *Quarantine
+
+	// Watcher lifecycle. bgMu guards closed and reloadTimer; bg counts the
+	// watcher goroutine and every debounced reload, so Close can wait for
+	// all of them. bg.Add only happens under bgMu while closed is false,
+	// which is what makes the Wait in Close safe.
+	bgMu        sync.Mutex
+	bg          sync.WaitGroup
+	closed      bool
+	reloadTimer *time.Timer
+	debounce    time.Duration // guarded by bgMu
 }
 
 func NewManager(logger *zap.Logger) (*Manager, error) {
@@ -54,21 +64,62 @@ func NewManager(logger *zap.Logger) (*Manager, error) {
 		logger:     logger,
 		watcher:    watcher,
 		quarantine: NewQuarantine(pluginsDir),
+		debounce:   reloadDebounce,
 	}
 	m.Reload()
-	go m.watchForChanges()
+	m.bg.Add(1)
+	go func() {
+		defer m.bg.Done()
+		m.watchForChanges()
+	}()
 
 	return m, nil
 }
 
-// Close encerra o watcher de arquivos de forma segura.
+// Close stops watching the plugins directory and returns only after the
+// watcher goroutine and any debounced reload have finished. Closing the
+// watcher alone is not enough: a reload already scheduled by the debounce
+// timer would still fire up to half a second later and run plugin
+// verification on behalf of a manager its owner has already shut down.
 func (m *Manager) Close() {
 	m.closeOnce.Do(func() {
+		m.bgMu.Lock()
+		m.closed = true
+		if m.reloadTimer != nil && m.reloadTimer.Stop() {
+			// The timer had not fired, so its reload never will; release
+			// the slot scheduleReload reserved for it.
+			m.bg.Done()
+		}
+		m.bgMu.Unlock()
 		if m.watcher != nil {
 			_ = m.watcher.Close()
 		}
+		m.bg.Wait()
 	})
 }
+
+// scheduleReload debounces directory events into a single Reload. Each
+// call replaces the pending timer; after Close it does nothing.
+func (m *Manager) scheduleReload() {
+	m.bgMu.Lock()
+	defer m.bgMu.Unlock()
+	if m.closed {
+		return
+	}
+	if m.reloadTimer != nil && m.reloadTimer.Stop() {
+		m.bg.Done()
+	}
+	m.bg.Add(1)
+	m.reloadTimer = time.AfterFunc(m.debounce, func() {
+		defer m.bg.Done()
+		m.logger.Info("Diretório de plugins modificado, recarregando automaticamente...")
+		m.Reload()
+	})
+}
+
+// reloadDebounce is how long the plugins directory must stay quiet before
+// a change triggers a reload.
+const reloadDebounce = 500 * time.Millisecond
 
 // watchForChanges escuta por eventos no diretório de plugins e aciona o Reload.
 func (m *Manager) watchForChanges() {
@@ -78,9 +129,6 @@ func (m *Manager) watchForChanges() {
 		m.logger.Error("Erro ao iniciar a observação do diretório de plugins", zap.Error(err))
 		return
 	}
-
-	// Debounce: Evita recarregamentos múltiplos em rápida sucessão.
-	var reloadTimer *time.Timer
 
 	for {
 		select {
@@ -93,13 +141,7 @@ func (m *Manager) watchForChanges() {
 				m.logger.Debug("Alteração detectada no diretório de plugins", zap.String("event", event.String()))
 
 				// Reseta o timer de debounce a cada novo evento.
-				if reloadTimer != nil {
-					reloadTimer.Stop()
-				}
-				reloadTimer = time.AfterFunc(500*time.Millisecond, func() {
-					m.logger.Info("Diretório de plugins modificado, recarregando automaticamente...")
-					m.Reload()
-				})
+				m.scheduleReload()
 			}
 		case err, ok := <-m.watcher.Errors:
 			if !ok {
