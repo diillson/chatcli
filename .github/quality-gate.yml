@@ -17,10 +17,14 @@ target_branches:
 
 # Bot actors whose PRs skip the gate entirely. Release-please reshuffles
 # changelogs and version bumps; running coverage ratchet against those is noise.
+#
+# dependabot[bot] is deliberately NOT here: its pull requests are merged
+# without a human by .github/workflows/dependabot-automerge.yml, so the
+# floors (both module builds, coverage, E2E, binary size) are part of what
+# validates a bump.
 skip_actors:
   - release-please[bot]
   - github-actions[bot]
-  - dependabot[bot]
 
 # Floor 1 — Build / static analysis. Already covered by 1-ci.yml; the
 # Quality Gate re-runs them so the single required check is self-contained

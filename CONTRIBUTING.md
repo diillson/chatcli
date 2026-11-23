@@ -137,7 +137,7 @@ Every pull request runs the quality gate. Each floor below must pass:
 | Binary size | `chatcli` stays under 150 MB |
 | Provider parity | every provider wired through every touch point |
 
-Security scans (`govulncheck`, `gosec`, CodeQL, Trivy and dependency review) also run on every pull request. The scripts behind each floor are in [`scripts/qg`](scripts/qg) and can be run locally; see [`scripts/qg/README.md`](scripts/qg/README.md).
+Security scans (`govulncheck`, `gosec`, CodeQL, Trivy and dependency review) also run on every pull request. Dependabot pull requests go through the same gate and are merged automatically when they are plain version bumps with every check green. The scripts behind each floor are in [`scripts/qg`](scripts/qg) and can be run locally; see [`scripts/qg/README.md`](scripts/qg/README.md).
 
 ## License
 

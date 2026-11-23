@@ -12,6 +12,9 @@ name: Operator go.sum sync
 # PREREQUISITE (one-time): store a token with `contents: write` on this repo as
 # a *Dependabot* secret named DEPENDABOT_TIDY_TOKEN
 # (Settings > Secrets and variables > Dependabot > New repository secret).
+# The same token, stored again as an *Actions* secret under the same name,
+# drives .github/workflows/dependabot-automerge.yml, which also needs
+# `pull-requests: write` and `workflows: write` on it.
 # Why a dedicated token:
 #   * The default GITHUB_TOKEN is read-only on Dependabot-triggered runs, so it
 #     cannot push back.
@@ -100,5 +103,8 @@ jobs:
           git config user.name "dependabot[bot]"
           git config user.email "49699333+dependabot[bot]@users.noreply.github.com"
           git add operator/go.mod operator/go.sum
-          git commit -m "chore(deps): sync operator go.sum after root bump"
+          # [dependabot skip] lets Dependabot keep rebasing and updating the
+          # pull request; without it an extra commit on the branch makes
+          # Dependabot stop managing it.
+          git commit -m "chore(deps): sync operator go.sum after root bump [dependabot skip]"
           git push
