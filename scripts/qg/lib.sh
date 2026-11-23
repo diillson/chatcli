@@ -123,11 +123,17 @@ qg_pr_commits() {
   git log --no-merges --format='%H' "$QG_BASE_REF"..HEAD
 }
 
-# qg_is_docs_only -> exit 0 if the PR touches no .go files (docs/CI only)
+# qg_is_docs_only -> exit 0 if the PR touches no code (docs/CI only).
+#
+# Code is any .go file and any go.mod / go.sum, at the root or in a nested
+# module. A dependency bump changes what gets compiled into the binaries
+# without touching a .go file, so it must not be mistaken for a docs change:
+# the floors keyed on this (AI smells, E2E, binary size) are the ones that
+# validate a bump.
 qg_is_docs_only() {
-  local go_files
-  go_files=$(qg_diff_changed_files '*.go' || true)
-  [[ -z "$go_files" ]]
+  local code_files
+  code_files=$(qg_diff_changed_files '*.go' ':(glob)**/go.mod' ':(glob)**/go.sum' || true)
+  [[ -z "$code_files" ]]
 }
 
 # qg_require_yq / qg_require_jq -> install on demand (Actions images have apt)

@@ -173,7 +173,7 @@ ChatCLI applies defense in depth across its components. The [security overview](
   - secret scanning with gitleaks.
 - **Weekly:** `govulncheck`, `gosec`, CodeQL and Trivy run again on `main`.
 - **Every release:** image scanning with Trivy, an SBOM and Cosign signatures.
-- **Dependencies:** Dependabot keeps them current.
+- **Dependencies:** Dependabot proposes updates weekly. An update is merged automatically only when it is a plain minor or patch version bump and every check above passes on it; major versions, pre-releases and new dependencies wait for a maintainer.
 
 ## Published advisories
 
