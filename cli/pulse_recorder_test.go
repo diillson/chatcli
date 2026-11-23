@@ -26,6 +26,9 @@ func TestStartPulseRecorderGivesAStandaloneProcessASpool(t *testing.T) {
 	_, base, _ := pulse.ReadSince(root, instance, 0, 0)
 
 	stop := StartPulseRecorder(context.Background(), "daemon", zap.NewNop())
+	// The recorder is process-wide: a failure below must not leave it, and
+	// its session node, running under the tests that follow.
+	t.Cleanup(stop)
 	require.Eventually(t, pulse.Default().Enabled, 3*time.Second, 10*time.Millisecond)
 	pulse.Emit(pulse.Event{Kind: pulse.KindBackground, Phase: pulse.PhasePoint, ID: "job:x", Name: "scheduler"})
 
