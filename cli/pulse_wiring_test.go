@@ -160,6 +160,9 @@ func TestInitPulseLeavesDefaultObserversInPlace(t *testing.T) {
 
 	c := &ChatCLI{logger: zap.NewNop(), Provider: "OPENAI", Model: "gpt-x"}
 	c.initPulse(context.Background(), "repl")
+	// The recorder is process-wide: a failure below must not leave it, and
+	// its session node, running under the tests that follow.
+	t.Cleanup(c.shutdownPulse)
 	require.NotNil(t, c.pulse)
 	first := c.pulse
 	c.initPulse(context.Background(), "repl")
@@ -201,9 +204,19 @@ func TestInitPulseLeavesDefaultObserversInPlace(t *testing.T) {
 	wire, _ := json.Marshal(spooled)
 	assert.NotContains(t, string(wire), "secret task text")
 
-	metas := pulse.ListInstances(root)
-	require.NotEmpty(t, metas)
-	assert.Equal(t, "acp", metas[0].Surface, "SetAuditSurface renames the pulse surface too")
+	// The rename is handed to the recorder goroutine, which writes it with
+	// its next heartbeat: the events above reaching the spool says nothing
+	// about whether that heartbeat has been written yet.
+	surface := func() string {
+		for _, m := range pulse.ListInstances(root) {
+			if m.Instance == instance {
+				return m.Surface
+			}
+		}
+		return ""
+	}
+	require.Eventually(t, func() bool { return surface() == "acp" }, 3*time.Second, 20*time.Millisecond,
+		"SetAuditSurface renames the pulse surface too")
 
 	c.shutdownPulse()
 	c.shutdownPulse() // idempotent

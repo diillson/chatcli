@@ -19,6 +19,7 @@ import (
 // the running total: the same numbers /cost shows, as they change.
 func TestUsageAndCostReachTheModelAndSessionNodes(t *testing.T) {
 	ct := NewCostTrackerAt(t.TempDir())
+	t.Cleanup(ct.FlushDailySpend) // the debounced daily-spend timer must not write during TempDir cleanup
 	ct.RecordRealUsageIn(LaneMain, "openai", "gpt-4o", &models.UsageInfo{PromptTokens: 10, CompletionTokens: 5, IsReal: true})
 	// Off: nothing above may have been published, and nothing is built.
 	require.Nil(t, ct.pulseUsageEventsLocked(LaneMain, &ModelUsageRecord{}, 1, &models.UsageInfo{}))
@@ -44,8 +45,14 @@ func TestUsageAndCostReachTheModelAndSessionNodes(t *testing.T) {
 }
 
 func TestSessionNodeCarriesTotalCostAndContextWindow(t *testing.T) {
-	collect := pulseWatch(t, pulse.KindSession)
+	// Only the updates of the session node are this test's: the snapshot
+	// another test's wiring replays when the bus comes on must not be
+	// counted among the three awaited here.
+	collect := pulseWatchFunc(t, "session update", func(ev pulse.Event) bool {
+		return ev.Kind == pulse.KindSession && ev.Phase == pulse.PhaseUpdate && ev.ID == pulseSessionNodeID
+	})
 	ct := NewCostTrackerAt(t.TempDir())
+	t.Cleanup(ct.FlushDailySpend) // the debounced daily-spend timer must not write during TempDir cleanup
 	ct.RecordRealUsageIn(LaneMain, "openai", "gpt-4o", &models.UsageInfo{PromptTokens: 5000, CompletionTokens: 1000, IsReal: true})
 	pulseContextWindow(37, 128000)
 	pulseContextWindow(104, 128000) // past 100 is the signal the next turn compacts
@@ -53,9 +60,6 @@ func TestSessionNodeCarriesTotalCostAndContextWindow(t *testing.T) {
 
 	var usage, ctx []pulse.Event
 	for _, ev := range collect(3) {
-		if ev.Phase != pulse.PhaseUpdate || ev.ID != pulseSessionNodeID {
-			continue // the session snapshot of another test's wiring
-		}
 		if ev.Attrs["ctx"] != "" {
 			ctx = append(ctx, ev)
 		} else {
