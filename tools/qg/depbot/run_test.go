@@ -17,15 +17,15 @@ import (
 
 var required = []string{"Lint, Test and Generate Coverage", "Quality Gate"}
 
-func run(name, workflow, status, conclusion, startedAt string) Check {
+func checkRun(name, workflow, status, conclusion, startedAt string) Check {
 	return Check{Name: name, Workflow: workflow, Status: status, Conclusion: conclusion, StartedAt: startedAt}
 }
 
 func green() []Check {
 	return []Check{
-		run("Lint, Test and Generate Coverage", "CI", "COMPLETED", "SUCCESS", "2026-11-23T09:00:00Z"),
-		run("Quality Gate", "Quality Gate", "COMPLETED", "SUCCESS", "2026-11-23T09:00:00Z"),
-		run("Floor 11 · CRD drift", "Quality Gate", "COMPLETED", "SKIPPED", "2026-11-23T09:00:00Z"),
+		checkRun("Lint, Test and Generate Coverage", "CI", "COMPLETED", "SUCCESS", "2026-11-23T09:00:00Z"),
+		checkRun("Quality Gate", "Quality Gate", "COMPLETED", "SUCCESS", "2026-11-23T09:00:00Z"),
+		checkRun("Floor 11 · CRD drift", "Quality Gate", "COMPLETED", "SKIPPED", "2026-11-23T09:00:00Z"),
 		{Context: "quality-gate/coverage", State: "SUCCESS"},
 	}
 }
@@ -35,19 +35,19 @@ func TestEvaluateChecks(t *testing.T) {
 		assert.Equal(t, ChecksResult{State: ChecksGreen}, EvaluateChecks(green(), required))
 	})
 	t.Run("a non-required check failing still blocks", func(t *testing.T) {
-		res := EvaluateChecks(append(green(), run("Trivy — Operator Image", "Security Scan", "COMPLETED", "FAILURE", "")), required)
+		res := EvaluateChecks(append(green(), checkRun("Trivy — Operator Image", "Security Scan", "COMPLETED", "FAILURE", "")), required)
 		assert.Equal(t, ChecksFailed, res.State)
 		assert.Equal(t, []string{"Trivy — Operator Image"}, res.Failing)
 	})
 	t.Run("running check", func(t *testing.T) {
-		res := EvaluateChecks(append(green(), run("Go Vulnerability Check", "Security Scan", "IN_PROGRESS", "", "")), required)
+		res := EvaluateChecks(append(green(), checkRun("Go Vulnerability Check", "Security Scan", "IN_PROGRESS", "", "")), required)
 		assert.Equal(t, ChecksPending, res.State)
 		assert.Equal(t, []string{"Go Vulnerability Check"}, res.Waiting)
 	})
 	t.Run("pending wins over failed", func(t *testing.T) {
 		res := EvaluateChecks(append(green(),
-			run("A", "X", "COMPLETED", "FAILURE", ""),
-			run("B", "X", "QUEUED", "", "")), required)
+			checkRun("A", "X", "COMPLETED", "FAILURE", ""),
+			checkRun("B", "X", "QUEUED", "", "")), required)
 		assert.Equal(t, ChecksPending, res.State)
 	})
 	t.Run("required check not registered yet", func(t *testing.T) {
@@ -60,8 +60,8 @@ func TestEvaluateChecks(t *testing.T) {
 	})
 	t.Run("skipped required check validated nothing", func(t *testing.T) {
 		checks := []Check{
-			run("Lint, Test and Generate Coverage", "CI", "COMPLETED", "SKIPPED", ""),
-			run("Quality Gate", "Quality Gate", "COMPLETED", "SUCCESS", ""),
+			checkRun("Lint, Test and Generate Coverage", "CI", "COMPLETED", "SKIPPED", ""),
+			checkRun("Quality Gate", "Quality Gate", "COMPLETED", "SUCCESS", ""),
 		}
 		res := EvaluateChecks(checks, required)
 		assert.Equal(t, ChecksPending, res.State)
@@ -69,13 +69,13 @@ func TestEvaluateChecks(t *testing.T) {
 	})
 	t.Run("superseded run does not outvote its replacement", func(t *testing.T) {
 		checks := append(green(),
-			run("Quality Gate", "Quality Gate", "COMPLETED", "FAILURE", "2026-11-23T08:00:00Z"),
-			run("Floor 4 · AI smells", "Quality Gate", "COMPLETED", "CANCELLED", "2026-11-23T08:00:00Z"),
-			run("Floor 4 · AI smells", "Quality Gate", "COMPLETED", "SUCCESS", "2026-11-23T09:00:00Z"))
+			checkRun("Quality Gate", "Quality Gate", "COMPLETED", "FAILURE", "2026-11-23T08:00:00Z"),
+			checkRun("Floor 4 · AI smells", "Quality Gate", "COMPLETED", "CANCELLED", "2026-11-23T08:00:00Z"),
+			checkRun("Floor 4 · AI smells", "Quality Gate", "COMPLETED", "SUCCESS", "2026-11-23T09:00:00Z"))
 		assert.Equal(t, ChecksGreen, EvaluateChecks(checks, required).State)
 	})
 	t.Run("a newer failure replaces an older pass", func(t *testing.T) {
-		checks := append(green(), run("Quality Gate", "Quality Gate", "COMPLETED", "FAILURE", "2026-11-23T10:00:00Z"))
+		checks := append(green(), checkRun("Quality Gate", "Quality Gate", "COMPLETED", "FAILURE", "2026-11-23T10:00:00Z"))
 		assert.Equal(t, ChecksFailed, EvaluateChecks(checks, required).State)
 	})
 	t.Run("commit status states", func(t *testing.T) {
@@ -219,7 +219,7 @@ func TestRunHoldsIneligibleDiffAndSaysWhy(t *testing.T) {
 
 func TestRunReportsFailedChecksAndMovesOn(t *testing.T) {
 	f := newFake(PR{Number: 1}, PR{Number: 2})
-	f.checks[1] = append(green(), run("Go Vulnerability Check", "Security Scan", "COMPLETED", "FAILURE", ""))
+	f.checks[1] = append(green(), checkRun("Go Vulnerability Check", "Security Scan", "COMPLETED", "FAILURE", ""))
 	outs, err := Run(f, Options{Required: required})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"merge #2"}, f.calls)
