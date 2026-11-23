@@ -64,10 +64,7 @@ func (cli *ChatCLI) initPulse(ctx context.Context, surface string) {
 		return
 	}
 	logger := cli.logger
-	ctl, started := startProcessPulse(ctx, surface, logger)
-	if started {
-		pulse.Default().RegisterSnapshotter("00-session", cli.pulseSessionSnapshot)
-	}
+	ctl, started := startProcessPulse(ctx, surface, logger, cli.pulseSessionSnapshot)
 	cli.pulse, cli.pulseOwner = ctl, started
 }
 
@@ -79,16 +76,29 @@ var (
 	pulseProcCtl *pulse.Controller
 )
 
+// pulseSessionSnapshotKey orders the session node ahead of everything that
+// hangs from it when current state is replayed.
+const pulseSessionSnapshotKey = "00-session"
+
 // startProcessPulse installs the taps every surface needs — agent runs, LLM
 // requests and the caller behind each request — and starts the recording
-// controller once per process. started is false when one was running.
-func startProcessPulse(ctx context.Context, surface string, logger *zap.Logger) (ctl *pulse.Controller, started bool) {
+// controller once per process. started is false when one was running, and
+// session is then left out: the entry point that started it owns the node.
+//
+// session describes the root node of the process. It is registered here,
+// before the controller exists, because the controller enables the bus from
+// its own goroutine as soon as recording is forced or leased, and the bus
+// asks the snapshotters for the current state only at that moment. A session
+// snapshotter registered after the start could lose that race, and the
+// process would then record a graph with no root.
+func startProcessPulse(ctx context.Context, surface string, logger *zap.Logger, session func() []pulse.Event) (ctl *pulse.Controller, started bool) {
 	pulseProcMu.Lock()
 	defer pulseProcMu.Unlock()
 	if pulseProcCtl != nil {
 		return pulseProcCtl, false
 	}
 	bus := pulse.Default()
+	bus.RegisterSnapshotter(pulseSessionSnapshotKey, session)
 	bus.RegisterSnapshotter("10-runs", pulseRunsSnapshot)
 	runs.Default().OnEventKeyed(pulseObserverKey, func(info runs.Info) { bus.Emit(pulseRunEvent(info)) })
 	llmTap := newPulseLLMTap(bus)
@@ -140,14 +150,7 @@ func stopProcessPulse(ctl *pulse.Controller) {
 // surface, and a session node of its own so its jobs have a root to hang
 // from. The returned func stops recording and flushes the spool.
 func StartPulseRecorder(ctx context.Context, surface string, logger *zap.Logger) func() {
-	ctl, started := startProcessPulse(ctx, surface, logger)
-	if !started {
-		// Another entry point already records this process; it owns the
-		// session node and the controller.
-		return func() {}
-	}
-	bus := pulse.Default()
-	bus.RegisterSnapshotter("00-session", func() []pulse.Event {
+	ctl, started := startProcessPulse(ctx, surface, logger, func() []pulse.Event {
 		return []pulse.Event{{
 			Kind:   pulse.KindSession,
 			Phase:  pulse.PhaseStart,
@@ -156,8 +159,13 @@ func StartPulseRecorder(ctx context.Context, surface string, logger *zap.Logger)
 			Status: pulse.StatusRunning,
 		}}
 	})
+	if !started {
+		// Another entry point already records this process; it owns the
+		// session node and the controller.
+		return func() {}
+	}
 	return func() {
-		bus.RegisterSnapshotter("00-session", nil)
+		pulse.Default().RegisterSnapshotter(pulseSessionSnapshotKey, nil)
 		stopProcessPulse(ctl)
 	}
 }
@@ -183,7 +191,7 @@ func (cli *ChatCLI) shutdownPulse() {
 	runs.Default().OnEventKeyed(pulseObserverKey, nil)
 	client.RegisterRequestAuditorKeyed(pulseObserverKey, nil)
 	bus := pulse.Default()
-	bus.RegisterSnapshotter("00-session", nil)
+	bus.RegisterSnapshotter(pulseSessionSnapshotKey, nil)
 	bus.RegisterSnapshotter("10-runs", nil)
 	bus.RegisterSnapshotter(pulseMCPSnapshotKey, nil)
 	bus.RegisterSnapshotter(pulseProcSnapshotKey, nil)
