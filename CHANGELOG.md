@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.232.1](https://github.com/diillson/chatcli/compare/v1.232.0...v1.232.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **plugins:** stop pending and running reloads when the manager closes ([#2016](https://github.com/diillson/chatcli/issues/2016)) ([cc7f473](https://github.com/diillson/chatcli/commit/cc7f473075d81eaf036f7230815580e395863578))
+* **pulse:** register the session snapshotter before the recorder starts ([#2012](https://github.com/diillson/chatcli/issues/2012)) ([be7eb6d](https://github.com/diillson/chatcli/commit/be7eb6d4bb43258cad234384172f751eab50b21a))
+
 ## [1.232.0](https://github.com/diillson/chatcli/compare/v1.231.1...v1.232.0) (2026-11-20)
 
 
