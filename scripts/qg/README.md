@@ -39,6 +39,7 @@ to be marked **required** in branch protection.
 | `.github/workflows/quality-gate.yml`           | Orchestrator workflow. Runs on `pull_request`. |
 | `.github/workflows/quality-gate-baseline.yml`  | Publishes total-coverage baseline on pushes to `main`/`develop`. |
 | `.github/workflows/security-scan.yml`          | Companion workflow — govulncheck, gosec, trivy. |
+| `.github/workflows/dependabot-automerge.yml`   | Validates and merges Dependabot pull requests (see below). |
 | `.github/quality-gate.yml`                     | All thresholds and enforcement modes (single source of truth). |
 | `.github/labels.yml`                           | Bypass labels (large/wide PR, deps, breaking change, refactor, skip). |
 | `.github/actions/setup-qg-tools/`              | Composite action — installs yq/gocyclo/apidiff/controller-gen/govulncheck and pre-builds the in-repo Go helpers. |
@@ -48,7 +49,8 @@ to be marked **required** in branch protection.
 | `tools/qg/diffcover/`                          | Go-native cover-profile + diff parser used by Floors 2 and 3. |
 | `tools/qg/i18nparity/`                         | Go-native i18n locale and Go-source AST scanner used by Floor 10. |
 | `tools/qg/providerparity/`                     | LLM provider parity matrix + exemption table used by Floor 15. |
-| `tools/qg/cmd/qg-*/`                           | CLI binaries — `qg-diffcover`, `qg-cover-total`, `qg-i18n-parity`, `qg-provider-parity`, `qg-fan-in`, `qg-verdict`. Pre-built by setup-qg-tools. |
+| `tools/qg/depbot/`                             | Dependency-bump policy, check evaluation and merge sequencing for Dependabot pull requests. |
+| `tools/qg/cmd/qg-*/`                           | CLI binaries — `qg-diffcover`, `qg-cover-total`, `qg-i18n-parity`, `qg-provider-parity`, `qg-fan-in`, `qg-verdict`. Pre-built by setup-qg-tools. `qg-depbot` is run by the auto-merge workflow. |
 
 ## The 15 floors
 
@@ -95,7 +97,7 @@ After every PR the aggregator posts a comment with this layout:
 |-------|--------|
 | `large-pr-approved`  | Waives Floor 5 LOC threshold. |
 | `wide-pr-approved`   | Waives Floor 5 file-count threshold. |
-| `deps:approved`      | Allows new `go.mod` entries (Floor 4). |
+| `deps:approved`      | Allows new `go.mod` entries (Floor 4). Applied by the auto-merge workflow to a Dependabot pull request once its diff is proven to be version bumps only. |
 | `breaking-change`    | Allows removed exports and incompatible API diffs (Floors 4 and 13). |
 | `refactor-only`      | Relaxes Floor 3 global + per-path bars to `refactor_threshold_pct`. |
 | `quality-gate-skip`  | Nuclear: skips every floor. Logged prominently in the sticky comment. |
@@ -216,12 +218,50 @@ Mark **Quality Gate** (aggregator job) as required. Do not require the
 individual floor jobs — their names can change when the workflow is
 restructured, and a renamed required check blocks merges silently.
 
+## Dependabot auto-merge
+
+Dependabot opens grouped pull requests every week (`.github/dependabot.yml`):
+one for Go modules across the root and operator modules, one for GitHub
+Actions, one for Docker base images. Major updates are not grouped and
+arrive on their own.
+
+`.github/workflows/dependabot-automerge.yml` runs `qg-depbot` whenever CI,
+the Quality Gate or the Security Scan finishes on a Dependabot branch, and
+hourly as a safety net. A pull request is merged only when all of these hold:
+
+1. **The diff is version bumps and nothing else** (`tools/qg/depbot/policy.go`).
+   Allowed: `go.sum` changes; `go.mod` require entries whose version moves
+   forward; `uses:` references pinned to a commit with a version comment;
+   Dockerfile `FROM` tags. Held for review: a new or removed direct
+   dependency, a major version, a pre-release or pseudo-version on a direct
+   dependency, a downgrade, any `go` / `toolchain` / `replace` / `exclude`
+   change, an image whose name or variant changes, and any other file.
+2. **Every check on the head commit passed** — including the security scans
+   the branch ruleset does not require.
+3. **The branch is up to date with `main`.**
+
+Pull requests merge one at a time, oldest first; after each merge only the
+next one is updated, so the batch costs one CI run per pull request. A held
+or failing pull request gets a single comment explaining why and stays open.
+
+The workflow needs the `DEPENDABOT_TIDY_TOKEN` secret (fine-grained token
+with Contents, Pull requests and Workflows write access on this repository)
+stored as both an Actions and a Dependabot secret; without it the workflow
+does nothing. Try a pass without side effects with
+`gh workflow run dependabot-automerge.yml -f dry_run=true`, or locally:
+
+```bash
+GH_REPO=diillson/chatcli go run ./tools/qg/cmd/qg-depbot -dry-run
+gh pr diff <number> | go run ./tools/qg/cmd/qg-depbot -policy-only
+```
+
 ## Behaviour matrix
 
 | PR shape | Floors that run |
 |----------|-----------------|
-| Bot PR (release-please / dependabot / github-actions) | none — gate skipped |
+| Bot PR (release-please / github-actions) | none — gate skipped |
 | `quality-gate-skip` label | none — gate skipped |
-| Docs/CI only (no Go files) | 1, 2, 5, 7, 9, 10, 11, 15 |
+| Docs/CI only (no `.go`, `go.mod` or `go.sum` change) | 1, 2, 5, 7, 9, 10, 11, 15 |
+| Dependency bump (`go.mod` / `go.sum` only, Dependabot included) | all 15 — Floor 4 needs `deps:approved` |
 | Pure refactor (`refactor-only`) | all — Floor 3 thresholds relaxed |
 | Normal PR | all 15 |

@@ -1,0 +1,122 @@
+# Dependabot auto-merge — validates and merges Dependabot pull requests.
+#
+# Each run makes one pass over the open Dependabot pull requests with
+# tools/qg/cmd/qg-depbot. A pull request is merged only when ALL hold:
+#
+#   * its diff is nothing but version bumps of dependencies the repository
+#     already has (tools/qg/depbot/policy.go — no new direct dependency, no
+#     major version, no pre-release, no go/toolchain/replace change, no file
+#     outside go.mod/go.sum, workflow `uses:` pins and Dockerfile FROM lines);
+#   * every check on the head commit passed — not only the two the branch
+#     ruleset requires, so a red vulnerability or image scan blocks it;
+#   * the branch is up to date with main.
+#
+# Anything else stays open with a comment saying why. Merges go one at a
+# time, oldest first.
+#
+# Why workflow_run and not pull_request: this job holds a write token, so it
+# must never run in the context of a pull request. workflow_run executes the
+# workflow file and the tool from the default branch; the pull request is
+# only read through the API, as data, and none of its code is checked out
+# or executed here.
+#
+# Why a dedicated token (DEPENDABOT_TIDY_TOKEN, the same one
+# operator-gomod-sync.yml uses) and not GITHUB_TOKEN: nothing done with
+# GITHUB_TOKEN triggers other workflows. A label added with it would not
+# re-run the Quality Gate, an updated branch would not re-run CI, and a
+# merge would not trigger the push workflows on main. Without the secret the
+# job is a no-op.
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows:
+      - "CI (Lint, Fmt, Test, Coverage)"
+      - "Quality Gate"
+      - "Security Scan"
+      - "Dependabot Guard"
+      - "Operator go.sum sync"
+    types: [completed]
+  schedule:
+    # Safety net for anything the events above missed.
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Evaluate and log only — label, update and merge nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One pass at a time: two concurrent passes could both merge, each on a
+# branch the other just made stale. A queued pass is enough, since every
+# pass looks at all pull requests.
+concurrency:
+  group: dependabot-automerge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Validate and merge
+    # workflow_run fires for every pull request's CI; only Dependabot
+    # branches are worth a pass. The value is compared, never interpolated
+    # into a script.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check token is configured
+        id: token
+        env:
+          AUTOMATION_TOKEN: ${{ secrets.DEPENDABOT_TIDY_TOKEN }}
+        run: |
+          if [ -n "$AUTOMATION_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DEPENDABOT_TIDY_TOKEN not set — Dependabot auto-merge is disabled. Store a token with contents, pull-requests and workflows write access as both an Actions and a Dependabot secret to enable it."
+          fi
+
+      # Default ref on purpose: for workflow_run, schedule and
+      # workflow_dispatch this is the default branch, never a pull request.
+      - name: Checkout default branch
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        if: steps.token.outputs.present == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run qg-depbot
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDABOT_TIDY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          # Checks that must be present and successful before a merge, one
+          # per line. Every other check on the commit must also have passed;
+          # this list only keeps a commit whose workflows have not been
+          # registered yet from reading as green.
+          DEPBOT_REQUIRED_CHECKS: |
+            Lint, Test and Generate Coverage
+            Quality Gate
+            Go Vulnerability Check
+            Go Security Analysis
+            Dependency Review
+            Trivy — ChatCLI Image
+            Trivy — Operator Image
+        run: |
+          set -euo pipefail
+          args=(-base main)
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(-dry-run)
+          fi
+          go run ./tools/qg/cmd/qg-depbot "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

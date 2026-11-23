@@ -1,8 +1,22 @@
 version: 2
+
+# Updates are grouped so a week of bumps arrives as a handful of pull
+# requests instead of one per dependency. Minor and patch updates of an
+# ecosystem share one pull request; a major update stays on its own pull
+# request, because it is held for review rather than merged automatically.
+#
+# .github/workflows/dependabot-automerge.yml validates and merges these pull
+# requests; .github/workflows/operator-gomod-sync.yml keeps operator/go.sum
+# in step when a root bump reaches the operator through its
+# `replace github.com/diillson/chatcli => ../`.
 updates:
-  # Go module dependencies
+  # Go modules — the root module and the operator (separate go.mod) in one
+  # entry, so a dependency both modules require is bumped in both by the
+  # same pull request.
   - package-ecosystem: "gomod"
-    directory: "/"
+    directories:
+      - "/"
+      - "/operator"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -12,6 +26,13 @@ updates:
     labels:
       - "dependencies"
       - "security"
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # GitHub Actions versions
   - package-ecosystem: "github-actions"
@@ -23,15 +44,31 @@ updates:
     labels:
       - "ci/cd"
       - "dependencies"
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
-  # Dockerfile base images (main)
+  # Dockerfile base images (main and operator)
   - package-ecosystem: "docker"
-    directory: "/"
+    directories:
+      - "/"
+      - "/operator"
     schedule:
       interval: "weekly"
     labels:
       - "docker"
       - "dependencies"
+    groups:
+      docker-images:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     # NOTE: no `ignore.versions` for Go pre-release tags here. The docker
     # ecosystem parses `versions` as Bundler requirements (globs like
     # "*rc*" are a config error that breaks parsing repo-wide), and
@@ -39,34 +76,5 @@ updates:
     # the stable 1.27.0 evaluate identically, so an rc-only ignore is
     # inexpressible. The guard lives in
     # .github/workflows/dependabot-guard.yml instead: any PR that puts an
-    # rc/beta/alpha golang base-image tag in a Dockerfile fails visibly.
-
-  # Go module dependencies (operator — separate go.mod)
-  - package-ecosystem: "gomod"
-    directory: "/operator"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "diillson"
-    labels:
-      - "dependencies"
-      - "operator"
-
-  # Dockerfile base images (operator)
-  - package-ecosystem: "docker"
-    directory: "/operator"
-    schedule:
-      interval: "weekly"
-    labels:
-      - "docker"
-      - "dependencies"
-    # NOTE: no `ignore.versions` for Go pre-release tags here. The docker
-    # ecosystem parses `versions` as Bundler requirements (globs like
-    # "*rc*" are a config error that breaks parsing repo-wide), and
-    # requirement matching compares the tag's release part — 1.27rc2 and
-    # the stable 1.27.0 evaluate identically, so an rc-only ignore is
-    # inexpressible. The guard lives in
-    # .github/workflows/dependabot-guard.yml instead: any PR that puts an
-    # rc/beta/alpha golang base-image tag in a Dockerfile fails visibly.
+    # rc/beta/alpha golang base-image tag in a Dockerfile fails visibly,
+    # and the auto-merge policy refuses such a tag on its own.
