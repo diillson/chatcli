@@ -25,6 +25,14 @@ import (
 // collector of the events of one kind.
 func pulseWatch(t *testing.T, kind pulse.Kind) func(n int) []pulse.Event {
 	t.Helper()
+	return pulseWatchFunc(t, string(kind), func(ev pulse.Event) bool { return ev.Kind == kind })
+}
+
+// pulseWatchFunc is pulseWatch for a test that owns only some of the events
+// of a kind: the bus is process-wide, so only what keep accepts is counted
+// against n.
+func pulseWatchFunc(t *testing.T, what string, keep func(pulse.Event) bool) func(n int) []pulse.Event {
+	t.Helper()
 	bus := pulse.Default()
 	ch, cancel := bus.Subscribe(256)
 	bus.SetEnabled(true)
@@ -36,11 +44,11 @@ func pulseWatch(t *testing.T, kind pulse.Kind) func(n int) []pulse.Event {
 		for len(seen) < n {
 			select {
 			case ev := <-ch:
-				if ev.Kind == kind {
+				if keep(ev) {
 					seen = append(seen, ev)
 				}
 			case <-deadline:
-				t.Fatalf("got %d of %d %s events: %+v", len(seen), n, kind, seen)
+				t.Fatalf("got %d of %d %s events: %+v", len(seen), n, what, seen)
 			}
 		}
 		return seen
